@@ -1,0 +1,35 @@
+# 换行符策略
+#
+# 这个项目只在 Windows 上跑，但别人可能在 Linux / macOS 上 clone 之后再拷到
+# Windows，所以要明确告诉 git 哪些文件不能碰、哪些该统一成 CRLF。
+#
+# 最重要的一条：.tools/redis/ 下的 .exe / .dll 是二进制，
+# 一旦被 git 当成文本做换行符转换，文件就废了（Redis 起不来）。
+
+# 二进制文件：绝不转换
+*.exe   binary
+*.dll   binary
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.sqlite3 binary
+
+# 脚本和纯文本：统一成 CRLF（Windows 上双击 / powershell -File 都依赖它）
+*.ps1   text eol=crlf
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.vbs   text eol=crlf
+
+# 其余源码和文档：让 git 自己按平台处理
+*.py    text
+*.html  text
+*.css   text
+*.js    text
+*.json  text
+*.md    text
+*.txt   text
+*.yml   text
+*.yaml  text
+*.toml  text
