@@ -102,10 +102,16 @@ foreach ($f in $srcFiles) {
     if (-not (Test-Path -LiteralPath $srcFull)) { continue }
 
     if (-not $dstSet.ContainsKey($rel)) {
-        # 公开仓库没跟踪这个文件。两种情况要区别对待：
-        #   ① .tools/ 下的 .py / .ps1 通用工具脚本 —— 应该同步过去，别人也用得上
-        #   ② 其它（.github 已故意删掉、本机产物 JSON/日志）—— 不同步
-        if ($rel -match '^\.tools/[^/]+\.(py|ps1)$') {
+        # 公开仓库还没跟踪这个文件。三种情况：
+        #   ① .github/ 下 —— 故意删掉的（原版 Yamtrack 的 Actions），不同步
+        #   ② 工作副本里「源码/工具」类新文件 —— 要同步，否则新增的 .py 永远推不上去
+        #   ③ 本机运行产物（JSON/日志/进度文件）—— 不同步
+        if ($rel -match '^\.github/') {
+            $missingInDst.Add($rel)
+        } elseif ($rel -match '^\.tools/[^/]+\.(py|ps1|md)$' -or
+                  $rel -match '^src/.*\.(py|html|css|js)$' -or
+                  $rel -match '^deploy/.*\.(ps1|md|bat|cmd|vbs)$' -or
+                  $rel -match '^scripts/.*\.py$') {
             $toCopy.Add($rel)
         } else {
             $missingInDst.Add($rel)
