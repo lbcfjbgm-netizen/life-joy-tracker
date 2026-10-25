@@ -40,6 +40,7 @@ from events.models import Event
 from users.models import (
     DateFormatChoices,
     HomeSortChoices,
+    LayoutChoices,
     MediaSortChoices,
     MediaStatusChoices,
     User,
@@ -51,6 +52,138 @@ logger = logging.getLogger(__name__)
 # results arrive in a single batch and are sliced locally, so a huge page
 # number is only a very large offset; capping keeps that bounded.
 MAX_SEARCH_PAGE = 1000
+
+
+# ---------------------------------------------------------------------------
+# 列表页「每个库各记各的」偏好（session 里按 media_type 分桶）
+#
+# 为什么不用数据库：users.User 是按媒体类型分了 layout/sort/status 三列，但
+# 卡片密度 list_density 只有**一个全局列**，游戏和电影共用一份，这就是
+# 「选了巨幕，点游戏是巨幕、点电影也变巨幕」的根因；而且那一列的 check
+# constraint 只允许 ""/4/8/12/16，巨幕档 "1" 和伪状态 "All achievements"
+# 根本存不进去。session 不受数据库约束，所以四项共用一份 session 字典：
+#
+#     request.session["lj_list_prefs"] = {
+#         "game":  {"density": "1", "status": "All achievements",
+#                   "sort": "end_date", "layout": "grid", "lead": "1"},
+#         "movie": {"density": "4", "status": "Completed", ...},
+#     }
+#
+# 搜索关键词故意不存（用户明确要求「搜索不用记」）。
+# ---------------------------------------------------------------------------
+PREF_SESSION_KEY = "lj_list_prefs"
+
+# session 里最多存这四项；lead 单独走 PREF_LEAD。
+PREF_NAMES = ("layout", "sort", "status", "density")
+PREF_LEAD = "lead"
+
+# 密度档位。注意 "1"（巨幕）只在游戏库成立，写库时永远不写 "1"。
+VALID_DENSITIES = {"4", "8", "12", "16"}
+DENSITY_HERO = "1"
+
+_VALID_LAYOUTS = {value for value, _ in LayoutChoices.choices}
+_VALID_SORTS = {value for value, _ in MediaSortChoices.choices}
+
+
+def _get_list_prefs(request):
+    """取出整个偏好字典（没存过就是空字典）。"""
+    prefs = request.session.get(PREF_SESSION_KEY)
+    return prefs if isinstance(prefs, dict) else {}
+
+
+def _get_list_pref_bucket(request, media_type):
+    """取出某个库自己那一桶（没存过就是空字典）。"""
+    bucket = _get_list_prefs(request).get(media_type)
+    return bucket if isinstance(bucket, dict) else {}
+
+
+def _set_list_pref(request, media_type, name, value):
+    """写一项偏好。只有值真的变了才改 session（避免每次请求都写库）。
+
+    注意必须显式给 request.session[key] 赋值，session 才会被标记 modified；
+    只改嵌套字典里的值 Django 察觉不到。
+    """
+    if not media_type:
+        return
+    prefs = dict(_get_list_prefs(request))
+    bucket = dict(_get_list_pref_bucket(request, media_type))
+    if bucket.get(name) == value:
+        return
+    bucket[name] = value
+    prefs[media_type] = bucket
+    request.session[PREF_SESSION_KEY] = prefs
+
+
+def _clean_pref_value(name, raw, media_type):
+    """把 URL 里的原始值校验成可存的干净值，脏值返回 None（不存）。"""
+    if raw is None:
+        return None
+    if name == "density":
+        # 巨幕 "1"（含老链接的 auto 已在调用前换算）只认游戏库；
+        # 非游戏库里出现 "1" 是脏值，不记。
+        if raw == DENSITY_HERO:
+            return DENSITY_HERO if media_type == MediaTypes.GAME.value else None
+        return raw if raw in VALID_DENSITIES else None
+    if name == "status":
+        return raw if raw in status_filters.FILTER_VALUES else None
+    if name == "sort":
+        return raw if raw in _VALID_SORTS else None
+    if name == "layout":
+        return raw if raw in _VALID_LAYOUTS else None
+    if name == PREF_LEAD:
+        return raw if raw in {"1", "0"} else None
+    return None
+
+
+def _list_param_names():
+    """URL 里用来表达这 5 项的参数名（lead 用 "lead"）。"""
+    return (*PREF_NAMES, PREF_LEAD)
+
+
+def _full_list_params(saved):
+    """把某个库 session 里记的偏好拼成 URL 参数（顺序固定，便于肉眼比对）。
+
+    只输出合法值；空桶返回空列表，调用方据此决定「不跳 / 不推 URL」。
+    """
+    bucket = saved if isinstance(saved, dict) else {}
+    params = []
+    for name in PREF_NAMES:
+        value = bucket.get(name)
+        if name == "density":
+            if value == DENSITY_HERO or value in VALID_DENSITIES:
+                params.append((name, value))
+        elif name == "status":
+            if value in status_filters.FILTER_VALUES:
+                params.append((name, value))
+        elif name == "sort":
+            if value in _VALID_SORTS:
+                params.append((name, value))
+        elif name == "layout":
+            if value in _VALID_LAYOUTS:
+                params.append((name, value))
+    lead = bucket.get(PREF_LEAD)
+    if lead in {"1", "0"}:
+        params.append((PREF_LEAD, lead))
+    return params
+
+
+def _saved_game_status(saved, target_user):
+    """游戏库的状态三层优先级：session → 数据库偏好 → 「全成就」。
+
+    - session 里存过（含伪值 "All achievements"）就用它，这是**分库**的保证
+    - 否则退回库里存的 game_status（真实状态：All / Completed / ...）
+    - 都是空/脏值才落到原来的默认「全成就」
+
+    以前这一支无条件返回 ALL_ACHIEVEMENTS，库里存什么都会被盖掉，
+    这就是用户说的「换了状态，下次进来又变回全成就」。
+    """
+    cand = (saved or {}).get("status") or ""
+    if cand in status_filters.FILTER_VALUES:
+        return cand
+    db_status = getattr(target_user, "game_status", "") or ""
+    if db_status in Status.values:
+        return db_status
+    return status_filters.ALL_ACHIEVEMENTS
 
 
 @require_GET
@@ -304,6 +437,11 @@ def media_list(request, username, media_type):
     """Return the media list page."""
     target_user = get_object_or_404(User, username=username)
 
+    # 这个库自己的 session 偏好（每个 media_type 一桶，互不污染）。
+    # 只有「看自己的库」才有意义；看别人的库一律不读也不写 session。
+    is_own_list = request.user == target_user
+    saved = _get_list_pref_bucket(request, media_type) if is_own_list else {}
+
     # if user is looking at own page then update preferences
     if request.user == target_user:
         layout = target_user.update_preference(
@@ -352,6 +490,27 @@ def media_list(request, username, media_type):
     search_query = request.GET.get("search", "")
     page = request.GET.get("page", 1)
 
+    # URL 里明确带了版式/排序 → 存进本库的 session 桶，之后裸进本库就沿用。
+    # （状态和密度的写入在下面各自的分支里，因为它们还要校验取值/巨幕。）
+    if is_own_list:
+        for _name in ("layout", "sort"):
+            _clean = _clean_pref_value(_name, request.GET.get(_name), media_type)
+            if _clean is not None:
+                _set_list_pref(request, media_type, _name, _clean)
+
+    # 读：URL 没带版式/排序时，先看本库 session，再退回库里的偏好。
+    # 版式和排序在四个库里都有独立的数据库列，所以以前「分库」本来就是对的；
+    # 这里加 session 只是为了和 density / lead 保持同一套优先级。
+    if is_own_list:
+        if _clean_pref_value("layout", request.GET.get("layout"), media_type) is None:
+            _saved_layout = (saved or {}).get("layout")
+            if _saved_layout in _VALID_LAYOUTS:
+                layout = _saved_layout
+        if _clean_pref_value("sort", request.GET.get("sort"), media_type) is None:
+            _saved_sort = (saved or {}).get("sort")
+            if _saved_sort in _VALID_SORTS:
+                sort_filter = _saved_sort
+
     # 巨屏搜索（density=1 + search=关键词）：URL 里没带 status 时**不沿用**上回存的
     # 状态偏好。用户方案是「搜到一个就在屏幕上铺开那一个的巨幕」，而存下来的偏好
     # 往往是「已暂停 / 全成就」，实测搜 Hades 命中 4 条、筛完剩 0 条 → 屏幕一片空白，
@@ -369,16 +528,21 @@ def media_list(request, username, media_type):
     requested_status = request.GET.get("status")
     if requested_status in status_filters.FILTER_VALUES:
         status_filter = requested_status
+        # 伪值 "All achievements" 照存进 session（那边不受 DB 约束），
+        # 这样「上次选了全成就」下次裸进来还能回来。
+        if is_own_list:
+            _set_list_pref(request, media_type, "status", requested_status)
     # 游戏列表的默认档位是「全成就」：URL 里没带 status（从侧栏、详情页返回、
-    # 统计页跳过来）就先落到这一档；带了 status 说明用户自己点过某一档，
-    # 上面那句 update_preference 已经照旧把真实状态写库，这里不再插手。
-    # 伪值只在本次请求里生效，不写回数据库，所以下次不带参数进来仍是全成就。
+    # 统计页跳过来）就先落到这一档。
+    # 现在多一层：先看本库 session 里记的档位，其次看库里存的 game_status，
+    # 都没有才落到「全成就」。这就是「状态记忆 100% 失效」的修复点 ——
+    # 以前这一支无条件写死 ALL_ACHIEVEMENTS，库里的值等于白存。
     elif (
         not requested_status
         and media_type == MediaTypes.GAME.value
         and not hero_search_mode
     ):
-        status_filter = status_filters.ALL_ACHIEVEMENTS
+        status_filter = _saved_game_status(saved, target_user)
 
     # Prepare status filter for database query
     if not status_filter:
@@ -435,30 +599,37 @@ def media_list(request, username, media_type):
     # 巨屏（density=1，18 条）是唯一还走服务端的档位，而且只给游戏库：
     # 书/影/剧没有 3:1 横版大图，铺满 100svh 很难看。
     # density=1 落在别的库上必须干净地退回 12 档，不能沿用上一轮的数字。
-    # 密度三级（用户要「选的 4/8/12/16 记住」）：
-    #   ① URL 带了合法档位（4/8/12/16）→ 用它，并写回用户，之后任何入口都能沿用
-    #   ② URL 没带 → 用用户身上存的 list_density（空串当没存）
-    #   ③ 库里也是空 → 兜底 12
-    # 下面这几条原有特殊规则逐条保留，一个字没动：
-    #   · auto → 16     · 巨屏只在「游戏库 且 URL 里 density=1」时成立（看 URL，不看库）
+    # 密度三级（用户要「选的 4/8/12/16 记住」，而且**每个库各记各的**）：
+    #   ① URL 带了合法档位（4/8/12/16，或游戏库的巨幕 1）→ 用它，并记进本库 session + 写库
+    #   ② URL 没带 → 先用本库 session 里记的，其次用用户身上的 list_density（空串当没存）
+    #   ③ 都没有 → 兜底 12
+    # ⚠ 巨幕必须在这里就把 hero_mode / items_per_page 抬上来：下面 Paginator
+    #   要靠 items_per_page 抓 18 条，模板要靠 hero_mode 铺满屏。只在 density_show
+    #   里写个 "1" 是不够的（那就是用户说的「选了巨幕，点游戏没反应」）。
+    # 下面这几条原有特殊规则逐条保留：
+    #   · auto → 16     · 巨幕只在游戏库成立
     #   · density=1 落在非游戏库干净退回 12     · 合法只有 {4,8,12,16}，脏值一律 12
     #   · 巨屏 18 条 / 普通 16 条     · 写库只写 4/8/12/16，永不写 "1"（DB 有约束）
-    VALID_DENSITIES = {"4", "8", "12", "16"}
     density_param_given = request.GET.get("density") is not None
     density_raw = request.GET.get("density", "")
     if density_raw == "auto":  # 老链接里的 auto 就是 16 档
         density_raw = "16"
-    hero_mode = media_type == MediaTypes.GAME.value and density_raw == "1"
+    hero_mode = media_type == MediaTypes.GAME.value and density_raw == DENSITY_HERO
     if hero_mode:
-        density_show = "1"
+        density_show = DENSITY_HERO
         items_per_page = 18
+        # 巨幕只进 session（DB 那一列存不了 "1"，有 check constraint）
+        if is_own_list:
+            _set_list_pref(request, media_type, "density", DENSITY_HERO)
     else:
         # 只认四档；"1"（巨屏档）和任何脏值一律落到 12。
         # 这样「游戏库点巨屏 → 点电影库」时，URL 里残留的 density=1
         # 不会让电影库变成 4 张卡或半截巨屏。
         if density_raw in VALID_DENSITIES:
-            # ① URL 给了合法档位：以它为准，顺手记住（只记 4/8/12/16）
+            # ① URL 给了合法档位：以它为准，顺手记住（只记 4/8/12/16，永不记 "1"）
             density_show = density_raw
+            if is_own_list:
+                _set_list_pref(request, media_type, "density", density_raw)
             if request.user == target_user:
                 target_user.update_preference("list_density", density_raw)
         elif density_param_given:
@@ -466,11 +637,21 @@ def media_list(request, username, media_type):
             # 不读记忆 —— 这是原有规则，一个字不能变。
             density_show = "12"
         else:
-            # ② URL 根本没带 density：读库里的记忆
-            saved = getattr(target_user, "list_density", "") or ""
-            # ③ 库里也没有 → 兜底 12
-            density_show = saved if saved in VALID_DENSITIES else "12"
-        items_per_page = 16
+            # ② URL 根本没带 density：先看本库 session，再看用户身上那一列。
+            # session 里可能是巨幕 "1"（只可能是游戏库存的，写入时已按库校验过）。
+            cand = (saved or {}).get("density") or ""
+            if cand == DENSITY_HERO and media_type == MediaTypes.GAME.value:
+                hero_mode = True
+                density_show = DENSITY_HERO
+                items_per_page = 18
+            else:
+                if cand not in VALID_DENSITIES:
+                    cand = getattr(target_user, "list_density", "") or ""
+                # ③ 都没有 → 兜底 12
+                density_show = cand if cand in VALID_DENSITIES else "12"
+                items_per_page = 16
+        if not hero_mode:
+            items_per_page = 16
     density_param = density_show
     paginator = Paginator(media_queryset, items_per_page)
     media_page = paginator.get_page(page)
@@ -488,6 +669,19 @@ def media_list(request, username, media_type):
     show_start_date_column = any(item.start_date for item in page_items)
     show_end_date_column = any(item.end_date for item in page_items)
 
+    # ---------------------------------------------------------------- 首卡特写
+    # lead 是纯前端概念（L 键让第一张卡横向铺开），后端只负责「按库记住这个开关」。
+    # 优先级：URL 的 lead=1/0（刚点过那一下）→ 本库 session → 默认关。
+    # 模板判断的是 {% if lead_mode == True %}，所以必须传**真正的布尔**，
+    # 传字符串 "1" 两个分支都不命中，会掉进 localStorage 兜底（分库就废了）。
+    lead_param = _clean_pref_value(PREF_LEAD, request.GET.get(PREF_LEAD), media_type)
+    if lead_param is not None:
+        if is_own_list:
+            _set_list_pref(request, media_type, PREF_LEAD, lead_param)
+        lead_mode = lead_param == "1"
+    else:
+        lead_mode = (saved or {}).get(PREF_LEAD) == "1"
+
     context = {
         "media_type": media_type,
         "media_type_plural": app_tags.media_type_readable_plural(media_type).lower(),
@@ -503,6 +697,10 @@ def media_list(request, username, media_type):
         "density": density_param,
         "density_data": items_per_page,
         "hero_mode": hero_mode,
+        # 首卡特写开关。必须是 Python bool：模板里写的是
+        #   {% if lead_mode == True %}true{% elif lead_mode == False %}false{% ... %}
+        # 传字符串/数字都会掉进 else 分支。
+        "lead_mode": bool(lead_mode),
         "has_prev_page": media_page.has_previous(),
         "has_next_page": media_page.has_next(),
         "prev_page_number": media_page.previous_page_number()
@@ -533,9 +731,9 @@ def media_list(request, username, media_type):
 
     # Handle HTMX requests for partial updates. Soft-navigation requests (e.g.
     # after saving from an edit modal) need the full page for the body swap.
-    if request.headers.get("HX-Request") and not request.headers.get(
-        "X-Soft-Navigation"
-    ):
+    hx_request = bool(request.headers.get("HX-Request"))
+    soft_navigation = bool(request.headers.get("X-Soft-Navigation"))
+    if hx_request and not soft_navigation:
         # Filtering from empty list
         if request.headers.get("HX-Target") == "empty_list":
             # If still empty, keep user in the same page
@@ -550,10 +748,57 @@ def media_list(request, username, media_type):
             template_name = "app/components/media_grid_items.html"
         else:
             template_name = "app/components/media_table_items.html"
-    else:
-        template_name = "app/media_list.html"
+        # 局部请求（筛选、翻页、排序按钮）一律原样返回片段，不做 302、
+        # 不推 URL —— 这块行为一个字没改。
+        return render(request, template_name, context)
 
-    return render(request, template_name, context)
+    template_name = "app/media_list.html"
+
+    # 走到这里时本轮该记的都已经写进 session 了，重新读一次，
+    # 这样拼出来的地址和刚才真正渲染出来的页面是同一套值
+    # （用请求开头那份快照会出现「页面已经是 table、地址栏还写 grid」）。
+    saved_now = _get_list_pref_bucket(request, media_type) if is_own_list else {}
+
+    # --------------------------------------------------------- 裸地址补全（302）
+    # 用户从侧栏 / 首页点进来时 URL 是光秃秃的 /admin/game，不带任何参数，
+    # 浏览器地址栏里就看不出「上次选的是巨幕 / 全成就 / 结束日期」。
+    # 这里补一次 302，把参数拼回去，地址栏和页面内容就对得上了。
+    #
+    # 只在**这个库真的记过**的时候跳（session 里有桶），首次访问不跳，
+    # 否则新用户每点一次侧栏都要吃一发多余跳转。
+    # 跳过去的地址必定带齐参数，所以第二次一定命中「URL 已带某项」→ 不再跳（防循环）。
+    skip_redirect = (
+        not is_own_list  # 看别人的库不跳
+        or soft_navigation  # 软导航不能 302（hx-select 会选不到东西，正文空白）
+        or hero_search_mode  # 巨屏搜索
+        or bool(request.GET.get("search"))
+        or bool(request.GET.get("page"))
+        or bool(request.GET.get("genres"))
+        or any(name in request.GET for name in _list_param_names())
+        or not saved  # 进这个视图之前就没记过 → 不跳
+    )
+    if not skip_redirect:
+        full_params = _full_list_params(saved_now)
+        if full_params:
+            url = reverse("medialist", args=[target_user.username, media_type])
+            return redirect(f"{url}?{urlencode(full_params)}")
+
+    response = render(request, template_name, context)
+    # 软导航同样要把参数推回地址栏：整页照常返回（hx-boost 要能选到
+    # #main-content），但用 HX-Push-Url 让地址栏和页面内容保持一致。
+    # 分页 / 搜索 / 分类不属于「要记住的 5 项」，但它们在这次请求里生效了，
+    # 所以原样带上，不能让推回地址栏的链接丢掉用户当前看的页。
+    if soft_navigation and saved_now:
+        push_params = _full_list_params(saved_now)
+        if push_params:
+            push_params += [
+                (name, request.GET[name])
+                for name in ("search", "page", "genres")
+                if request.GET.get(name)
+            ]
+            url = reverse("medialist", args=[target_user.username, media_type])
+            response["HX-Push-Url"] = f"{url}?{urlencode(push_params)}"
+    return response
 
 
 def _search_local_items(query, media_type, source, limit):

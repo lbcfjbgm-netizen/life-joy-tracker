@@ -74,7 +74,7 @@
       <div class="bg-[#2a2f35] rounded-xl p-8 text-center ring-1 ring-white/5">
         <div class="text-3xl font-bold mb-3">{{ year }} 年，一片空白</div>
         <p class="text-gray-400 mb-6 max-w-md mx-auto">
-          这一年没有游戏的通关日期或成就同步记录，所以还算不出报告。
+          这一年没有游戏的通关日期或开始游玩日期记录，所以还算不出报告。
           <br>
           换一年看看，或者先去玩点什么。
         </p>
@@ -90,7 +90,7 @@
       {# ---------- 1. 开场大字：累计口径 ---------- #}
       <section class="bg-[#2a2f35] rounded-xl p-8 mb-8 ring-1 ring-white/5">
         <div class="text-gray-400 text-lg mb-3">
-          这批游戏（{{ year }} 年通关或有成就同步的）的<b class="text-gray-300">游戏库累计时长</b>
+          这批游戏（{{ year }} 年通关或开始玩的）的<b class="text-gray-300">游戏库累计时长</b>
         </div>
         <div class="flex flex-wrap items-baseline gap-3">
           <span class="lj-yir-hero-num text-white">{{ report.total_hours_text }}</span>
@@ -109,7 +109,7 @@
         <div class="flex flex-wrap gap-6 mt-6 pt-4 border-t border-gray-700">
           <div>
             <div class="text-2xl font-bold text-white lj-yir-num">{{ report.game_count }}</div>
-            <div class="text-gray-400 text-sm">款游戏在这一年通关或有成就同步</div>
+            <div class="text-gray-400 text-sm">款游戏在这一年通关或开始玩</div>
           </div>
           <div>
             <div class="text-2xl font-bold text-white lj-yir-num">{{ report.played_count }}</div>
@@ -123,16 +123,11 @@
         <p class="text-gray-500 text-xs mt-4">
           口径说明：本库没有逐日游玩记录（历史表 5669 条全是导入时的批量快照，
           全挤在同一个月，变更原因全为空，时间戳不可信），
-          所以「某年玩过」= 通关日期或成就同步时间落在该年的游戏 —— 这是真实的年内事件；
+          所以「某年玩过」= <b>通关日期或开始游玩日期</b>落在该年的游戏 —— 这是真实的年内事件。
+          （成就同步时间不参与判年份：那 2782 条全是导入时一次性刷的，
+          挤在同一个月，拿它算会让某一年凭空多出几千款游戏。）
           但时长取的是这些游戏的累计游玩分钟数，<b>不代表它们在当年玩了多少</b>。
         </p>
-        {% if year == 2026 %}
-          <p class="text-amber-500/80 text-xs mt-2">
-            额外提醒：成就同步时间也被导入覆盖过 —— 上面 {{ report.game_count }} 款里有
-            {{ report.achievements.synced_games }} 款是「同步时间落在这一年」进来的，
-            它们其实是同一次批量导入，不是今年真碰过这么多款。
-          </p>
-        {% endif %}
       </section>
 
       {# ---------- 2. 累计最常玩的 Top 5 ---------- #}
@@ -326,7 +321,9 @@
           具体来说：游戏的游玩分钟数是「从入库到今天」的总和；
           历史表 5669 条全是导入时的批量快照，全挤在同一个月、
           变更原因全为空，所以时间线不可信；
-          通关日期（{{ report.completed.count }} 款）和成就同步时间是真实的年内事件，只有这两项代表「这一年」。
+          只有<b>通关日期或开始游玩日期</b>是真实的年内事件，代表「这一年」。
+          <b>成就同步时间不算</b>：那 2782 条是导入 Steam 数据时一次性刷进去的，
+          全挤在同一个月，它只说明「什么时候导入的」，不说明「什么时候玩的」。
         </p>
       </section>
 

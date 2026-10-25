@@ -111,31 +111,39 @@ def sync_achievements(user, steam_id, appids=None, delay=DEFAULT_DELAY):
     to_update = []
     now = timezone.now()
 
-    for game in games:
-        appid = game.item.media_id
-        achievements = _fetch_achievements(api_key, steam_id, appid, delay)
+    # A batch job: nobody is waiting, and the loop is thousands of games long,
+    # so the short circuit of the provider must be the tolerant one. Otherwise
+    # a single slow answer marks Steam down and the rest of the run is answered
+    # from the flag without a request going out (measured: 2011 games "synced"
+    # in 34 seconds, none of them touched).
+    with services.background_requests():
+        for game in games:
+            appid = game.item.media_id
+            achievements = _fetch_achievements(api_key, steam_id, appid, delay)
 
-        if achievements is None:
-            skipped += 1
-            continue
+            if achievements is None:
+                skipped += 1
+                continue
 
-        unlocked = sum(1 for achievement in achievements if achievement.get("achieved"))
-        game.achievements_total = len(achievements)
-        game.achievements_unlocked = unlocked
-        game.achievements_synced_at = now
+            unlocked = sum(
+                1 for achievement in achievements if achievement.get("achieved")
+            )
+            game.achievements_total = len(achievements)
+            game.achievements_unlocked = unlocked
+            game.achievements_synced_at = now
 
-        # A fully unlocked achievement list means the game is finished. This
-        # runs after the playtime based import, which cannot know about the
-        # achievements yet.
-        if (
-            game.achievements_total > 0
-            and unlocked >= game.achievements_total
-            and game.status != Status.COMPLETED.value
-        ):
-            game.status = Status.COMPLETED.value
+            # A fully unlocked achievement list means the game is finished. This
+            # runs after the playtime based import, which cannot know about the
+            # achievements yet.
+            if (
+                game.achievements_total > 0
+                and unlocked >= game.achievements_total
+                and game.status != Status.COMPLETED.value
+            ):
+                game.status = Status.COMPLETED.value
 
-        to_update.append(game)
-        synced += 1
+            to_update.append(game)
+            synced += 1
 
     if to_update:
         Game.objects.bulk_update(

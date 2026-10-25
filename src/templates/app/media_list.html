@@ -57,32 +57,48 @@
       this.genreOpen = false;
       this.writeGenresOpen(false);
     },
+    /* 首卡（L 键）记忆：老版本只认一个全局 key 'lj.lead'，所有库共用一份 ——
+       游戏库开了首卡特写，电影库也跟着开，这就是「不分库」的根因。
+       现在按库分开存：'lj.lead.game' / 'lj.lead.movie' …
+       真正权威的是后端给的 lead_mode（存在 session 里，本来就按库分开），
+       本地这份只在后端还没落库时兜底（见 initialLead）。 */
+    leadKey() { return 'lj.lead.' + (this.mediaType || ''); },
     readLead() {
-      try { return window.localStorage.getItem('lj.lead') === '1'; } catch (err) { return false; }
+      try { return window.localStorage.getItem(this.leadKey()) === '1'; } catch (err) { return false; }
     },
     writeLead(v) {
-      try { window.localStorage.setItem('lj.lead', v ? '1' : '0'); } catch (err) { /* 隐私模式下会抛，忽略 */ }
+      try {
+        window.localStorage.setItem(this.leadKey(), v ? '1' : '0');
+        window.localStorage.removeItem('lj.lead'); /* 旧的全库共用 key 一并清掉，免得又被读到 */
+      } catch (err) { /* 隐私模式下会抛，忽略 */ }
     },
-    /* 密度记忆只认「同一个地址」：存的时候把 location.pathname+search 一起记下来，
-       读的时候必须完全对上才采用。
-       这样能同时满足两件事，又不会串库：
-         · 同一个页面点 8 → 刷新 → 还是 8（地址没变）
-         · 游戏库点巨屏 → 点电影库 → 电影是 12（地址变了，游戏那份不生效）
-         · 电影 → 点回游戏 → 游戏也是 12（回到的是 /admin/game，不是当初那个带参地址）
+    /* 首卡初值，优先级从高到低：
+         ① 地址栏里的 lead=1/0 —— 刚点过的那一下，刷新/分享都对得上
+         ② 后端给的 lead_mode  —— 这个库上次的状态，分库就靠它（权威）
+         ③ 后端还没这个变量时（views.py 未就位）→ 本库 localStorage 兜底
+       表格版式没有首卡这个概念，init() 里已经先挡掉了，不会走到这里。 */
+    initialLead() {
+      var urlV = new URLSearchParams(window.location.search).get('lead');
+      if (urlV === '1') return true;
+      if (urlV === '0') return false;
+      return {% if lead_mode == True %}true{% elif lead_mode == False %}false{% else %}this.readLead(){% endif %};
+    },
+    /* 密度本地备份改成「按库分开」存：'lj.density.game' / 'lj.density.book' …
+       ⚠ 老版本只存一个全局 key 'lj.density'，还要凭 lj.density.href 跟当前地址
+       完全对得上才认。软导航回来时地址栏是裸的 /admin/book，跟存下来的
+       '/admin/book?density=4' 必然对不上 → 永远读不到 → 那一层兜底等于没有。
        okDensity 只认 4/8/12/16，存过巨屏档 '1' 的一律丢掉。 */
     okDensity(v) { return (v === '4' || v === '8' || v === '12' || v === '16') ? v : ''; },
-    hereHref() { return window.location.pathname + window.location.search; },
+    densityKey() { return 'lj.density.' + (this.mediaType || ''); },
     readDensity() {
-      try {
-        var v = this.okDensity(window.localStorage.getItem('lj.density'));
-        var at = window.localStorage.getItem('lj.density.href') || '';
-        return (v && at === this.hereHref()) ? v : '';
-      } catch (err) { return ''; }
+      try { return this.okDensity(window.localStorage.getItem(this.densityKey())); } catch (err) { return ''; }
     },
     writeDensity(v) {
       try {
-        window.localStorage.setItem('lj.density', v);
-        window.localStorage.setItem('lj.density.href', this.hereHref());
+        window.localStorage.setItem(this.densityKey(), v);
+        /* 顺手清掉老版本那两个全局 key，免得残值又被别的库读到 */
+        window.localStorage.removeItem('lj.density');
+        window.localStorage.removeItem('lj.density.href');
       } catch (err) { /* 隐私模式下会抛，忽略 */ }
     },
     /* 换档后可见卡片总数变了：首卡焦点如果落到被藏掉的卡上，拉回第一张。 */
@@ -108,30 +124,56 @@
       var n = this.shownCards().length;
       if (n && this.leadIdx >= n) this.leadIdx = 0;
       this.syncCards();
-      /* 把档位同步进地址栏（不刷新页面）：用户点 8 → 地址变成 ...?density=8，
-         这样下一次刷新/分享/从别的入口回来，后端就能从 URL 读到 8 并写回用户，
-         其他库也跟着沿用。只换参数，不动历史记录，也不触发任何请求。 */
+      /* 把档位同步进地址栏（不刷新页面）：用户点 8 → 地址变成 ...?density=8。
+         只换参数，不动历史记录。 */
       try {
         var here = new URL(window.location.href);
         here.searchParams.set('density', v);
         window.history.replaceState(null, '', here.toString());
       } catch (err) { /* 极老浏览器不支持 replaceState，退回旧行为，不影响这次切换 */ }
       this.writeDensity(v);
+      this.persistDensity(v);
     },
-    /* 刷新/软导航进来，优先级一目了然：
-       ① 这个「完全相同的地址」上用户亲手点过档位 → 用记下的那个（刷新后保持）
-       ② 否则 URL 明确带了 4/8/12/16 → 以 URL 为准（外部链接、地址栏直达听它的）
-       ③ 都没有 → 保持后端给的默认 12
-       ⚠ 上一版让 localStorage 无条件盖住 URL，于是 data-show 永远是上次点的那个
-       （用户看到的「恒为 12 / 点 4 变 4 张」就是这条引起的），现在反过来了。 */
+    /* ⚠ 这就是「书/影/剧都不记住密度」的第二层根因：
+       点胶囊只改 data-show + replaceState，**一个请求都不发**。replaceState 只改
+       浏览器地址栏，服务器完全不知道。所以后端 session 桶里永远没有 density，
+       下次裸进这个库（侧栏软导航）后端只能回到默认值 —— 记忆根本不存在。
+       这里补一个后台请求，让视图看到 density 参数、写进本库 session 桶。
+       带 HX-Request（不带 X-Soft-Navigation）：视图走局部片段分支，
+       只回十几 KB 的网格片段，比整页 200+KB 便宜得多，而且我们根本不看返回内容。
+       失败（离线/断网）不影响本次切换的显示。 */
+    persistDensity(v) {
+      try {
+        var u = new URL(window.location.href);
+        u.searchParams.set('density', v);
+        u.searchParams.delete('page'); /* 换档不保留页码，跟后端 16 张一页的规则一致 */
+        fetch(u.toString(), {
+          credentials: 'same-origin',
+          keepalive: true,
+          headers: { 'HX-Request': 'true' }
+        }).catch(function () { /* 记不上就记不上，本页表现不受影响 */ });
+      } catch (err) { /* 老浏览器没有 fetch，忽略 */ }
+    },
+    /* 刷新 / 软导航进来时的密度优先级（从高到低）：
+         ① 后端渲染的值 —— data-show 和 x-data 的 density 都是视图算好的
+            （URL 带的 > 本库 session 桶 > 用户列 > 默认 12），这是唯一权威
+         ② URL 明确带了 4/8/12/16 —— 用户刚点的 / 外部链接直达，听它的
+         ③ 本库 localStorage —— 只在前两者都拿不到值时兜底
+       ⚠ 老版本把 localStorage 放第一位，还要求「完全相同的地址」才认
+       （lj.density.href 必须等于当前 pathname+search）。软导航回来地址栏是裸的
+       /admin/book，跟存下的 '/admin/book?density=4' 必然对不上 → 永远读不到，
+       两个来源都空就 return 啥也不做。现在不会再盖掉后端给的值。 */
     applyDensity() {
-      if (this.heroMode) return;
-      var saved = this.readDensity();
-      var urlV = this.okDensity(new URLSearchParams(window.location.search).get('density'));
-      var target = saved || urlV;
-      if (!target) return;
+      if (this.heroMode) return; /* 巨幕整套版式归后端管，绝不在这里改 */
       var grid = document.querySelector('.lib-stage > .lib-grid');
-      if (grid) grid.setAttribute('data-show', target);
+      /* ① 后端渲染值：以 DOM 上的 data-show 为准（它就是视图算出来的结果） */
+      var serverV = this.okDensity(grid ? grid.getAttribute('data-show') : '');
+      /* ② URL 明确带的 */
+      var urlV = this.okDensity(new URLSearchParams(window.location.search).get('density'));
+      var target = serverV || urlV || this.readDensity();
+      if (!target) return; /* 三样都没有：保持后端默认，什么都不动 */
+      /* 只有真的跟后端不一样才写 DOM，避免无谓重排 */
+      if (grid && serverV !== target) grid.setAttribute('data-show', target);
       this.density = target;
     },
     /* 密度胶囊的位置完全交给 CSS 的 #lj-density-pill 规则（showcase.css 11.0），
@@ -179,6 +221,29 @@
       this.lead = !!on;
       if (!this.lead) this.leadIdx = 0;
       this.writeLead(this.lead);
+      /* ① 先把状态同步进地址栏（做法跟上面的 setDensity 完全一致）：只换参数、
+         不刷新、不动历史记录。刷新或收藏都能带回这个库自己的首卡状态。 */
+      var href = null;
+      try {
+        var u = new URL(window.location.href);
+        u.searchParams.set('lead', this.lead ? '1' : '0');
+        window.history.replaceState(null, '', u.toString());
+        href = u.toString();
+      } catch (err) { /* 极老浏览器不支持 replaceState，退回旧行为，不影响这次切换 */ }
+      /* ② 地址栏变了不等于后端知道了（replaceState 不发请求）。
+         这里补一个后台请求，让视图把 lead 写进 session，下次进这个库才有值。
+         用 fetch + keepalive 而不是 htmx.ajax：htmx 会走 HX-Request 分支去拿
+         局部片段，还可能把页面刷掉；fetch 只取响应不看内容，零副作用。
+         带 X-Soft-Navigation 头，视图会回整页 200 而不是 302 跳走。 */
+      if (href) {
+        try {
+          fetch(href, {
+            credentials: 'same-origin',
+            keepalive: true,
+            headers: { 'X-Soft-Navigation': 'true' }
+          }).catch(function () { /* 记不上就记不上，本页表现不受影响 */ });
+        } catch (err) { /* 老浏览器没有 fetch，忽略 */ }
+      }
       var self = this;
       window.setTimeout(function () { self.syncCards(); }, 0);
     },
@@ -248,7 +313,9 @@
       }
     },
     init() {
-      this.lead = this.layout === 'table' ? false : this.readLead();
+      /* 表格版式没有「首卡」，一律关掉（原有规则，不能丢）；
+         网格/巨屏才去问后端要这个库自己的状态。 */
+      this.lead = this.layout === 'table' ? false : this.initialLead();
       this.genreOpen = this.readGenresOpen();
       this.applyDensity();
       this.mountDensityPill();
@@ -315,9 +382,19 @@
                x-transition:leave-start="transform opacity-100 scale-100"
                x-transition:leave-end="transform opacity-0 scale-95">
             {% for value, label in status_choices %}
+              {% comment %}
+                hx-vals 必须带上这一项自己的值：@click 里 Alpine 改 status 是异步的
+                （反应式更新排队到微任务），而 htmx 的点击处理器更早去读
+                #filter-form 里那个 x-model 隐藏域，读到的还是**上一个**状态。
+                结果就是「点了在读，实际按已读完去请求、后端也记成已读完」——
+                这就是书/影/剧状态记忆失效的直接原因。
+                htmx 的合并顺序是 hx-vals 覆盖 hx-include（ln() 会先 delete 同名字段），
+                所以这里显式写死新值，不依赖 x-model 的更新时机。
+              {% endcomment %}
               <button hx-get="{% url 'medialist' target_user.username media_type %}"
                       {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
                       hx-include="#filter-form"
+                      hx-vals='{"status": "{{ value }}"}'
                       hx-indicator="#loading-indicator"
                       class="block w-full px-4 py-2 min-h-11 text-left text-sm transition-colors cursor-pointer"
                       :class="status === '{{ value }}' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-300 hover:bg-[#454d5a] hover:text-white'"
@@ -349,9 +426,14 @@
                x-transition:leave-start="transform opacity-100 scale-100"
                x-transition:leave-end="transform opacity-0 scale-95">
             {% for value, label in sort_choices %}
+              {% comment %}
+                排序同样是旧值抢先：hx-vals 显式给出本项的值，覆盖 x-model 的滞后。
+                见上面状态下拉那条注释。
+              {% endcomment %}
               <button hx-get="{% url 'medialist' target_user.username media_type %}"
                       {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
                       hx-include="#filter-form"
+                      hx-vals='{"sort": "{{ value }}"}'
                       hx-indicator="#loading-indicator"
                       class="block w-full px-4 py-2 min-h-11 text-left text-sm transition-colors cursor-pointer"
                       :class="sort === '{{ value }}' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-300 hover:bg-[#454d5a] hover:text-white'"

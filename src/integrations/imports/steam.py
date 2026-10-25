@@ -120,8 +120,18 @@ def fetch_recently_played(api_key, steam_id):
     Best effort: an answer that can't be read yields an empty set, which only
     means no game gets the "played recently" exemption this run.
     """
+    return {game["appid"] for game in fetch_recently_played_games(api_key, steam_id)}
+
+
+def fetch_recently_played_games(api_key, steam_id):
+    """Return the games played in the last two weeks, with their playtime.
+
+    The answer already carries the name and both playtime counters of every
+    game, so the daily recent sync never has to read the whole library. It is
+    best effort: an answer that can't be read yields an empty list.
+    """
     if not api_key or not steam_id:
-        return set()
+        return []
 
     url = f"{STEAM_API_BASE_URL}/IPlayerService/GetRecentlyPlayedGames/v1/"
     params = {"key": api_key, "steamid": steam_id, "format": "json"}
@@ -143,14 +153,30 @@ def fetch_recently_played(api_key, steam_id):
 
     if payload is None:
         logger.warning("Could not read the recently played games: %s", last_error)
-        return set()
+        return []
 
     games = (payload.get("response") or {}).get("games") or []
-    recent = {
-        int(game["appid"])
-        for game in games
-        if int(game.get("playtime_2weeks") or 0) > 0 and game.get("appid")
-    }
+    recent = []
+    for game in games:
+        try:
+            appid = int(game.get("appid"))
+            two_weeks = int(game.get("playtime_2weeks") or 0)
+        except (TypeError, ValueError):
+            continue
+        # The endpoint lists the games played during the two weeks, but a zero
+        # counter still shows up on some accounts
+        if two_weeks <= 0:
+            continue
+        recent.append(
+            {
+                "appid": appid,
+                "name": game.get("name") or f"Unknown Game {appid}",
+                "playtime_forever": int(game.get("playtime_forever") or 0),
+                "playtime_2weeks": two_weeks,
+                "rtime_last_played": game.get("rtime_last_played"),
+            },
+        )
+
     logger.info("Got %d games played in the last two weeks", len(recent))
     return recent
 

@@ -98,12 +98,18 @@ if (-not $RootPath) {
 
 # ------------------------------------------------------------------ 2. 关键目录
 Write-Step '第 2 步 / 关键目录是否齐全'
+# 字段说明：
+#   Rel  / Desc  目录相对路径 / 人话说明
+#   Auto         该目录是「跑部署脚本时自动生成」的产物，新 clone 下来本来就该没有。
+#                打了 Auto = $true 的目录缺失时只报 [WARN]（不计入失败数、不影响退出码）。
+#                GenBy 说明是哪个脚本生成的，直接用在该条提示里。
+#                → 以后新增「会自动生成」的目录，只要在清单里加一行 Auto 即可，不用改下面的循环。
 $needDirs = @(
     @{ Rel = 'src';              Desc = 'Django 源码目录（manage.py 在这层）' },
     @{ Rel = 'src\config';       Desc = '配置目录（settings.py）' },
-    @{ Rel = 'src\db';           Desc = '数据库目录（db.sqlite3 放这）' },
+    @{ Rel = 'src\db';           Desc = '数据库目录（db.sqlite3 放这）'; Auto = $true; GenBy = '03_setup_db.ps1（或站点首次启动时 settings.py 自动建）' },
     @{ Rel = 'src\static';       Desc = '静态源文件（tailwind 输出到这）' },
-    @{ Rel = 'src\staticfiles';  Desc = 'collectstatic 的产物目录' },
+    @{ Rel = 'src\staticfiles';  Desc = 'collectstatic 的产物目录';      Auto = $true; GenBy = '05_static.ps1' },
     @{ Rel = 'src\templates';    Desc = '模板目录' },
     @{ Rel = '.venv';            Desc = 'Python 虚拟环境' },
     @{ Rel = '.tools';           Desc = '本地工具/缓存/日志目录' },
@@ -114,6 +120,11 @@ foreach ($d in $needDirs) {
     $full = Join-Path $RootPath $d.Rel
     if (Test-Path -LiteralPath $full) {
         Write-Pass "$($d.Rel)  →  $($d.Desc)"
+    } elseif ($d.Auto) {
+        $by = if ($d.GenBy) { $d.GenBy } else { '后续部署脚本' }
+        $txt = "缺少目录 $($d.Rel)（$($d.Desc)） —— 新部署时正常缺失，不用手动创建"
+        $fix = "跑完 $by 就会自动出现；只有站点已经在跑、这里还长期是空的，才需要去查。"
+        Write-Warn $txt $fix
     } else {
         Write-Fail "缺少目录 $($d.Rel)（$($d.Desc)）" "先确认项目是不是拷全了；$($d.Rel) 属于项目自带目录，不该手动重建。"
     }

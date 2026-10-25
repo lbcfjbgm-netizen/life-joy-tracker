@@ -24,6 +24,7 @@ from integrations.imports import (
     simkl,
     steam,
     steam_achievements,
+    steam_recent,
     trakt,
     weread,
     yamtrack,
@@ -185,6 +186,34 @@ def sync_steam_achievements(user_id, steam_id, appids=None):
     """Celery task for syncing the Steam achievements of a user's games."""
     user = get_user_model().objects.get(pk=user_id)
     return steam_achievements.sync_achievements(user, steam_id, appids)
+
+
+@shared_task(name="Sync recent Steam games")
+def sync_recent_steam_games(user_id, steam_id):
+    """Celery task for syncing the games played during the last two weeks.
+
+    New games are imported, hand edited ones only get their playtime and
+    achievements refreshed, and the achievements of that batch are synced.
+    """
+    user = get_user_model().objects.get(pk=user_id)
+    return steam_recent.sync_recent_games(user, steam_id)
+
+
+@shared_task(name="Backfill Steam achievements")
+def backfill_steam_achievements(user_id, steam_id, batch_size=None):
+    """Celery task for the one-time achievement backfill.
+
+    ``batch_size`` is optional so the schedule does not have to store a value
+    that only exists to tune the run.
+    """
+    user = get_user_model().objects.get(pk=user_id)
+    if batch_size:
+        return steam_recent.backfill_achievements(
+            user,
+            steam_id,
+            batch_size=batch_size,
+        )
+    return steam_recent.backfill_achievements(user, steam_id)
 
 
 @shared_task(name="Import from IMDB")

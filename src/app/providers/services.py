@@ -2,6 +2,7 @@ import contextvars
 import logging
 import time
 from contextlib import contextmanager
+from urllib.parse import urlsplit
 
 import requests
 from defusedxml import ElementTree
@@ -162,6 +163,34 @@ def interactive_budget_remaining(deadline=None):
 
 CONNECT_RETRIES = _InteractiveRetry(total=3, connect=0)
 
+# Providers whose host only answers through the operator's local proxy.
+# Steam is on this list because its store API silently drops a direct
+# connection from this machine (the connect phase hangs, nothing is refused),
+# which then marks the provider down and starves the cover lookup that is the
+# only source of a new game's hashed asset path.
+PROXY_ROUTE_PROVIDERS = frozenset({"steam"})
+
+
+def _steam_route_proxies(provider):
+    """Return the proxy mapping to use for this provider, ``{}`` for direct.
+
+    Imported lazily: ``integrations.imports.steam`` reaches back into this
+    module, so a module level import would be a cycle. ``steam_proxies()``
+    returns an empty mapping when no proxy is listening, which is exactly the
+    "go direct" answer we want in that case.
+    """
+    if provider not in PROXY_ROUTE_PROVIDERS:
+        return {}
+    try:
+        from integrations.imports.steam import steam_proxies  # noqa: PLC0415
+    except Exception:  # noqa: BLE001 - a broken import must not kill any request
+        return {}
+    try:
+        return steam_proxies() or {}
+    except Exception:  # noqa: BLE001 - same: never let the probe raise
+        return {}
+
+
 session.mount("http://", HTTPAdapter(max_retries=CONNECT_RETRIES))
 session.mount("https://", HTTPAdapter(max_retries=CONNECT_RETRIES))
 
@@ -272,7 +301,44 @@ def raise_not_found_error(provider, media_id, media_type="item"):
 # A provider that timed out or refused the connection once is skipped for a
 # minute instead of being retried on every keystroke: a dead host costs one
 # connect timeout per request otherwise, which is what froze the search page.
+#
+# This is the interactive budget, and it stays the ceiling of every other
+# policy below: a batch job may wait less, never more.
 PROVIDER_DOWN_TTL = 60  # seconds
+
+# The breaker of a batch job (a Celery import, the achievement backfill) is a
+# different trade off than the one in front of the search box. Nobody is
+# waiting on it, so waiting a few seconds costs nothing, while the strict rule
+# cost a whole run: one connect timeout marked Steam down and the following
+# 2011 games were answered from the flag without a single request going out.
+#
+# So inside ``background_requests`` the failure has to repeat before it counts,
+# and the pause escalates instead of jumping to the full minute:
+#
+#   * ``slow``  - the answer was late (read timeout, dropped body). The host is
+#                 talking, so one of these is a hiccup, not a dead provider.
+#   * ``flaky`` - the connection could not be established in time. Suspicious,
+#                 but a single one is still a network blip.
+#   * ``hard``  - refused, reset, DNS or TLS failure. Something is really gone.
+#
+# The first trip waits ``BACKGROUND_COOL_DOWN_STEPS[0]``, the next one the
+# following step, and a provider that keeps failing ends up on
+# ``PROVIDER_DOWN_TTL``: the same minute the interactive path uses right away.
+# A single hiccup therefore costs one game instead of the rest of the run,
+# while a host that is really down still stops being hammered with thousands
+# of connect timeouts.
+BACKGROUND_FAILURE_TOLERANCE = {"slow": 3, "flaky": 2, "hard": 1}
+BACKGROUND_COOL_DOWN_STEPS = (5, 15, 30, PROVIDER_DOWN_TTL)
+# How long the failures of a background caller are remembered. It has to
+# outlast the widest gap between two attempts, which is one read timeout
+# (``settings.REQUEST_TIMEOUT``, 120 s by default): a counter that expires
+# between two slow answers would reset to one every time and never trip.
+BACKGROUND_FAILURE_WINDOW = 15 * 60  # seconds
+
+_background_request = contextvars.ContextVar(
+    "provider_background_request",
+    default=False,
+)
 
 
 def _provider_down_key(provider):
@@ -285,10 +351,47 @@ def _provider_down_key(provider):
     return f"provider_down:{str(provider).strip().lower()}"
 
 
-def is_provider_down(provider):
-    """Return whether the provider failed on the network within the TTL."""
+def _down_host_key(provider, url):
+    """Return the cache key of the short-circuit flag of one host.
+
+    A provider is not one host. Steam answers from ``api.steampowered.com``
+    while its storefront lives on ``store.steampowered.com``, and from this
+    machine the first is reachable while the second stalls: a provider wide
+    flag mixed the two up and let a dead storefront silence a working API for
+    a whole batch. Scoping the background flag by host keeps them apart.
+
+    An URL without a host falls back to the provider key, so the caller keeps
+    the plain behaviour instead of losing the protection.
+    """
     try:
-        return cache.get(_provider_down_key(provider)) is not None
+        host = urlsplit(str(url)).netloc.strip().lower()
+    except Exception:  # noqa: BLE001 - a broken URL must not break the breaker
+        host = ""
+    if not host:
+        return _provider_down_key(provider)
+    return f"{_provider_down_key(provider)}:{host}"
+
+
+def _down_failures_key(scope_key):
+    """Return the cache key counting the failures in a row of one scope."""
+    return f"{scope_key}:failures"
+
+
+def is_provider_down(provider, url=None):
+    """Return whether the provider failed on the network within the TTL.
+
+    Two flags are consulted, because they are set by two different callers:
+    the provider wide one (interactive requests, one failure, one minute) and
+    the per host one (batch jobs, see ``background_requests``). Either of them
+    means the request is not worth sending. ``url`` is optional so a caller
+    that only knows the provider keeps working.
+    """
+    try:
+        if cache.get(_provider_down_key(provider)) is not None:
+            return True
+        if url is None:
+            return False
+        return cache.get(_down_host_key(provider, url)) is not None
     except Exception:  # a cache outage must not break requests
         logger.exception("Could not read the short-circuit flag of %s", provider)
         return False
@@ -302,12 +405,129 @@ def mark_provider_down(provider):
         logger.exception("Could not set the short-circuit flag of %s", provider)
 
 
-def clear_provider_down(provider):
-    """Drop the short-circuit flag of a provider after a success."""
+def clear_provider_down(provider, url=None):
+    """Drop the short-circuit flags of a provider after a success."""
+    keys = [_provider_down_key(provider)]
+    keys.append(_down_failures_key(keys[0]))
+    if url is not None:
+        host_key = _down_host_key(provider, url)
+        keys.extend([host_key, _down_failures_key(host_key)])
     try:
-        cache.delete(_provider_down_key(provider))
+        cache.delete_many(keys)
     except Exception:  # a cache outage must not break requests
         logger.exception("Could not clear the short-circuit flag of %s", provider)
+
+
+@contextmanager
+def background_requests():
+    """Mark every request made inside the block as a batch job.
+
+    The short circuit in ``api_request`` is tuned for a person waiting on the
+    search box: the first network failure disables the provider for
+    ``PROVIDER_DOWN_TTL`` seconds so the next keystrokes fail instantly. That
+    is the right trade off there and the wrong one in a backfill, where nobody
+    waits and 2000 games are one loop: a single connect timeout used to skip
+    the rest of the run without a request going out.
+
+    Inside this block a failure only counts once it repeats
+    (``BACKGROUND_FAILURE_TOLERANCE``) and the pause before the next attempt
+    escalates (``BACKGROUND_COOL_DOWN_STEPS``) instead of jumping to a minute,
+    so an occasional slow answer costs one item while a host that is really
+    down is still left alone.
+
+    It stays a context variable rather than a parameter so every existing
+    caller of ``api_request`` keeps its behaviour without being edited.
+    """
+    token = _background_request.set(True)
+    try:
+        yield
+    finally:
+        _background_request.reset(token)
+
+
+def _failure_kind(error):
+    """Classify a network failure, for the leniency of the short circuit.
+
+    * ``"slow"`` - the answer never came in time (read timeout, dropped body).
+      The host completed the handshake and then stalled, so a second attempt a
+      moment later very often succeeds; this is the case that used to kill a
+      whole backfill batch.
+    * ``"flaky"`` - the connection could not be established before the connect
+      timeout. Ambiguous: a blip, or the start of a dead host.
+    * ``"hard"`` - refused, reset, DNS or TLS failure. Nothing is listening, so
+      there is no point in asking again right away.
+
+    A plain ``Timeout`` (no separate phase) is treated as ``flaky``: it can
+    come from either half of the request, so it is not proven harmless.
+    """
+    if isinstance(
+        error,
+        (requests.exceptions.ReadTimeout, requests.exceptions.ChunkedEncodingError),
+    ):
+        return "slow"
+    if isinstance(error, requests.exceptions.ConnectTimeout):
+        return "flaky"
+    return "hard"
+
+
+def _record_network_failure(provider, error, url):
+    """
+    Count a failure and trip the short circuit once it is worth tripping.
+
+    Interactive callers keep the original behaviour: one failure, one minute.
+    Background callers get the tolerant policy of ``background_requests``,
+    scoped to the host that actually failed.
+    """
+    if _interactive_request.get() or not _background_request.get():
+        mark_provider_down(provider)
+        return
+
+    kind = _failure_kind(error)
+    tolerance = BACKGROUND_FAILURE_TOLERANCE.get(
+        kind,
+        BACKGROUND_FAILURE_TOLERANCE["hard"],
+    )
+    # Scoped by host, not only by provider: Steam's API and its storefront
+    # have different health, and a dead storefront must not silence a working
+    # API for the rest of a batch.
+    scope_key = _down_host_key(provider, url)
+    key = _down_failures_key(scope_key)
+    try:
+        failures = (cache.get(key) or 0) + 1
+        cache.set(key, failures, timeout=BACKGROUND_FAILURE_WINDOW)
+    except Exception:  # a cache outage must not break requests
+        logger.exception("Could not count the failures of %s", provider)
+        return
+
+    if failures < tolerance:
+        logger.warning(
+            "%s failed on the network (%s), %s of %s failures before the "
+            "short circuit: retrying the next item",
+            provider,
+            kind,
+            failures,
+            tolerance,
+        )
+        return
+
+    # The provider keeps failing: wait, but far less than the interactive
+    # minute at first, and climb to it only if it keeps failing.
+    trips = failures - tolerance
+    seconds = BACKGROUND_COOL_DOWN_STEPS[
+        min(trips, len(BACKGROUND_COOL_DOWN_STEPS) - 1)
+    ]
+    try:
+        cache.set(scope_key, value=True, timeout=seconds)
+    except Exception:  # a cache outage must not break requests
+        logger.exception("Could not set the short-circuit flag of %s", provider)
+        return
+    logger.warning(
+        "%s is short-circuited for %s seconds after %s network failures (%s)",
+        provider,
+        seconds,
+        failures,
+        kind,
+    )
 
 
 def api_request(  # noqa: PLR0913 - the signature is part of the public API
@@ -368,7 +588,7 @@ def api_request(  # noqa: PLR0913 - the signature is part of the public API
         )
         timeout = (min(connect, remaining), min(read, remaining))
 
-    if is_provider_down(provider):
+    if is_provider_down(provider, url):
         logger.warning(
             "%s is short-circuited, the request to %s is skipped",
             provider,
@@ -388,6 +608,19 @@ def api_request(  # noqa: PLR0913 - the signature is part of the public API
             "headers": headers,
             "timeout": timeout,
         }
+
+        # Steam's store API does not answer a direct connection from this
+        # machine: the connect phase hangs until it times out, the provider is
+        # marked down for a minute, and every caller that needed the answer
+        # (notably the cover lookup, which is the only way to learn the hashed
+        # asset path of a new game) gets nothing. The local proxy reaches it in
+        # well under a second, so Steam requests are routed through it when it
+        # is up. Every other provider keeps the plain direct route: they are
+        # reachable without a proxy and routing them through one only adds a
+        # hop.
+        proxies = _steam_route_proxies(provider)
+        if proxies:
+            request_kwargs["proxies"] = proxies
 
         if method == "GET":
             request_kwargs["params"] = params
@@ -427,10 +660,15 @@ def api_request(  # noqa: PLR0913 - the signature is part of the public API
         # The provider answered nothing at all: refused, or timed out before a
         # single byte came back. An HTTP status is an answer and never lands
         # here, so the short circuit only ever trips on unreachable hosts.
-        mark_provider_down(provider)
+        #
+        # How hard it trips depends on who is asking: a person waiting on the
+        # search box gets the immediate minute, a batch job gets the tolerant
+        # policy of ``background_requests`` (see ``_record_network_failure``).
+        # The error raised is the same either way.
+        _record_network_failure(provider, error, url)
         raise ProviderUnavailableError(provider, error) from error
 
-    clear_provider_down(provider)
+    clear_provider_down(provider, url)
 
     if response_format == "xml":
         return ElementTree.fromstring(response.text)

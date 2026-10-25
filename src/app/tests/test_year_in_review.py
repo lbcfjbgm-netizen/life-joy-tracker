@@ -35,6 +35,7 @@ class YearInReviewAggregateTests(TestCase):
         *,
         minutes=0,
         end_year=None,
+        start_year=None,
         release_year=None,
         genres=None,
         status=Status.COMPLETED.value,
@@ -58,6 +59,12 @@ class YearInReviewAggregateTests(TestCase):
                 end_year, 6, 1, 12, 0,
                 tzinfo=timezone.get_current_timezone(),
             )
+        start_date = None
+        if start_year:
+            start_date = datetime.datetime(
+                start_year, 2, 1, 12, 0,
+                tzinfo=timezone.get_current_timezone(),
+            )
         synced = None
         if synced_year:
             synced = datetime.datetime(
@@ -70,6 +77,7 @@ class YearInReviewAggregateTests(TestCase):
             progress=minutes,
             status=status,
             end_date=end_date,
+            start_date=start_date,
             achievements_total=achievements_total,
             achievements_unlocked=achievements_unlocked,
             achievements_synced_at=synced,
@@ -302,6 +310,113 @@ class YearInReviewAggregateTests(TestCase):
 
         self.assertEqual(cold, warm)
         self.assertEqual(cold["total_minutes"], 60)
+
+
+    def test_synced_at_does_not_pull_games_into_a_year(self):
+        """Import timestamps must never decide which year a game belongs to.
+
+        回归测试（2026-10 修正）：``achievements_synced_at`` 在真实库里 2782
+        条全部挤在同一个月的批量导入里，如果拿它判年份，2026 年会凭空多出
+        2768 款游戏、8400 小时根本不存在的时长（真机上占 2026 的 80%）。
+        这里造一个「同步时间在 2025、但没有任何真实游玩日期」的游戏，
+        它必须**哪里都不算**：2025 的数里不能有，单独开 2026 也不能有。
+        """
+        self._game("real", minutes=600, end_year=2025)
+        self._game("imported", minutes=999, synced_year=2025)
+
+        report = yir.build_year_in_review(self.user.id, 2025)
+
+        self.assertEqual(report["game_count"], 1)
+        self.assertEqual(report["total_minutes"], 600)
+        self.assertEqual(report["total_hours"], 10)
+        self.assertEqual([g["title"] for g in report["top_games"]], ["real"])
+
+    def test_start_date_counts_as_a_real_play_date(self):
+        """Starting a game in the year is enough, no completion needed.
+
+        口径是 ``end_date`` **或** ``start_date`` 落在该年：只开坑没通关的
+        游戏也是这一年真的玩过，必须算进来（``start_date`` 目前真实库里
+        全是 NULL，所以这条只能靠测试覆盖）。
+        """
+        self._game(
+            "started",
+            minutes=300,
+            start_year=2025,
+            status=Status.IN_PROGRESS.value,
+        )
+        self._game("finished", minutes=60, end_year=2025)
+
+        report = yir.build_year_in_review(self.user.id, 2025)
+
+        self.assertEqual(report["game_count"], 2)
+        self.assertEqual(report["total_minutes"], 360)
+        titles = {g["title"] for g in report["top_games"]}
+        self.assertIn("started", titles)
+
+    def test_completed_still_requires_end_date(self):
+        """A started-only game is not a completion, even in the same year."""
+        self._game(
+            "started",
+            minutes=300,
+            start_year=2025,
+            status=Status.IN_PROGRESS.value,
+        )
+
+        report = yir.build_year_in_review(self.user.id, 2025)
+
+        self.assertEqual(report["completed"]["count"], 0)
+
+    def test_synced_fields_are_zero(self):
+        """``synced_games`` / ``synced_unlocked`` are dead keys kept for templates.
+
+        v2 口径下 cohort 里已经没有「靠同步时间混进来」的游戏，这两个字段
+        恒为 0。字段不能删（模板还在引用），但也不能再被当成一个真实数字。
+        """
+        self._game("a", minutes=60, end_year=2025, synced_year=2025,
+                   achievements_total=10, achievements_unlocked=5)
+
+        report = yir.build_year_in_review(self.user.id, 2025)
+
+        self.assertEqual(report["achievements"]["synced_games"], 0)
+        self.assertEqual(report["achievements"]["synced_unlocked"], 0)
+
+    def test_available_years_matches_the_cohort(self):
+        """Year buttons and year contents must use the same rule.
+
+        两边口径一旦不一致，就会出现「年份按钮里有，点开是空的」——
+        按钮按宽口径出、内容按严口径算。这里逐个年份对账。
+        """
+        self._game("done2024", minutes=60, end_year=2024)
+        self._game("started2025", minutes=60, start_year=2025,
+                   status=Status.IN_PROGRESS.value)
+        # 只有同步时间，不该造出任何年份
+        self._game("imported_only", minutes=60, synced_year=2023)
+
+        years = yir.available_years(self.user.id)
+
+        self.assertIn(2024, years)
+        self.assertIn(2025, years)
+        # 2023 只有同步时间，没有真实日期 —— 不能出现在年份按钮里
+        self.assertNotIn(2023, years)
+        # 反过来：每个列出来的年份点开都必须真有东西
+        for year in years:
+            with self.subTest(year=year):
+                report = yir.build_year_in_review(self.user.id, year)
+                if year in (2024, 2025):
+                    self.assertTrue(report["has_data"], year)
+
+    def test_no_real_dates_means_no_year_at_all(self):
+        """A library of pure import snapshots has an empty report every year."""
+        for index in range(5):
+            self._game(f"imp{index}", minutes=600, synced_year=2025)
+
+        report = yir.build_year_in_review(self.user.id, 2025)
+
+        self.assertFalse(report["has_data"])
+        self.assertEqual(report["total_minutes"], 0)
+        self.assertEqual(report["game_count"], 0)
+        self.assertEqual(report["top_games"], [])
+        self.assertEqual(report["completed"]["count"], 0)
 
 
 class ResolveYearTests(TestCase):

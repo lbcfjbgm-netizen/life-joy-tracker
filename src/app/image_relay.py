@@ -46,6 +46,11 @@ REFERER_BY_HOST = {
 CACHE_ONLY_HOSTS = frozenset({
     "media.steampowered.com",
     "shared.fastly.steamstatic.com",
+    # The asset host the Store API reports for recently published games. It is
+    # a proxy only host: a direct request from this machine never completes
+    # (a connect timeout every time, measured at 20 s), while the local proxy
+    # answers in about half a second. See ``PROXY_ONLY_HOSTS``.
+    "shared.akamai.steamstatic.com",
     "cdn.cloudflare.steamstatic.com",
     "steamcdn-a.akamaihd.net",
     # WeRead (微信读书) book covers, which arrive without a referer check but
@@ -74,6 +79,16 @@ CACHE_ONLY_HOSTS = frozenset({
 # free bandwidth. Derived from the two maps above so a host can never be
 # cacheable without also being allowed through the endpoint (Douban included).
 ALLOWED_RELAY_HOSTS = frozenset(REFERER_BY_HOST) | CACHE_ONLY_HOSTS
+
+# Hosts that only answer through the operator's local proxy. Asking them
+# directly does not fail fast, it hangs until the connect timeout, and every
+# list page would wait that out. These skip the direct attempt and go straight
+# through the proxy, so a host is only listed here once the direct route was
+# measured dead. Every other allowed host keeps the usual order (proxy first on
+# this machine, direct as the fallback).
+PROXY_ONLY_HOSTS = frozenset({
+    "shared.akamai.steamstatic.com",
+})
 
 # Douban's image CDN accepts either Douban referer for a film poster: with
 # ``book.douban.com`` and with ``movie.douban.com`` the same 88 KB JPEG comes
@@ -287,6 +302,29 @@ def host_allowed(url):
     )
 
 
+def _proxy_only(url):
+    """Return True if this host is only ever fetched through the proxy."""
+    host = (urlparse(url or "").hostname or "").lower()
+    return any(_host_matches(host, suffix) for suffix in PROXY_ONLY_HOSTS)
+
+
+def _relay_proxies():
+    """Return the proxy mapping for an image fetch, or ``{}`` for a direct one.
+
+    The helper is imported from the Steam importer instead of copied, so the
+    address stays in one place and an environment override of
+    ``STEAM_PROXY_URL`` keeps working here too. The import is done lazily
+    because ``integrations.imports.steam`` pulls in the Django models and the
+    provider registry, which would be a cycle at this module's import time.
+
+    An empty mapping means "no proxy is listening, go direct", which is exactly
+    the fallback this relay wants too.
+    """
+    from integrations.imports.steam import steam_proxies  # noqa: PLC0415
+
+    return steam_proxies()
+
+
 def proxy_url(url):
     """Return the local URL that serves an external image, or "" for empty."""
     if not url:
@@ -295,6 +333,49 @@ def proxy_url(url):
     from django.urls import reverse  # noqa: PLC0415
 
     return f"{reverse('image_relay')}?url={requests.utils.quote(url, safe='')}"
+
+
+def _request_image(url, headers):
+    """Return a live response for the image, or ``None`` when nothing worked.
+
+    Order on this machine is proxy first, direct second, because the local
+    proxy is what reaches the Steam asset hosts at all. A proxy only host (see
+    :data:`PROXY_ONLY_HOSTS`) skips the direct attempt entirely: asking it
+    directly just burns a full connect timeout, and with no proxy listening
+    there is nothing left to try, so the fetch gives up at once instead of
+    stalling the page for twenty seconds. Every other host keeps the usual
+    order, and with no proxy listening the mapping comes back empty, which
+    degrades the fetch to a plain direct request.
+    """
+    proxy = _relay_proxies()
+    if proxy:
+        attempts = [proxy] if _proxy_only(url) else [proxy, {}]
+    else:
+        attempts = [] if _proxy_only(url) else [{}]
+
+    if not attempts:
+        # Proxy only host and no proxy running: the direct route is known dead,
+        # so fail fast rather than wait out a connect timeout that cannot win.
+        logger.warning("Image relay has no route to %s (proxy is down)", url)
+        return None
+
+    failure = None
+    for proxies in attempts:
+        try:
+            response = requests.get(
+                url,
+                headers=headers,
+                timeout=REQUEST_TIMEOUT,
+                proxies=proxies,
+            )
+            response.raise_for_status()
+        except (requests.RequestException, ValueError) as error:
+            failure = error
+            continue
+        return response
+
+    logger.warning("Image relay failed for %s: %s", url, failure)
+    return None
 
 
 def fetch_image(url):
@@ -322,11 +403,8 @@ def fetch_image(url):
     if referer:
         headers["Referer"] = referer
 
-    try:
-        response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-    except requests.RequestException as error:
-        logger.warning("Image relay failed for %s: %s", url, error)
+    response = _request_image(url, headers)
+    if response is None:
         return None, None
 
     content_type = response.headers.get("Content-Type", "")

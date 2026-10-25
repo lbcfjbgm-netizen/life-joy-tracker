@@ -22,11 +22,19 @@
 游玩量。唯一能用的年内日期信号是：
 
 * ``end_date``：通关日期，真实值，2023 起才有（289 条）
-* ``achievements_synced_at``：成就同步时间，只用于「这一年的成就战绩」近似
+* ``start_date``：开始游玩日期，真实值，但目前 4935 条全是 NULL（导入没补）
 
-所以「某年玩过哪些游戏」的口径是：``end_date`` 或 ``achievements_synced_at``
-落在该年——这是真实的年内事件，保留。这些游戏的 ``progress`` 求和只是它们的
-**累计**时长，用来排序和算占比，不代表它们在当年玩了多少。
+所以「某年玩过哪些游戏」的口径是：``end_date`` 或 ``start_date`` 落在该年。
+这两列都是**用户真实行为**留下的日期，是全年内事件。
+
+🔴 ``achievements_synced_at`` 不能用来判年份（2026-10 修正）：
+这一列 2782 条全部挤在 2026-10 同一个月，是导入 Steam 数据时一次性刷进去的
+系统快照，不是「这一年同步过」的用户行为。用它判年份的后果是 2026 年
+凭空多出 2768 款游戏、8400 小时假时长（10,497 小时里 80% 是假的）。
+现在它彻底退出年份判定，只在 ``_achievements()`` 里作为「当前快照」的说明。
+
+这些游戏的 ``progress`` 求和只是它们的**累计**时长（不是年内增量），
+用来排序和算占比，不代表它们在当年玩了多少。
 """
 
 from __future__ import annotations
@@ -40,6 +48,13 @@ from app.models import Game, Status
 
 # 缓存 10 分钟：游戏时长一天才同步一两次，没必要每次请求都重算。
 CACHE_TTL = 600
+
+# 🔴 口径版本号：只要「哪些游戏算这一年的」这条规则变了，就必须把它加一。
+# 它进缓存键，老 key 自然查不到（等于全部失效），不用手动 flush，
+# 也不依赖部署时机 —— 线上正在跑的进程下次请求就落到新 key 上。
+#   v1：end_date 或 achievements_synced_at（错误口径，2026 年虚高 8400 小时）
+#   v2：end_date 或 start_date（只认用户真实行为日期）
+CACHE_VERSION = 2
 
 # 各区块的展示上限，改这里即可，模板只按长度循环。
 TOP_GAMES = 5
@@ -65,8 +80,11 @@ GENRE_COLORS = ("#818cf8", "#34d399", "#fbbf24", "#fb7185", "#38bdf8", "#c084fc"
 
 
 def cache_key(user_id: int, year: int) -> str:
-    """Return the cache key for one user's report of one year."""
-    return f"year_in_review:{user_id}:{year}"
+    """Return the cache key for one user's report of one year.
+
+    key 里带 ``CACHE_VERSION``：口径一变，老缓存自动作废，不会被旧数据骗。
+    """
+    return f"year_in_review:v{CACHE_VERSION}:{user_id}:{year}"
 
 
 def resolve_year(raw_year: str | None) -> int:
@@ -119,7 +137,7 @@ def build_year_in_review(user_id: int, year: int) -> dict:
 
     注意：``total_minutes`` 是这批游戏的**累计**游玩分钟数，不是这一年的
     增量（库里没有按年切分的记录）。模板上必须把它写成「累计」，
-    绝不能写成「这一年玩了」。
+    绝不能写成「这一年玩了」。这一点和年份口径修正无关，依然成立。
     """
     cohort = _cohort(user_id, year)
     totals = _totals(cohort)
@@ -130,7 +148,7 @@ def build_year_in_review(user_id: int, year: int) -> dict:
     top_games = _top_games(cohort, total_minutes)
     completed = _completed(user_id, year, total_minutes)
     genres = _genres(cohort, total_minutes)
-    achievements = _achievements(cohort, year)
+    achievements = _achievements(cohort)
     age = _game_age(cohort, year, total_minutes)
     library = _library(user_id, total_minutes)
 
@@ -179,19 +197,30 @@ def _library(user_id: int, cohort_minutes: int) -> dict:
 
 
 def available_years(user_id: int) -> list[int]:
-    """Return the years that have any date signal, newest first.
+    """Return the years that have a real play date, newest first.
 
-    只查 ``end_date``：``achievements_synced_at`` 全落在导入那一年，
-    两个都查只会把同一年重复加一遍，价值为零还多一次往返。
+    🔴 必须和 :func:`_cohort` 完全同口径：两处都只认 ``end_date`` /
+    ``start_date``。否则会出现「年份按钮里有，点开是空的」（按钮按宽口径出、
+    内容按严口径算）或者反过来。
+
+    不查 ``achievements_synced_at``：那一列全落在导入那一个月（2026-10），
+    用它只会凭空多出一个「有数据」的年份，点开还是假的。
     """
     years = (
-        Game.objects.filter(user_id=user_id, end_date__isnull=False)
+        Game.objects.filter(user_id=user_id)
+        .filter(Q(end_date__isnull=False) | Q(start_date__isnull=False))
         .order_by()
-        .annotate(stamp_year=ExtractYear("end_date"))
-        .values_list("stamp_year", flat=True)
-        .distinct()
+        .annotate(
+            end_year=ExtractYear("end_date"),
+            play_year=ExtractYear("start_date"),
+        )
+        .values_list("end_year", "play_year")
     )
-    found = {int(y) for y in years if y}
+    found: set[int] = set()
+    for end_year, play_year in years:
+        for value in (end_year, play_year):
+            if value:
+                found.add(int(value))
     found.add(timezone.localdate().year)
     return sorted(found, reverse=True)
 
@@ -199,12 +228,18 @@ def available_years(user_id: int) -> list[int]:
 def _cohort(user_id: int, year: int):
     """Return the queryset of games that belong to one year.
 
-    口径：``end_date`` 落在该年，或成就在该年同步过。
+    口径：``end_date`` 落在该年，或 ``start_date`` 落在该年。
+
+    这两列都是用户真实行为留下的日期（通关 / 开始玩）。**不用**
+    ``achievements_synced_at``：那一列 2782 条全挤在 2026-10 一次批量导入里，
+    是系统行为，拿它判年份会让 2026 年凭空多出 2768 款游戏、8400 小时假时长。
+    宁可少统计，也不要虚假统计。
+
     ``order_by()`` 必须清空：``Media.Meta.ordering`` 里的字段不在
     ``values()`` 里，一旦留着就会被并进 GROUP BY，把分组拆碎。
     """
     return Game.objects.filter(user_id=user_id).filter(
-        Q(end_date__year=year) | Q(achievements_synced_at__year=year),
+        Q(end_date__year=year) | Q(start_date__year=year),
     ).order_by()
 
 
@@ -351,12 +386,16 @@ def _genres(cohort, total_minutes: int) -> list[dict]:
     return out
 
 
-def _achievements(cohort, year: int) -> dict:
+def _achievements(cohort) -> dict:
     """Return the achievement snapshot for the cohort.
 
     ⚠ 这里给的是「当前快照」，不是「这一年新解锁」：``achievements_synced_at``
     被导入统一覆盖过，逐条解锁时间库里根本没有。所以 ``unlocked`` /
     ``percent`` 都只说明这批游戏此刻的状态，模板文案不能写成「今年解锁了 N 个」。
+
+    ``synced_games`` / ``synced_unlocked`` 在 v2 口径下**恒为 0**：
+    cohort 已经不含「靠同步时间混进来」的游戏，这一年同步过的游戏本来就
+    不属于这一年。字段保留只是为了不让还在引用它的模板炸掉，别据此写文案。
     """
     totals = cohort.aggregate(
         unlocked=Sum("achievements_unlocked"),
@@ -364,17 +403,14 @@ def _achievements(cohort, year: int) -> dict:
         games_with_data=Count("id", filter=Q(achievements_total__gt=0)),
         perfect=Count("id", filter=Q(is_all_achievements=True)),
     )
-    synced = cohort.filter(achievements_synced_at__year=year).aggregate(
-        unlocked=Sum("achievements_unlocked"),
-        games=Count("id"),
-    )
     return {
         "unlocked": totals["unlocked"] or 0,
         "available": totals["available"] or 0,
         "games_with_data": totals["games_with_data"] or 0,
         "perfect": totals["perfect"] or 0,
-        "synced_unlocked": synced["unlocked"] or 0,
-        "synced_games": synced["games"] or 0,
+        # v2 起恒为 0，见上面 docstring，保留键只为模板兼容
+        "synced_unlocked": 0,
+        "synced_games": 0,
         "percent": round(
             (totals["unlocked"] or 0) / totals["available"] * 100,
         )
@@ -450,6 +486,7 @@ def _thousands(value: int) -> str:
 
 __all__ = [
     "CACHE_TTL",
+    "CACHE_VERSION",
     "available_years",
     "build_year_in_review",
     "cache_key",
