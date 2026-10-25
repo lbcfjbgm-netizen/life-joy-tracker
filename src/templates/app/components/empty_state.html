@@ -1,0 +1,29 @@
+{% comment %}
+  Reusable empty state: an icon, one sentence, one guided action.
+  Callers pass empty_icon (svg path), empty_title, empty_description and an
+  optional empty_url/empty_label. Every block falls back to something sane so
+  that a caller can pass only the text.
+{% endcomment %}
+<div class="flex flex-col items-center justify-center py-16 bg-[#2a2f35] rounded-lg ring-1 ring-white/5">
+  <div class="text-center max-w-md mx-auto p-6">
+    <div class="bg-[#39404b] rounded-full p-4 w-16 h-16 mx-auto mb-4 flex items-center justify-center">
+      {% if empty_icon %}
+        {% include empty_icon with classes="w-8 h-8 text-gray-400" %}
+      {% else %}
+        {% include "app/icons/info.svg" with classes="w-8 h-8 text-gray-400" %}
+      {% endif %}
+    </div>
+    <h3 class="text-xl font-semibold mb-2">{{ empty_title }}</h3>
+    {% if empty_description %}
+      <p class="text-gray-400 mb-6">{{ empty_description }}</p>
+    {% endif %}
+    {% if empty_url %}
+      <a href="{{ empty_url }}"
+         class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">{{ empty_label|default:"去看看" }}</a>
+    {% endif %}
+    {% if empty_secondary_url %}
+      <a href="{{ empty_secondary_url }}"
+         class="ml-2 px-4 py-2 bg-[#39404b] text-gray-200 rounded-lg hover:bg-[#454d59] transition-colors">{{ empty_secondary_label }}</a>
+    {% endif %}
+  </div>
+</div>

@@ -1,0 +1,94 @@
+{% load app_tags %}
+
+{% comment %}
+  卡片底部信息条（需求 12）：左边「游玩时长」，右边「状态 + ⋯ 菜单」。
+  +/- 常驻按钮已取消，改时长 / 标记完成的入口收进右下角 ⋯ 里，
+  仍然复用同一个 progress_edit 端点，不新造 API。
+  ⚠️ 本文件只被 home_grid.html 与 progress_edit 的响应引用，改这里等于同时改首页刷新后的片段。
+{% endcomment %}
+
+{% include "app/components/messages/messages_oob.html" %}
+
+<div class="px-2 pb-3 sm:px-3">
+  <div class="flex min-w-0 items-center gap-1.5">
+    <div class="flex min-w-0 flex-1 items-center gap-1 text-[11px] font-medium text-indigo-400 sm:text-xs"
+         title="游玩时长 {{ media.formatted_progress }}">
+      {% include "app/icons/clock.svg" with classes="w-3.5 h-3.5 shrink-0" %}
+      <span class="truncate">
+        {{ media.formatted_progress }}
+        {% if media.item.media_type != MediaTypes.GAME.value and media.item.media_type != MediaTypes.MOVIE.value %}
+          {% if media.max_progress %}
+            / {{ media.max_progress }} {{ media.item.media_type|long_unit }}
+          {% else %}
+            {{ media.item.media_type|long_unit }}
+          {% endif %}
+        {% endif %}
+      </span>
+    </div>
+
+    <div class="flex shrink-0 items-center gap-0.5">
+      {# 状态徽章只留图标（文字放 title 里），给左侧时长腾出宽度 #}
+      {# 传整个对象：全成就的游戏悬停能看到「全成就」而不是只有「已通关」 #}
+      {% if media.status %}
+        <span class="flex items-center rounded-md bg-gray-700/80 p-1"
+              aria-label="{{ media|media_status_readable }}"
+              title="{{ media|media_status_readable }}">
+          <span class="h-3 w-3 {{ media.status|status_color }}">{% include media.status|status_icon %}</span>
+        </span>
+      {% endif %}
+
+      <button type="button"
+              class="cursor-pointer rounded-lg p-1 min-h-9 min-w-9 inline-flex items-center justify-center text-gray-400 transition-colors hover:bg-gray-700 hover:text-white"
+              aria-label="更多操作"
+              title="更多操作"
+              @click="cardMenuOpen = !cardMenuOpen">
+        {% include "app/icons/ellipsis.svg" with classes="w-4 h-4" %}
+      </button>
+    </div>
+  </div>
+
+  <div x-show="cardMenuOpen" x-cloak class="mt-2 flex flex-col gap-1">
+    <button type="button"
+            class="inline-flex w-full cursor-pointer items-center justify-start gap-1.5 whitespace-nowrap rounded-lg bg-gray-700 px-2.5 py-1 min-h-9 text-xs text-white transition-colors hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-gray-700"
+            aria-label="减 30 分钟游玩时长"
+            title="减 30 分钟游玩时长"
+            {% if media.progress == 0 %}disabled{% endif %}
+            hx-post="{% url 'progress_edit' media.item.media_type media.id %}"
+            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+            hx-vals='{"operation": "decrease", "home_status": "{{ home_status }}"}'
+            hx-swap="innerHTML"
+            hx-target="#progress-{{ media.item.media_type }}-{{ media.id }}">
+      {% include "app/icons/minus.svg" with classes="w-3 h-3" %}
+      <span>30</span>
+    </button>
+
+    <button type="button"
+            class="inline-flex w-full cursor-pointer items-center justify-start gap-1.5 whitespace-nowrap rounded-lg bg-gray-700 px-2.5 py-1 min-h-9 text-xs text-white transition-colors hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-gray-700"
+            aria-label="加 30 分钟游玩时长"
+            title="加 30 分钟游玩时长"
+            hx-post="{% url 'progress_edit' media.item.media_type media.id %}"
+            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+            hx-vals='{"operation": "increase", "home_status": "{{ home_status }}"}'
+            hx-swap="innerHTML"
+            hx-target="#progress-{{ media.item.media_type }}-{{ media.id }}">
+      {% include "app/icons/plus.svg" with classes="w-3 h-3" %}
+      <span>30</span>
+    </button>
+
+    <button type="button"
+            class="inline-flex w-full cursor-pointer items-center justify-start gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1 min-h-9 text-xs transition-colors {% if media.status == Status.COMPLETED.value %}cursor-not-allowed bg-gray-700/40 text-gray-500{% else %}bg-emerald-700 text-white hover:bg-emerald-800{% endif %}"
+            {% if media.status == Status.COMPLETED.value %}disabled{% endif %}
+            aria-label="标记为已通关"
+            title="标记为已通关"
+            hx-post="{% url 'progress_edit' media.item.media_type media.id %}"
+            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+            hx-vals='{"operation": "complete", "home_status": "{{ home_status }}"}'
+            hx-swap="innerHTML"
+            hx-target="#progress-{{ media.item.media_type }}-{{ media.id }}">
+      {% include "app/icons/states/completed.svg" with classes="w-3 h-3" %}
+      <span>{% if media.status == Status.COMPLETED.value %}已通关{% else %}标记通关{% endif %}</span>
+    </button>
+  </div>
+</div>
+
+{% include "app/components/progress_bar.html" with media=media user=user %}

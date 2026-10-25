@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% load static %}
+{% load app_tags %}
+
+{% block title %}
+  临门一脚 - LIFE JOY
+{% endblock title %}
+
+{% block content %}
+  {% comment %}
+    临门一脚：差 1~10 个成就就全成就、且解锁率已经 >= 30% 的游戏。
+    页面上的数字全部来自 app.near_complete（数据库聚合 + 缓存），模板只负责排版。
+
+    整页一次性渲染，侧栏入口标了 hx-boost="false"，跟年度报告一致。
+    配色只用两套：暗色沿用 bg-[#2a2f35] / ring-white/5 / text-gray-400，
+    亮色由 main.css 里已有的 html[data-theme="light"] 覆盖块接管；
+    下面 <style> 只补 accent 变量和进度条底色，全部限定在 .lj-nc 作用域内。
+  {% endcomment %}
+  <style>
+    .lj-nc {
+      --lj-nc-accent: #818cf8;
+      --lj-nc-accent-2: #34d399;
+      --lj-nc-track: rgba(255, 255, 255, .10);
+    }
+    html[data-theme="light"] .lj-nc {
+      --lj-nc-accent: #4f46e5;
+      --lj-nc-accent-2: #047857;
+      --lj-nc-track: rgba(38, 34, 28, .12);
+    }
+    .lj-nc-track { background: var(--lj-nc-track); }
+    .lj-nc-fill { background: var(--lj-nc-accent); }
+    .lj-nc-fill-hot { background: var(--lj-nc-accent-2); }
+    .lj-nc-num { font-variant-numeric: tabular-nums; }
+    .lj-nc-cover { background-color: #3e454d; }
+    html[data-theme="light"] .lj-nc-cover { background-color: #e8dfcd; }
+  </style>
+
+  <div class="lj-nc max-w-6xl mx-auto">
+
+    {# ---------- 标题 ---------- #}
+    <div class="mb-8">
+      <h1 class="text-3xl font-bold mb-2">临门一脚</h1>
+      <p class="text-gray-400 text-sm">
+        成就差得最少的先排前面 —— 这些游戏再推一把就全成就了
+      </p>
+    </div>
+
+    {% if games %}
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for game in games %}
+          <a href="{% url 'media_details' source=game.source media_type='game' media_id=game.media_id title=game.title|slug %}"
+             class="group block bg-[#2a2f35] rounded-xl p-4 ring-1 ring-white/5 hover:ring-indigo-500/40 transition">
+            <div class="flex items-start gap-4">
+
+              {# ---------- 封面 ---------- #}
+              <div class="shrink-0 w-16 rounded-lg overflow-hidden lj-nc-cover">
+                <img class="lazyload w-full aspect-2/3 object-cover"
+                     alt="{{ game.title }}"
+                     data-src="{{ game.image|relay_image }}">
+              </div>
+
+              {# ---------- 正文 ---------- #}
+              <div class="flex-1 min-w-0">
+                <div class="font-semibold truncate group-hover:text-indigo-400 transition-colors"
+                     title="{{ game.title }}">{{ game.title }}</div>
+
+                <div class="flex items-baseline flex-wrap gap-x-2 gap-y-1 mt-1">
+                  <span class="text-gray-300 text-sm lj-nc-num">{{ game.unlocked }}/{{ game.total }}</span>
+                  <span class="text-xs px-1.5 py-0.5 rounded bg-[#39404b] text-gray-300">{{ game.status|media_status_readable }}</span>
+                </div>
+
+                <div class="lj-nc-track rounded-full h-2 mt-3 overflow-hidden">
+                  <div class="h-2 rounded-full {% if game.remaining <= 3 %}lj-nc-fill-hot{% else %}lj-nc-fill{% endif %}"
+                       style="width: {{ game.percent }}%"></div>
+                </div>
+
+                <div class="flex items-center justify-between gap-2 mt-2 text-xs">
+                  <span class="font-semibold text-emerald-400 lj-nc-num">还差 {{ game.remaining }} 个</span>
+                  <span class="text-gray-400 lj-nc-num">{{ game.hours }} 小时</span>
+                </div>
+              </div>
+
+            </div>
+          </a>
+        {% endfor %}
+      </div>
+
+      <p class="text-gray-500 text-xs mt-6">
+        共 {{ count }} 款 · 口径：成就总数 ≥ 5、还差 1~10 个、解锁率 ≥ 30%
+      </p>
+    {% else %}
+      {# ---------- 空态 ---------- #}
+      <div class="bg-[#2a2f35] rounded-xl p-8 text-center ring-1 ring-white/5">
+        <div class="text-2xl font-bold mb-3">没有卡在门口的了</div>
+        <p class="text-gray-400 max-w-md mx-auto">
+          眼下没有「差几个成就就全成就」的游戏：要么都已经收干净，要么还差得远。
+          等成就同步跑完再回来看看。
+        </p>
+      </div>
+    {% endif %}
+
+  </div>
+{% endblock content %}

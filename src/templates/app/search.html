@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% load app_tags %}
+{% load i18n %}
+
+{% block title %}
+  {% trans "Search - Yamtrack" %}
+{% endblock title %}
+
+{% block content %}
+  {# 数据源连不上 / 返回错误时的提示条。和「真的没搜到」严格分开：
+     这里说的是「服务没应答」，下面空态说的是「应答了但没有这条」。
+     两种情况用户该做的事不一样，混成一句会让人以为关键词打错了。 #}
+  {% if degraded %}
+    <div class="mb-6 rounded-lg border {% if degraded.kind == 'unavailable' %}border-amber-600/60 bg-amber-950/30{% else %}border-rose-700/60 bg-rose-950/30{% endif %} p-5 flex items-start gap-4">
+      <div class="shrink-0 mt-0.5">
+        {% if degraded.kind == 'unavailable' %}
+          {% include "app/icons/circle-spinning-clockwise.svg" with classes="w-6 h-6 text-amber-400" %}
+        {% else %}
+          {% include "app/icons/warning.svg" with classes="w-6 h-6 text-rose-400" %}
+        {% endif %}
+      </div>
+      <div class="min-w-0">
+        <p class="font-semibold {% if degraded.kind == 'unavailable' %}text-amber-200{% else %}text-rose-200{% endif %}">
+          {{ degraded.message }}
+        </p>
+        <p class="text-sm text-gray-400 mt-1">{{ degraded.hint }}</p>
+        {% if degraded.local_count %}
+          <p class="text-sm text-gray-300 mt-2">
+            不过本地库里翻到了 <span class="font-semibold">{{ degraded.local_count }}</span> 条同名记录，已经先列在下面了。
+          </p>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-y-4">
+    <h2 class="text-2xl font-bold">{% trans "Search Results" %}</h2>
+    <div class="flex items-center flex-wrap gap-x-4 gap-y-2">
+      <span class="text-sm text-gray-400">{% trans "Source:" %}</span>
+      <div class="flex gap-x-2">
+        {% with source_options=media_type|sources %}
+          {% for source_option in source_options %}
+            <a href="{% url 'search' %}?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}&source={{ source_option.value }}&layout={{ layout }}"
+               class="px-3 py-1.5 text-sm rounded-lg transition-colors duration-200 cursor-pointer flex items-center {% if source == source_option.value %}bg-indigo-600 text-white{% else %}bg-gray-700 text-gray-300 hover:bg-gray-600{% endif %}">
+              {{ source_option.label }}
+            </a>
+          {% endfor %}
+        {% endwith %}
+        <div class="flex rounded-lg overflow-hidden border border-gray-700">
+          <a href="?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}{% if source %}&source={{ source }}{% endif %}&layout=grid"
+             {% if layout == 'grid' %} class="p-2 cursor-pointer bg-indigo-600 text-white flex items-center" {% else %} class="p-2 cursor-pointer bg-[#39404b] hover:bg-[#454d5a] flex items-center" {% endif %}
+             title="Grid View">{% include "app/icons/four-square.svg" with classes="w-5 h-5" %}</a>
+          <a href="?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}{% if source %}&source={{ source }}{% endif %}&layout=list"
+             {% if layout == 'list' %} class="p-2 cursor-pointer bg-indigo-600 text-white flex items-center" {% else %} class="p-2 cursor-pointer bg-[#39404b] hover:bg-[#454d5a] flex items-center" {% endif %}
+             title="List View">{% include "app/icons/list.svg" with classes="w-5 h-5" %}</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if data.results %}
+    <div {% if layout == 'grid' %}
+         class="media-grid lib-grid lj-showcase">
+      {% for result in data.results %}
+        {% include "app/components/media_card.html" with item=result.item title=result.item.title media=result.media info_card=True %}
+      {% endfor %}
+    {% else %}
+      class="grid grid-cols-1 gap-4">
+      {% for result in data.results %}
+        {% include "app/components/media_card_list.html" with item=result.item title=result.item.title media=result.media %}
+      {% endfor %}
+    {% endif %}
+  </div>
+
+  {% if data.total_pages > 1 %}
+    <div class="flex flex-wrap justify-center items-center mt-8 gap-x-2 gap-y-3">
+      {# Previous button #}
+      {% if data.page > 1 %}
+        <a href="?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}{% if source %}&source={{ source }}{% endif %}&page={{ data.page|add:'-1' }}&layout={{ layout }}"
+           class="p-2 rounded-lg bg-[#2a2f35] text-white hover:bg-[#39404b]">
+          {% include "app/icons/chevron-left.svg" with classes="w-5 h-5" %}
+        </a>
+      {% else %}
+        <button class="p-2 rounded-lg bg-gray-700 text-gray-500 cursor-not-allowed"
+                disabled>{% include "app/icons/chevron-left.svg" with classes="w-5 h-5" %}</button>
+      {% endif %}
+
+      {# Page numbers with ellipses #}
+      {% get_pagination_range data.page data.total_pages 2 as pages %}
+      {% for page_num in pages %}
+        {% if page_num %}
+          <a href="?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}{% if source %}&source={{ source }}{% endif %}&page={{ page_num }}&layout={{ layout }}"
+             class="w-10 h-10 rounded-lg {% if data.page == page_num %}bg-indigo-600{% else %}bg-[#2a2f35] hover:bg-[#39404b]{% endif %} text-white flex items-center justify-center">
+            {{ page_num }}
+          </a>
+        {% else %}
+          {# Ellipsis #}
+          <span class="flex items-center justify-center w-10 h-10 text-gray-400">
+            {% include "app/icons/ellipsis.svg" with classes="w-5 h-5" %}
+          </span>
+        {% endif %}
+      {% endfor %}
+
+      {# Next button #}
+      {% if data.page < data.total_pages %}
+        <a href="?q={{ request.GET.q|urlencode }}&media_type={{ media_type }}{% if source %}&source={{ source }}{% endif %}&page={{ data.page|add:'1' }}&layout={{ layout }}"
+           class="p-2 rounded-lg bg-[#2a2f35] text-white hover:bg-[#39404b]">
+          {% include "app/icons/chevron-right.svg" with classes="w-5 h-5" %}
+        </a>
+      {% else %}
+        <button class="p-2 rounded-lg bg-gray-700 text-gray-500 cursor-not-allowed"
+                disabled>{% include "app/icons/chevron-right.svg" with classes="w-5 h-5" %}</button>
+      {% endif %}
+    </div>
+
+    {# Page info text #}
+    <div class="text-center text-sm text-gray-400 mt-3">
+      第 {{ data.page }} / {{ data.total_pages }} 页（共 {{ data.total_results }} 条结果）
+    </div>
+  {% endif %}
+{% else %}
+  {# 没有结果时要说清是哪一种「没有」：没输关键词 / 服务连不上 / 真的没这条。
+     三种情况用户的下一步动作完全不同，全都说成「没搜到」等于骗人。 #}
+  <div class="flex flex-col items-center justify-center py-32 px-4 bg-[#2a2f35] rounded-lg">
+    <div class="bg-[#39404b] rounded-full p-4 w-16 h-16 mx-auto mb-4 flex items-center justify-center">
+      {% include "app/icons/magnifying-glass.svg" with classes="w-8 h-8 text-gray-400" %}
+    </div>
+    {% if degraded %}
+      <h3 class="text-xl font-semibold mb-2">这次没搜成</h3>
+      <p class="text-gray-400 text-center max-w-md">
+        上面那条提示已经说明了原因（{{ degraded.message }}）。这不代表库里没有这款游戏。
+      </p>
+    {% elif not request.GET.q %}
+      <h3 class="text-xl font-semibold mb-2">还没输入关键词</h3>
+      <p class="text-gray-400 text-center max-w-md">
+        在上面的搜索框里敲游戏名（中文英文都行），回车就能搜。
+      </p>
+    {% else %}
+      <h3 class="text-xl font-semibold mb-2">没有找到「{{ request.GET.q }}」</h3>
+      <p class="text-gray-400 text-center max-w-md">
+        数据源正常应答了，但确实没有这条。换个说法试试（少打几个字、试试英文原名），
+        或者换个数据源。
+      </p>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock content %}

@@ -1,0 +1,1780 @@
+# Yamtrack 简体中文翻译
+# 由本地汉化脚本生成，供个人使用。
+msgid ""
+msgstr ""
+"Project-Id-Version: Yamtrack\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-20 18:54+0800\n"
+"PO-Revision-Date: 2026-10-20 19:00+0800\n"
+"Last-Translator: local\n"
+"Language-Team: Chinese (Simplified)\n"
+"Language: zh_Hans\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#: .\templates\400.html:6 .\templates\403.html:6 .\templates\403_csrf.html:6
+msgid "Forbidden - Yamtrack"
+msgstr "禁止访问 - Yamtrack"
+
+#: .\templates\400.html:14
+msgid "Bad Request"
+msgstr "请求有误"
+
+#: .\templates\400.html:16
+msgid "The server could not understand the request due to invalid syntax or missing parameters."
+msgstr "服务器无法理解这个请求，可能是语法错误或缺少参数。"
+
+#: .\templates\400.html:19 .\templates\403.html:20 .\templates\403_csrf.html:29
+#: .\templates\404.html:17 .\templates\500.html:23
+msgid "If you believe this was a bug, please"
+msgstr "如果你认为这是个 bug，请"
+
+#: .\templates\400.html:20 .\templates\403.html:21 .\templates\403_csrf.html:30
+#: .\templates\404.html:18 .\templates\500.html:24
+msgid "report the issue."
+msgstr "反馈问题。"
+
+#: .\templates\400.html:27 .\templates\403.html:33 .\templates\403_csrf.html:42
+#: .\templates\404.html:25 .\templates\500.html:36
+#: .\templates\socialaccount\connections.html:95
+msgid "Back to Home"
+msgstr "返回首页"
+
+#: .\templates\403.html:14 .\templates\403_csrf.html:14
+msgid "Access Forbidden"
+msgstr "禁止访问"
+
+#: .\templates\403.html:16 .\templates\403_csrf.html:16
+msgid "You don't have permission to access this resource. Please log in or contact an administrator."
+msgstr "你没有权限访问该资源。请登录或联系管理员。"
+
+#: .\templates\403.html:28 .\templates\403_csrf.html:37
+msgid "Log In"
+msgstr "登录"
+
+#: .\templates\403_csrf.html:19
+msgid "Using a Reverse Proxy?"
+msgstr "使用反向代理？"
+
+#: .\templates\403_csrf.html:21
+msgid "If you're accessing YamTrack through a reverse proxy, you need to set the"
+msgstr "如果你通过反向代理访问 YamTrack，需要把"
+
+#: .\templates\403_csrf.html:21
+msgid "environment variable to your application URL."
+msgstr "环境变量设置为你的应用地址。"
+
+#: .\templates\403_csrf.html:25
+msgid "For example,"
+msgstr "例如，"
+
+#: .\templates\404.html:6
+msgid "Page not found - Yamtrack"
+msgstr "页面不存在 - Yamtrack"
+
+#: .\templates\404.html:14
+msgid "Page Not Found"
+msgstr "页面不存在"
+
+#: .\templates\404.html:15
+msgid "The page you are looking for doesn't exist or has been moved."
+msgstr "你要找的页面不存在，或者已经被移动了。"
+
+#: .\templates\500.html:6
+msgid "Server Error - Yamtrack"
+msgstr "服务器错误 - Yamtrack"
+
+#: .\templates\500.html:14
+msgid "Something Went Wrong"
+msgstr "出错了"
+
+#: .\templates\500.html:19
+msgid "We're sorry, but there was an error processing your request."
+msgstr "抱歉，处理你的请求时出错了。"
+
+#: .\templates\500.html:31
+msgid "Try Again"
+msgstr "重试"
+
+#: .\templates\account\login.html:7
+msgid "Login"
+msgstr "登录"
+
+#: .\templates\account\login.html:11
+msgid "Sign in to your account"
+msgstr "登录你的账户"
+
+#: .\templates\account\login.html:28 .\templates\app\media_list.html:243
+msgid "Sign In"
+msgstr "登录"
+
+#: .\templates\account\login.html:41
+msgid "Need an account?"
+msgstr "还没有账户？"
+
+#: .\templates\account\login.html:43
+msgid "Register now"
+msgstr "立即注册"
+
+#: .\templates\account\signup.html:6
+msgid "Register"
+msgstr "注册"
+
+#: .\templates\account\signup.html:10
+msgid "Create your account"
+msgstr "创建你的账户"
+
+#: .\templates\account\signup.html:26
+msgid "Create Account"
+msgstr "创建账户"
+
+#: .\templates\account\signup.html:38
+msgid "Already have an account?"
+msgstr "已有账户？"
+
+#: .\templates\account\signup.html:40
+msgid "Sign in"
+msgstr "登录"
+
+#: .\templates\allauth\elements\hr.html:4
+msgid "Or continue with"
+msgstr "或使用以下方式登录"
+
+#: .\templates\allauth\layouts\base.html:8 .\templates\app\media_details.html:9
+#: .\templates\app\media_list.html:8 .\templates\lists\list_detail.html:11
+msgid "- Yamtrack"
+msgstr " - Yamtrack"
+
+#: .\templates\allauth\layouts\entrance.html:11 .\templates\base.html:21
+#: .\templates\base.html:73
+msgid "Yamtrack"
+msgstr "Yamtrack"
+
+#: .\templates\app\components\fill_history.html:6
+#: .\templates\app\journal.html:145
+msgid "Activity History"
+msgstr "活动历史"
+
+#: .\templates\app\components\fill_history.html:16
+msgid "Instance #"
+msgstr "记录 #"
+
+#: .\templates\app\components\fill_history.html:29
+msgid "You haven't started tracking it yet."
+msgstr "你还没有开始记录它。"
+
+#: .\templates\app\components\fill_track.html:75
+msgid "Update"
+msgstr "更新"
+
+#: .\templates\app\components\fill_track.html:77
+#: .\templates\lists\components\list_item_button.html:16
+msgid "Add"
+msgstr "添加"
+
+#: .\templates\app\components\fill_track.html:85
+#: .\templates\app\components\fill_track_episode.html:67
+#: .\templates\app\components\journal_items.html:73
+#: .\templates\lists\components\list_form.html:46
+msgid "Delete"
+msgstr "删除"
+
+#: .\templates\app\components\fill_track_episode.html:14
+#: .\templates\app\media_details.html:610
+msgid "Track Episode"
+msgstr "记录剧集"
+
+#: .\templates\app\components\fill_track_episode.html:27
+#: .\templates\app\media_details.html:129
+#: .\templates\app\media_details.html:602
+msgid "Episode"
+msgstr "剧集"
+
+#: .\templates\app\components\fill_track_episode.html:30
+msgid "Watched once"
+msgstr "看过一次"
+
+#: .\templates\app\components\fill_track_episode.html:32
+msgid "Watched"
+msgstr "已看"
+
+#: .\templates\app\components\fill_track_episode.html:32
+#: .\templates\app\media_details.html:681
+msgid "times"
+msgstr "次"
+
+#: .\templates\app\components\fill_track_episode.html:35
+msgid "Not watched yet"
+msgstr "还没看过"
+
+#: .\templates\app\components\fill_track_episode.html:44
+msgid "Previous Watches"
+msgstr "历史观看"
+
+#: .\templates\app\components\fill_track_episode.html:53
+#: .\templates\app\media_details.html:679
+msgid "No date provided"
+msgstr "未提供日期"
+
+#: .\templates\app\components\fill_track_episode.html:101
+msgid "Watch Date"
+msgstr "观看日期"
+
+#: .\templates\app\components\fill_track_episode.html:116
+#: .\templates\app\create_entry.html:340
+msgid "Notes"
+msgstr "备注"
+
+#: .\templates\app\components\fill_track_episode.html:132
+msgid "Add watched entry with current settings"
+msgstr "用当前设置添加一条观看记录"
+
+#: .\templates\app\components\fill_track_episode.html:132
+msgid "Add watch"
+msgstr "添加观看记录"
+
+#: .\templates\app\components\fill_track_episode.html:158
+msgid "Fills in the current date and time"
+msgstr "填入当前日期和时间"
+
+#: .\templates\app\components\fill_track_episode.html:158
+msgid "Fill in current time"
+msgstr "填入当前时间"
+
+#: .\templates\app\components\fill_track_episode.html:166
+msgid "Fill in end time"
+msgstr "填入结束时间"
+
+#: .\templates\app\components\fill_track_episode.html:175
+msgid "Fill in air date"
+msgstr "填入播出日期"
+
+#: .\templates\app\components\fill_track_episode.html:182
+msgid "Clears the watch date and time"
+msgstr "清空观看日期和时间"
+
+#: .\templates\app\components\fill_track_episode.html:182
+msgid "Fill in no date"
+msgstr "不填日期"
+
+#: .\templates\app\components\home_section.html:25
+#: .\templates\lists\components\list_grid.html:37
+#: .\templates\lists\list_detail.html:32
+msgid "item"
+msgstr "条"
+
+#: .\templates\app\components\home_section.html:59
+msgid "Load all ("
+msgstr "加载全部（"
+
+#: .\templates\app\components\home_section.html:83
+msgid "Nothing is actively moving right now"
+msgstr "目前没有正在追的内容"
+
+#: .\templates\app\components\home_section.html:85
+msgid "Your planning shelf is still empty"
+msgstr "已暂停的条目还一个都没有"
+
+#: .\templates\app\components\home_section.html:90
+msgid "Start a title and mark it as in progress to see quick updates and release reminders here."
+msgstr "开始追一部作品并标记为进行中，这里就会显示最新动态和上映提醒。"
+
+#: .\templates\app\components\home_section.html:92
+msgid "Add a few titles to planning to see them here."
+msgstr "添加几部作品到已暂停，这里就会显示。"
+
+#: .\templates\app\components\home_section.html:99
+msgid "Browse media"
+msgstr "浏览媒体"
+
+#: .\templates\app\components\journal_items.html:30
+msgid "Delete activity"
+msgstr "删除活动"
+
+#: .\templates\app\components\journal_items.html:51
+msgid "Delete activity?"
+msgstr "删除这条活动？"
+
+#: .\templates\app\components\journal_items.html:53
+msgid "This removes “"
+msgstr "这会从历史记录中移除 “"
+
+#: .\templates\app\components\journal_items.html:58
+msgid "” for"
+msgstr "” （"
+
+#: .\templates\app\components\journal_items.html:58
+msgid "from your history. This can't be undone."
+msgstr "），此操作无法撤销。"
+
+#: .\templates\app\components\journal_items.html:64
+#: .\templates\app\journal.html:81 .\templates\app\statistics.html:80
+msgid "Cancel"
+msgstr "取消"
+
+#: .\templates\app\components\media_card.html:58
+#: .\templates\app\components\media_table_items.html:40
+#: .\templates\app\media_details.html:170
+msgid "Achievements"
+msgstr "成就"
+
+#: .\templates\app\components\media_section_tabs.html:9
+msgid "Overview"
+msgstr "概览"
+
+#: .\templates\app\components\media_section_tabs.html:16
+#: .\templates\app\media_details.html:445
+msgid "Cast"
+msgstr "演员表"
+
+#: .\templates\app\components\media_section_tabs.html:27
+#: .\templates\app\media_details.html:473
+msgid "DLCs"
+msgstr "DLC"
+
+#: .\templates\app\components\media_section_tabs.html:40
+msgid "Repeats"
+msgstr "重看记录"
+
+#: .\templates\app\components\media_section_tabs.html:48
+#: .\templates\app\media_details.html:582
+msgid "Episodes"
+msgstr "剧集"
+
+#: .\templates\app\components\media_section_tabs.html:57
+#: .\templates\app\media_details.html:696
+msgid "Streaming"
+msgstr "流媒体"
+
+#: .\templates\app\components\media_section_tabs.html:66
+#: .\templates\app\media_details.html:723
+msgid "Time to Beat"
+msgstr "通关时长"
+
+#: .\templates\app\components\search_parent_season.html:8
+msgid "- Season"
+msgstr " - 第"
+
+#: .\templates\app\components\search_parent_season.html:14
+msgid "No seasons found matching \""
+msgstr "没有找到匹配 \""
+
+#: .\templates\app\components\search_parent_season.html:14
+#: .\templates\app\components\search_parent_tv.html:14
+msgid "\". Please try a different search term."
+msgstr "\" 的季，换个关键词试试。"
+
+#: .\templates\app\components\search_parent_tv.html:14
+msgid "No TV shows found matching \""
+msgstr "没有找到匹配 \""
+
+#: .\templates\app\create_entry.html:6
+msgid "Create - Yamtrack"
+msgstr "新增 - Yamtrack"
+
+#: .\templates\app\create_entry.html:12
+msgid "Create Custom Entry"
+msgstr "创建自定义记录"
+
+#: .\templates\app\create_entry.html:13
+msgid "Add a custom media entry to your collection if it's not available in the database."
+msgstr "如果数据库里没有，可以自己添加一条自定义媒体记录。"
+
+#: .\templates\app\create_entry.html:111
+msgid "Media Type"
+msgstr "媒体类型"
+
+#: .\templates\app\create_entry.html:127 .\templates\app\media_list.html:168
+msgid "Title"
+msgstr "标题"
+
+#: .\templates\app\create_entry.html:129
+msgid "Enter title"
+msgstr "输入标题"
+
+#: .\templates\app\create_entry.html:137
+msgid "Parent TV Show"
+msgstr "所属剧集"
+
+#: .\templates\app\create_entry.html:159
+msgid "Season Number"
+msgstr "季数"
+
+#: .\templates\app\create_entry.html:184
+msgid "Parent Season"
+msgstr "所属季"
+
+#: .\templates\app\create_entry.html:206
+msgid "Episode Number"
+msgstr "集数"
+
+#: .\templates\app\create_entry.html:231
+msgid "Image URL"
+msgstr "图片地址"
+
+#: .\templates\app\create_entry.html:236
+msgid "Enter image URL"
+msgstr "输入图片地址"
+
+#: .\templates\app\create_entry.html:252 .\templates\app\media_list.html:169
+msgid "Score"
+msgstr "评分"
+
+#: .\templates\app\create_entry.html:278 .\templates\app\media_list.html:170
+msgid "Progress"
+msgstr "进度"
+
+#: .\templates\app\create_entry.html:308 .\templates\app\media_list.html:172
+msgid "Status"
+msgstr "状态"
+
+#: .\templates\app\create_entry.html:322 .\templates\app\journal.html:63
+#: .\templates\app\media_list.html:173 .\templates\app\statistics.html:62
+msgid "Start Date"
+msgstr "开始日期"
+
+#: .\templates\app\create_entry.html:331 .\templates\app\journal.html:70
+#: .\templates\app\media_list.html:174 .\templates\app\statistics.html:69
+msgid "End Date"
+msgstr "结束日期"
+
+#: .\templates\app\create_entry.html:344
+msgid "Add any notes or comments..."
+msgstr "写点备注或评论……"
+
+#: .\templates\app\create_entry.html:351
+msgid "Create Entry"
+msgstr "创建记录"
+
+#: .\templates\app\home.html:6
+msgid "Home - Yamtrack"
+msgstr "首页 - Yamtrack"
+
+#: .\templates\app\home.html:12 .\templates\base.html:88
+msgid "Home"
+msgstr "首页"
+
+#: .\templates\app\home.html:17
+msgid "Hide unreleased"
+msgstr "隐藏未上映"
+
+#: .\templates\app\journal.html:7
+msgid "Journal - Yamtrack"
+msgstr "日志 - Yamtrack"
+
+#: .\templates\app\journal.html:12 .\templates\base.html:160
+msgid "Journal"
+msgstr "日志"
+
+#: .\templates\app\journal.html:13
+msgid "A feed of everything you've done in Yamtrack"
+msgstr "你在 Yamtrack 里的全部活动记录"
+
+#: .\templates\app\journal.html:37 .\templates\app\statistics.html:36
+msgid "Predefined Ranges"
+msgstr "预设范围"
+
+#: .\templates\app\journal.html:40 .\templates\app\statistics.html:39
+msgid "Custom Range"
+msgstr "自定义范围"
+
+#: .\templates\app\journal.html:86 .\templates\app\statistics.html:85
+msgid "Apply Range"
+msgstr "应用范围"
+
+#: .\templates\app\journal.html:101
+msgid "Tracked Activities"
+msgstr "追踪记录"
+
+#: .\templates\app\journal.html:114
+msgid "Most Active Day"
+msgstr "最活跃的一天"
+
+#: .\templates\app\journal.html:117
+#, python-format
+msgid "%% of activity"
+msgstr "%% 的活动"
+
+#: .\templates\app\journal.html:128
+msgid "Current Streak"
+msgstr "当前连续天数"
+
+#: .\templates\app\journal.html:131 .\templates\app\journal.html:134
+msgid "day"
+msgstr "天"
+
+#: .\templates\app\journal.html:134
+msgid "Longest:"
+msgstr "最长："
+
+#: .\templates\app\journal.html:190
+msgid "Less"
+msgstr "收起"
+
+#: .\templates\app\journal.html:196
+msgid "More"
+msgstr "更多"
+
+#: .\templates\app\journal.html:214
+msgid "No tracking activity in this date range."
+msgstr "这个时间范围内没有追踪记录。"
+
+#: .\templates\app\media_details.html:35
+msgid "Add to tracker"
+msgstr "加入追踪"
+
+#: .\templates\app\media_details.html:63
+msgid "Add new entry"
+msgstr "新增记录"
+
+#: .\templates\app\media_details.html:193
+msgid "SCORE"
+msgstr "评分"
+
+#: .\templates\app\media_details.html:203
+msgid "vote"
+msgstr "票"
+
+#: .\templates\app\media_details.html:215
+msgid "YOUR SCORE"
+msgstr "你的评分"
+
+#: .\templates\app\media_details.html:228
+msgid "Click to edit"
+msgstr "点击编辑"
+
+#: .\templates\app\media_details.html:273
+msgid "Your History"
+msgstr "你的记录"
+
+#: .\templates\app\media_details.html:279
+msgid "Started:"
+msgstr "开始于："
+
+#: .\templates\app\media_details.html:286
+msgid "Ended:"
+msgstr "结束于："
+
+#: .\templates\app\media_details.html:293
+msgid "Progress:"
+msgstr "进度："
+
+#: .\templates\app\media_details.html:309
+msgid "Your notes"
+msgstr "你的备注"
+
+#: .\templates\app\media_details.html:325
+msgid "Actions"
+msgstr "操作"
+
+#: .\templates\app\media_details.html:339
+msgid "Add to lists"
+msgstr "加入列表"
+
+#: .\templates\app\media_details.html:364
+msgid "Activity history"
+msgstr "活动历史"
+
+#: .\templates\app\media_details.html:394
+msgid "Sync metadata"
+msgstr "同步元数据"
+
+#: .\templates\app\media_details.html:399
+msgid "Details"
+msgstr "详情"
+
+#: .\templates\app\media_details.html:415
+msgid "Provider"
+msgstr "提供方"
+
+#: .\templates\app\media_details.html:422 .\templates\users\about.html:29
+msgid "Links"
+msgstr "链接"
+
+#: .\templates\app\media_details.html:433
+msgid "No details available"
+msgstr "暂无详情"
+
+#: .\templates\app\media_details.html:457
+msgid "View all"
+msgstr "查看全部"
+
+#: .\templates\app\media_details.html:458
+msgid "cast members"
+msgstr "位演员"
+
+#: .\templates\app\media_details.html:496
+msgid "Repeats ("
+msgstr "重看记录（"
+
+#: .\templates\app\media_details.html:549
+#: .\templates\users\import_data.html:490
+msgid "Started"
+msgstr "已开始"
+
+#: .\templates\app\media_details.html:551
+#: .\templates\users\import_data.html:484
+msgid "Finished"
+msgstr "已看完"
+
+#: .\templates\app\media_details.html:675
+msgid "Last watched:"
+msgstr "最近观看："
+
+#: .\templates\app\media_details.html:681
+msgid "• Watched"
+msgstr "• 已看"
+
+#: .\templates\app\media_details.html:700
+msgid "Watch provider region is not configured. Set a region or disable this feature in the"
+msgstr "还没有配置播放平台地区。请设置地区，或在以下位置关闭该功能："
+
+#: .\templates\app\media_details.html:702
+msgid "preferences"
+msgstr "偏好设置"
+
+#: .\templates\app\media_details.html:732
+msgid "Main Story"
+msgstr "主线"
+
+#: .\templates\app\media_details.html:743
+msgid "Main + Extra"
+msgstr "主线 + 支线"
+
+#: .\templates\app\media_details.html:754
+msgid "Completionist"
+msgstr "全成就"
+
+#: .\templates\app\media_list.html:171
+msgid "Last Watched"
+msgstr "最近观看"
+
+#: .\templates\app\media_list.html:200
+msgid "'s Media:"
+msgstr "的媒体："
+
+#: .\templates\app\search.html:6
+msgid "Search - Yamtrack"
+msgstr "搜索 - Yamtrack"
+
+#: .\templates\app\search.html:11
+msgid "Search Results"
+msgstr "搜索结果"
+
+#: .\templates\app\search.html:13
+msgid "Source:"
+msgstr "来源："
+
+#: .\templates\app\search.html:100
+msgid "No results found"
+msgstr "没有找到结果"
+
+#: .\templates\app\search.html:102
+msgid "\". Try checking your spelling or using different keywords."
+msgstr "\"，请检查拼写或换个关键词。"
+
+#: .\templates\app\statistics.html:7
+msgid "Statistics - Yamtrack"
+msgstr "统计 - Yamtrack"
+
+#: .\templates\app\statistics.html:12 .\templates\base.html:145
+msgid "Statistics"
+msgstr "统计"
+
+#: .\templates\app\statistics.html:13
+msgid "Track your media consumption habits"
+msgstr "追踪你的媒体消费习惯"
+
+#: .\templates\app\statistics.html:101
+msgid "Completed Items"
+msgstr "已通关条目"
+
+#: .\templates\app\statistics.html:116
+msgid "In Progress"
+msgstr "进行中"
+
+#: .\templates\app\statistics.html:129
+msgid "Average Rating"
+msgstr "平均评分"
+
+#: .\templates\app\statistics.html:144
+#, python-format
+msgid "%% Rated"
+msgstr "%% 已评分"
+
+#: .\templates\app\statistics.html:159
+msgid "Consumption"
+msgstr "消费量"
+
+#: .\templates\app\statistics.html:177
+msgid "Media Type Distribution"
+msgstr "媒体类型分布"
+
+#: .\templates\app\statistics.html:188
+msgid "No media types to display"
+msgstr "没有可显示的媒体类型"
+
+#: .\templates\app\statistics.html:189
+msgid "Add different types of media to see their distribution."
+msgstr "添加不同类型的媒体后就能看到分布情况。"
+
+#: .\templates\app\statistics.html:196
+msgid "Status Distribution"
+msgstr "状态分布"
+
+#: .\templates\app\statistics.html:207
+msgid "No status data to display"
+msgstr "没有可显示的状态数据"
+
+#: .\templates\app\statistics.html:208
+msgid "Track media items with different statuses to see their distribution."
+msgstr "记录不同状态的媒体后就能看到分布情况。"
+
+#: .\templates\app\statistics.html:215
+msgid "Status Distribution by Media Type"
+msgstr "按媒体类型划分的状态分布"
+
+#: .\templates\app\statistics.html:226
+msgid "No data available"
+msgstr "暂无数据"
+
+#: .\templates\app\statistics.html:228
+msgid "Add media items with different statuses to see their distribution by type."
+msgstr "添加不同状态的媒体后就能看到按类型划分的分布。"
+
+#: .\templates\app\statistics.html:236
+msgid "Score Distribution by Media Type"
+msgstr "按媒体类型划分的评分分布"
+
+#: .\templates\app\statistics.html:247 .\templates\app\statistics.html:269
+msgid "No ratings yet"
+msgstr "还没有评分"
+
+#: .\templates\app\statistics.html:248 .\templates\app\statistics.html:270
+msgid "Rate your media items to see score distribution statistics."
+msgstr "给媒体打分后就能看到评分分布统计。"
+
+#: .\templates\app\statistics.html:256
+msgid "Top Rated Media"
+msgstr "评分最高的媒体"
+
+#: .\templates\base.html:130
+msgid "Create Custom"
+msgstr "自定义创建"
+
+#: .\templates\base.html:175 .\templates\lists\components\fill_lists.html:5
+#: .\templates\lists\custom_lists.html:17
+msgid "Lists"
+msgstr "列表"
+
+#: .\templates\base.html:190 .\templates\events\calendar.html:11
+msgid "Calendar"
+msgstr "日历"
+
+#: .\templates\base.html:216 .\templates\users\base.html:8
+msgid "Settings"
+msgstr "设置"
+
+#: .\templates\base.html:225
+msgid "Logout"
+msgstr "退出登录"
+
+#: .\templates\events\calendar.html:6
+msgid "Calendar - YamTrack"
+msgstr "日历 - Yamtrack"
+
+#: .\templates\events\calendar.html:12
+msgid "Track upcoming releases from your list."
+msgstr "追踪你列表里即将发行的内容。"
+
+#: .\templates\events\calendar.html:36
+#: .\templates\events\components\calendar_list.html:11
+msgid "Today"
+msgstr "今天"
+
+#: .\templates\events\calendar.html:42
+msgid "Fetch New Releases"
+msgstr "获取新发行"
+
+#: .\templates\events\calendar.html:74
+msgid "Export link"
+msgstr "导出链接"
+
+#: .\templates\events\calendar.html:77
+msgid "This link can be used to integrate your calendar into any of your calendar applications."
+msgstr "可以用这个链接把日历接入到任意日历应用中。"
+
+#: .\templates\events\components\calendar_list.html:27
+msgid "at"
+msgstr "在"
+
+#: .\templates\lists\components\fill_lists.html:16
+msgid "You haven't created any lists yet."
+msgstr "你还没有创建任何列表。"
+
+#: .\templates\lists\components\list_form.html:12
+#: .\templates\lists\list_detail.html:40
+msgid "Edit List"
+msgstr "编辑列表"
+
+#: .\templates\lists\components\list_form.html:14
+msgid "Create New List"
+msgstr "新建列表"
+
+#: .\templates\lists\components\list_form.html:41
+msgid "Save"
+msgstr "保存"
+
+#: .\templates\lists\components\list_form.html:53
+msgid "Create List"
+msgstr "创建列表"
+
+#: .\templates\lists\components\list_grid.html:17
+msgid "Edit list"
+msgstr "编辑列表"
+
+#: .\templates\lists\components\list_item_button.html:8
+msgid "Remove"
+msgstr "移除"
+
+#: .\templates\lists\custom_lists.html:10
+msgid "Lists - Yamtrack"
+msgstr "列表 - Yamtrack"
+
+#: .\templates\lists\custom_lists.html:18
+msgid "Organize and share your media lists"
+msgstr "整理并分享你的媒体列表"
+
+#: .\templates\lists\custom_lists.html:23
+msgid "New List"
+msgstr "新列表"
+
+#: .\templates\lists\custom_lists.html:99
+msgid "No Lists Created Yet"
+msgstr "还没创建列表"
+
+#: .\templates\lists\custom_lists.html:100
+msgid "Create custom lists to organize your media collection and share with friends."
+msgstr "创建自定义列表来整理媒体收藏，还能分享给朋友。"
+
+#: .\templates\lists\custom_lists.html:103
+msgid "Create Your First List"
+msgstr "创建你的第一个列表"
+
+#: .\templates\lists\list_detail.html:30
+msgid "collaborator"
+msgstr "协作者"
+
+#: .\templates\lists\list_detail.html:167
+msgid "All"
+msgstr "全部"
+
+#: .\templates\lists\list_detail.html:224
+msgid "No items in this list yet"
+msgstr "这个列表里还没有条目"
+
+#: .\templates\lists\list_detail.html:225
+msgid "Start adding your favorite media to build your collection"
+msgstr "开始添加你喜欢的媒体，建立自己的收藏"
+
+#: .\templates\lists\list_detail.html:228
+msgid "Browse Media"
+msgstr "浏览媒体"
+
+#: .\templates\socialaccount\connections.html:7
+#: .\templates\socialaccount\connections.html:11
+msgid "Account Connections"
+msgstr "账户绑定"
+
+#: .\templates\socialaccount\connections.html:18
+msgid "You can sign in to your account using any of the following third-party accounts:"
+msgstr "你可以用以下任一第三方账户登录："
+
+#: .\templates\socialaccount\connections.html:32
+msgid "id_account_"
+msgstr "id_account_"
+
+#: .\templates\socialaccount\connections.html:35
+msgid "socialaccount,"
+msgstr "socialaccount,"
+
+#: .\templates\socialaccount\connections.html:66
+msgid "Remove Selected"
+msgstr "移除所选"
+
+#: .\templates\socialaccount\connections.html:75
+msgid "You currently have no third-party accounts connected to this account."
+msgstr "当前没有绑定任何第三方账户。"
+
+#: .\templates\socialaccount\connections.html:83
+msgid "Add a Third-Party Account"
+msgstr "添加第三方账户"
+
+#: .\templates\users\about.html:8
+msgid "About - Yamtrack"
+msgstr "关于 - Yamtrack"
+
+#: .\templates\users\about.html:13
+msgid "About Yamtrack"
+msgstr "关于 Yamtrack"
+
+#: .\templates\users\about.html:19
+msgid "Description"
+msgstr "简介"
+
+#: .\templates\users\about.html:22
+msgid "Yamtrack is an open-source media tracker that helps you organize and track your media."
+msgstr "Yamtrack 是一个开源媒体追踪工具，帮你整理和记录看过的内容。"
+
+#: .\templates\users\about.html:37
+msgid "Source Code"
+msgstr "源代码"
+
+#: .\templates\users\about.html:46
+msgid "Documentation"
+msgstr "文档"
+
+#: .\templates\users\about.html:55
+msgid "Bug Reports"
+msgstr "问题反馈"
+
+#: .\templates\users\about.html:64
+msgid "License"
+msgstr "许可证"
+
+#: .\templates\users\about.html:67
+msgid "Yamtrack is licensed under the"
+msgstr "Yamtrack 的许可证是"
+
+#: .\templates\users\about.html:72
+msgid "GNU Affero General Public License v3.0 (AGPL-3.0)"
+msgstr "GNU Affero 通用公共许可证 v3.0 (AGPL-3.0)"
+
+#: .\templates\users\about.html:79
+msgid "Attribution"
+msgstr "致谢"
+
+#: .\templates\users\about.html:82
+msgid "Movie and TV streaming providers from"
+msgstr "影视播放平台数据来自"
+
+#: .\templates\users\about.html:87
+msgid "JustWatch"
+msgstr "JustWatch"
+
+#: .\templates\users\about.html:95
+msgid "Version:"
+msgstr "版本："
+
+#: .\templates\users\account.html:8
+msgid "Account - Yamtrack"
+msgstr "账户 - Yamtrack"
+
+#: .\templates\users\account.html:16
+msgid "Profile Information"
+msgstr "个人资料"
+
+#: .\templates\users\account.html:29
+msgid "Username"
+msgstr "用户名"
+
+#: .\templates\users\account.html:42
+msgid "Profile visibility"
+msgstr "资料可见性"
+
+#: .\templates\users\account.html:47
+msgid "Private profile"
+msgstr "私密资料"
+
+#: .\templates\users\account.html:49
+msgid "Hide your profile and media lists from anonymous visitors."
+msgstr "对未登录访客隐藏你的个人资料和媒体列表。"
+
+#: .\templates\users\account.html:68 .\templates\users\integrations.html:149
+#: .\templates\users\integrations.html:275
+msgid "Save Changes"
+msgstr "保存修改"
+
+#: .\templates\users\account.html:77
+msgid "Change Password"
+msgstr "修改密码"
+
+#: .\templates\users\account.html:92
+msgid "Current Password"
+msgstr "当前密码"
+
+#: .\templates\users\account.html:116
+msgid "New Password"
+msgstr "新密码"
+
+#: .\templates\users\account.html:140
+msgid "Confirm New Password"
+msgstr "确认新密码"
+
+#: .\templates\users\account.html:166
+msgid "Update Password"
+msgstr "更新密码"
+
+#: .\templates\users\account.html:177
+msgid "Third-Party Connections"
+msgstr "第三方账户绑定"
+
+#: .\templates\users\account.html:179
+msgid "Manage your connected third-party accounts for easier sign-in."
+msgstr "管理已绑定的第三方账户，登录更方便。"
+
+#: .\templates\users\account.html:183
+msgid "Manage Account Connections"
+msgstr "管理账户绑定"
+
+#: .\templates\users\advanced.html:8
+msgid "Advanced - Yamtrack"
+msgstr "高级 - Yamtrack"
+
+#: .\templates\users\advanced.html:17 .\templates\users\base.html:61
+msgid "Advanced"
+msgstr "高级"
+
+#: .\templates\users\advanced.html:23 .\templates\users\advanced.html:38
+msgid "Clear Search Cache"
+msgstr "清空搜索缓存"
+
+#: .\templates\users\advanced.html:26
+msgid "Yamtrack stores your search results in a cache to speed up performance and reduce API calls."
+msgstr "Yamtrack 会把搜索结果缓存起来，以提升速度并减少接口调用。"
+
+#: .\templates\users\advanced.html:28
+msgid "Normally, these cached results expire automatically after 24 hours. If your search results appear outdated, you can clear the cache manually."
+msgstr "通常缓存结果会在 24 小时后自动过期。如果搜索结果看起来过时了，可以手动清空缓存。"
+
+#: .\templates\users\advanced.html:30
+msgid "Your next search may be slightly slower as fresh data is retrieved."
+msgstr "下次搜索可能会稍慢一点，因为要重新拉取最新数据。"
+
+#: .\templates\users\base.html:9
+msgid "Configure your account and preferences"
+msgstr "管理账户与偏好设置"
+
+#: .\templates\users\base.html:19
+msgid "Account"
+msgstr "账户"
+
+#: .\templates\users\base.html:26 .\templates\users\preferences.html:14
+msgid "Preferences"
+msgstr "偏好设置"
+
+#: .\templates\users\base.html:33 .\templates\users\notifications.html:16
+msgid "Notifications"
+msgstr "通知"
+
+#: .\templates\users\base.html:40
+msgid "Integrations"
+msgstr "集成"
+
+#: .\templates\users\base.html:47
+msgid "Import Data"
+msgstr "导入数据"
+
+#: .\templates\users\base.html:54 .\templates\users\export_data.html:12
+msgid "Export Data"
+msgstr "导出数据"
+
+#: .\templates\users\base.html:68
+msgid "About"
+msgstr "关于"
+
+#: .\templates\users\components\excluded_items.html:4
+msgid "Currently Excluded:"
+msgstr "当前已排除："
+
+#: .\templates\users\components\excluded_items.html:30
+msgid "No media items excluded yet"
+msgstr "还没有排除任何媒体"
+
+#: .\templates\users\components\search_results.html:22
+msgid "Exclude"
+msgstr "排除"
+
+#: .\templates\users\components\search_results.html:28
+msgid "No matching items found"
+msgstr "没有找到匹配的条目"
+
+#: .\templates\users\export_data.html:5
+msgid "Export - Yamtrack"
+msgstr "导出 - Yamtrack"
+
+#: .\templates\users\export_data.html:14
+msgid "Back up your data or export it for use with other services."
+msgstr "备份数据，或导出给其他服务使用。"
+
+#: .\templates\users\export_data.html:15
+msgid "Your export will include all your media items."
+msgstr "导出内容会包含你的所有媒体条目。"
+
+#: .\templates\users\export_data.html:19
+msgid "Export as CSV"
+msgstr "导出为 CSV"
+
+#: .\templates\users\import_data.html:7
+msgid "Import - Yamtrack"
+msgstr "导入 - Yamtrack"
+
+#: .\templates\users\import_data.html:18
+msgid "Import Settings"
+msgstr "导入设置"
+
+#: .\templates\users\import_data.html:20
+msgid "Configure your import preferences."
+msgstr "设置导入相关的偏好。"
+
+#: .\templates\users\import_data.html:24
+msgid "Import Frequency"
+msgstr "导入频率"
+
+#: .\templates\users\import_data.html:28
+msgid "One Time Import"
+msgstr "一次性导入"
+
+#: .\templates\users\import_data.html:29
+msgid "Every Day"
+msgstr "每天"
+
+#: .\templates\users\import_data.html:30
+msgid "Every 2 Days"
+msgstr "每 2 天"
+
+#: .\templates\users\import_data.html:35
+msgid "Import Time"
+msgstr "导入时间"
+
+#: .\templates\users\import_data.html:42
+msgid "Import Mode"
+msgstr "导入模式"
+
+#: .\templates\users\import_data.html:46
+msgid "Only Sync New Items"
+msgstr "只同步新条目"
+
+#: .\templates\users\import_data.html:47
+msgid "Sync New Items and Overwrite Existing"
+msgstr "同步新条目并覆盖已有条目"
+
+#: .\templates\users\import_data.html:60
+msgid "Import Sources"
+msgstr "导入来源"
+
+#: .\templates\users\import_data.html:63
+msgid "Some of these require additional configuration, check the"
+msgstr "其中有些需要额外配置，请查看"
+
+#: .\templates\users\import_data.html:66
+msgid "import configuration guide"
+msgstr "导入配置指南"
+
+#: .\templates\users\import_data.html:79
+msgid "Import method"
+msgstr "导入方式"
+
+#: .\templates\users\import_data.html:82
+msgid "Public"
+msgstr "公开"
+
+#: .\templates\users\import_data.html:83
+msgid "Private (requires authentication)"
+msgstr "私密（需要登录认证）"
+
+#: .\templates\users\import_data.html:84
+msgid "Export (requires ZIP file)"
+msgstr "导出（需要 ZIP 文件）"
+
+#: .\templates\users\import_data.html:98
+msgid "Public Trakt username"
+msgstr "公开的 Trakt 用户名"
+
+#: .\templates\users\import_data.html:105
+#: .\templates\users\import_data.html:182
+#: .\templates\users\import_data.html:220
+#: .\templates\users\import_data.html:268
+#: .\templates\users\import_data.html:361
+msgid "Import"
+msgstr "导入"
+
+#: .\templates\users\import_data.html:121
+msgid "Connect with Trakt & Import"
+msgstr "连接 Trakt 并导入"
+
+#: .\templates\users\import_data.html:143
+msgid "Select ZIP File"
+msgstr "选择 ZIP 文件"
+
+#: .\templates\users\import_data.html:151
+msgid "Import TV shows, movies and anime"
+msgstr "导入剧集、电影和动画"
+
+#: .\templates\users\import_data.html:159
+msgid "Connect with Simkl & Import"
+msgstr "连接 Simkl 并导入"
+
+#: .\templates\users\import_data.html:167
+#: .\templates\users\import_data.html:192
+#: .\templates\users\import_data.html:244
+msgid "Import anime and manga"
+msgstr "导入动画和漫画"
+
+#: .\templates\users\import_data.html:176
+msgid "MAL username"
+msgstr "MAL 用户名"
+
+#: .\templates\users\import_data.html:199
+msgid "Import private profile (requires authentication)"
+msgstr "导入私密资料（需要登录认证）"
+
+#: .\templates\users\import_data.html:213
+msgid "Public AniList username"
+msgstr "公开的 AniList 用户名"
+
+#: .\templates\users\import_data.html:236
+msgid "Connect with AniList & Import"
+msgstr "连接 AniList 并导入"
+
+#: .\templates\users\import_data.html:253
+msgid "Kitsu user ID"
+msgstr "Kitsu 用户 ID"
+
+#: .\templates\users\import_data.html:260
+msgid "Find it on your Kitsu profile URL:"
+msgstr "可以在你的 Kitsu 个人主页地址里找到："
+
+#: .\templates\users\import_data.html:262
+msgid "kitsu.app/users/"
+msgstr "kitsu.app/users/"
+
+#: .\templates\users\import_data.html:280
+msgid "View CSV format documentation"
+msgstr "查看 CSV 格式说明"
+
+#: .\templates\users\import_data.html:301
+#: .\templates\users\import_data.html:328
+#: .\templates\users\import_data.html:390
+#: .\templates\users\import_data.html:417
+msgid "Select CSV File"
+msgstr "选择 CSV 文件"
+
+#: .\templates\users\import_data.html:336
+msgid "Import games from your Steam library"
+msgstr "从 Steam 库导入游戏"
+
+#: .\templates\users\import_data.html:345
+msgid "Steam 64-bit ID"
+msgstr "Steam 64 位 ID"
+
+#: .\templates\users\import_data.html:352
+msgid "Find it on your Steam account details page under your username."
+msgstr "在 Steam 账户详情页的用户名下面可以找到。"
+
+#: .\templates\users\import_data.html:355
+msgid "Your profile must be public if the API key you are using is not linked to the steamid you are requesting."
+msgstr "如果你用的 API key 没有绑定所请求的 steamid，个人资料必须设为公开。"
+
+#: .\templates\users\import_data.html:429
+msgid "Active Periodic Imports"
+msgstr "启用中的定时导入"
+
+#: .\templates\users\import_data.html:432
+msgid "Automated imports that run on a schedule. These will continue to sync your media until disabled."
+msgstr "按计划自动运行的导入，未关闭前会一直同步你的媒体。"
+
+#: .\templates\users\import_data.html:453
+msgid "Username:"
+msgstr "用户名："
+
+#: .\templates\users\import_data.html:454
+msgid "Mode:"
+msgstr "模式："
+
+#: .\templates\users\import_data.html:455
+msgid "Last Import:"
+msgstr "上次导入："
+
+#: .\templates\users\import_data.html:456
+msgid "Next Import:"
+msgstr "下次导入："
+
+#: .\templates\users\import_data.html:461
+msgid "No periodic imports configured"
+msgstr "还没有配置定时导入"
+
+#: .\templates\users\import_data.html:462
+msgid "Set up an import with a daily or 2-day frequency to see it here"
+msgstr "配置一个每天或每两天的导入后，这里会显示内容"
+
+#: .\templates\users\import_data.html:472
+msgid "Import History"
+msgstr "导入历史"
+
+#: .\templates\users\import_data.html:475
+msgid "Showing import activity from the last 7 days."
+msgstr "显示最近 7 天的导入活动。"
+
+#: .\templates\users\import_data.html:486
+msgid "Success"
+msgstr "成功"
+
+#: .\templates\users\import_data.html:492
+msgid "Failed"
+msgstr "失败"
+
+#: .\templates\users\import_data.html:494
+msgid "Pending"
+msgstr "等待中"
+
+#: .\templates\users\import_data.html:510
+msgid "Show failed items"
+msgstr "显示失败的条目"
+
+#: .\templates\users\import_data.html:515
+msgid "Show traceback"
+msgstr "显示错误堆栈"
+
+#: .\templates\users\import_data.html:530
+msgid "No imports in the last 7 days"
+msgstr "最近 7 天没有导入记录"
+
+#: .\templates\users\import_data.html:531
+msgid "Import your media from any source to see the history here"
+msgstr "从任意来源导入媒体后，这里会显示历史记录"
+
+#: .\templates\users\integrations.html:7
+msgid "Integrations - Yamtrack"
+msgstr "集成 - Yamtrack"
+
+#: .\templates\users\integrations.html:21
+msgid "Token"
+msgstr "令牌"
+
+#: .\templates\users\integrations.html:23
+msgid "This token is used to authenticate webhook requests from your media servers."
+msgstr "这个令牌用于验证来自媒体服务器的 Webhook 请求。"
+
+#: .\templates\users\integrations.html:32
+#: .\templates\users\integrations.html:168
+#: .\templates\users\integrations.html:198
+#: .\templates\users\integrations.html:233
+#: .\templates\users\integrations.html:303
+#: .\templates\users\integrations.html:339
+msgid "Copy"
+msgstr "复制"
+
+#: .\templates\users\integrations.html:41
+msgid "Regenerating will invalidate the previous token"
+msgstr "重新生成会让之前的令牌失效"
+
+#: .\templates\users\integrations.html:49
+msgid "Regenerate"
+msgstr "重新生成"
+
+#: .\templates\users\integrations.html:58
+msgid "Media Servers"
+msgstr "媒体服务器"
+
+#: .\templates\users\integrations.html:60
+msgid "Connect your media servers to automatically track your watching progress."
+msgstr "连接你的媒体服务器，自动记录观看进度。"
+
+#: .\templates\users\integrations.html:64
+msgid "Integration services"
+msgstr "集成服务"
+
+#: .\templates\users\integrations.html:72
+#: .\templates\users\integrations.html:97
+msgid "Jellyfin"
+msgstr "Jellyfin"
+
+#: .\templates\users\integrations.html:81
+#: .\templates\users\integrations.html:252
+msgid "Plex"
+msgstr "Plex"
+
+#: .\templates\users\integrations.html:90
+#: .\templates\users\integrations.html:319
+msgid "Emby"
+msgstr "Emby"
+
+#: .\templates\users\integrations.html:99
+msgid "Connect Jellyfin to automatically track your watching progress."
+msgstr "连接 Jellyfin，自动记录观看进度。"
+
+#: .\templates\users\integrations.html:101
+msgid "Webhook Events"
+msgstr "Webhook 事件"
+
+#: .\templates\users\integrations.html:103
+msgid "Play and Stop events are always processed. Enable these to sync manual watched changes from the unofficial Webhooks plugin."
+msgstr "播放和停止事件始终会处理。勾选这些可同步非官方 Webhooks 插件里的手动观看变更。"
+
+#: .\templates\users\integrations.html:113
+msgid "Process MarkPlayed events"
+msgstr "处理 MarkPlayed 事件"
+
+#: .\templates\users\integrations.html:115
+msgid "Mark media as watched when it is manually marked played in Jellyfin."
+msgstr "在 Jellyfin 中手动标记为已播放时，把媒体标记为已看。"
+
+#: .\templates\users\integrations.html:130
+msgid "Process MarkUnplayed events"
+msgstr "处理 MarkUnplayed 事件"
+
+#: .\templates\users\integrations.html:133
+msgid "Remove watched progress when it is manually marked unplayed in Jellyfin. This event can delete media from Yamtrack."
+msgstr "在 Jellyfin 中手动标记为未播放时，清除观看进度。该事件可能把媒体从 Yamtrack 中删除。"
+
+#: .\templates\users\integrations.html:155
+msgid "Official Webhook Plugin"
+msgstr "官方 Webhook 插件"
+
+#: .\templates\users\integrations.html:157
+#: .\templates\users\integrations.html:210
+msgid "You will need to have TMDB and TVDB as metadata providers in Jellyfin."
+msgstr "你的 Jellyfin 需要把 TMDB 和 TVDB 配置为元数据提供方。"
+
+#: .\templates\users\integrations.html:158
+msgid "Install the Webhook plugin from the 'Jellyfin Stable' repo via your server's Plugin Catalog."
+msgstr "在服务器的插件目录中，从 'Jellyfin Stable' 仓库安装 Webhook 插件。"
+
+#: .\templates\users\integrations.html:160
+#: .\templates\users\integrations.html:227
+msgid "Restart your server, then configure the plugin:"
+msgstr "重启服务器，然后配置插件："
+
+#: .\templates\users\integrations.html:162
+msgid "Click on the \"Add Generic Destination\" button to create a new webhook."
+msgstr "点击 \"添加通用目标\" 按钮来新建一个 Webhook。"
+
+#: .\templates\users\integrations.html:163
+msgid "Name: Yamtrack"
+msgstr "名称：Yamtrack"
+
+#: .\templates\users\integrations.html:166
+#: .\templates\users\integrations.html:231
+#: .\templates\users\integrations.html:332
+msgid "URL:"
+msgstr "地址："
+
+#: .\templates\users\integrations.html:174
+msgid "Notification Type: Playback Start and Playback Stop"
+msgstr "通知类型：开始播放、停止播放"
+
+#: .\templates\users\integrations.html:175
+msgid "User Filter: Your Jellyfin User"
+msgstr "用户过滤：你的 Jellyfin 用户"
+
+#: .\templates\users\integrations.html:176
+msgid "Finally, under the \"Template\" section, paste the following code."
+msgstr "最后，在 \"Template\" 一栏里粘贴下面的代码。"
+
+#: .\templates\users\integrations.html:208
+msgid "Unofficial Webhooks Plugin"
+msgstr "非官方 Webhooks 插件"
+
+#: .\templates\users\integrations.html:212
+msgid "Add this repository"
+msgstr "添加这个仓库"
+
+#: .\templates\users\integrations.html:216
+msgid "link"
+msgstr "链接"
+
+#: .\templates\users\integrations.html:217
+msgid "to your \"Plugins Catalog\" in Jellyfin settings."
+msgstr "到 Jellyfin 设置的 \"插件目录\" 中。"
+
+#: .\templates\users\integrations.html:220
+msgid "From your \"Plugins Catalog\", install the"
+msgstr "在 \"插件目录\" 中安装"
+
+#: .\templates\users\integrations.html:224
+msgid "Unofficial Webhooks plugin"
+msgstr "非官方 Webhooks 插件"
+
+#: .\templates\users\integrations.html:239
+msgid "Payload format: Default"
+msgstr "载荷格式：默认"
+
+#: .\templates\users\integrations.html:240
+msgid "Listen to events only for: Your Jellyfin User"
+msgstr "只监听该用户的事件：你的 Jellyfin 用户"
+
+#: .\templates\users\integrations.html:241
+msgid "Events: Play, Stop, MarkPlayed and MarkUnplayed"
+msgstr "事件：播放、停止、标记已看、标记未看"
+
+#: .\templates\users\integrations.html:254
+msgid "Connect Plex to automatically track your watching progress."
+msgstr "连接 Plex，自动记录观看进度。"
+
+#: .\templates\users\integrations.html:256
+msgid "Plex Usernames"
+msgstr "Plex 用户名"
+
+#: .\templates\users\integrations.html:263
+msgid "This username (or several, comma separated) will be used to filter which events are sent to your webhook."
+msgstr "这些用户名（多个用逗号分隔）会用来筛选哪些事件发送到你的 Webhook。"
+
+#: .\templates\users\integrations.html:281
+#: .\templates\users\integrations.html:323
+msgid "Setup Instructions"
+msgstr "配置说明"
+
+#: .\templates\users\integrations.html:283
+msgid "You will need to have a PlexPass in order to have webhooks enabled"
+msgstr "需要 PlexPass 才能启用 Webhook"
+
+#: .\templates\users\integrations.html:284
+msgid "Go to Settings > Server > Network and enable Webhooks"
+msgstr "进入 设置 > 服务器 > 网络，启用 Webhook"
+
+#: .\templates\users\integrations.html:286
+msgid "In Plex settings, go to"
+msgstr "在 Plex 设置中，进入"
+
+#: .\templates\users\integrations.html:290
+msgid "Webhooks"
+msgstr "Webhooks"
+
+#: .\templates\users\integrations.html:293
+msgid "In the Webhooks section, click on \"Add Webhook\" and enter the following URL:"
+msgstr "在 Webhook 区域点击 \"添加 Webhook\"，然后填入下面的地址："
+
+#: .\templates\users\integrations.html:321
+msgid "Connect Emby to automatically track your watching progress."
+msgstr "连接 Emby，自动记录观看进度。"
+
+#: .\templates\users\integrations.html:325
+msgid "In Emby, go to Settings > Notifications"
+msgstr "在 Emby 中进入 设置 > 通知"
+
+#: .\templates\users\integrations.html:326
+msgid "In the Notifications section, click on \"Add Notification\""
+msgstr "在通知区域点击 \"添加通知\""
+
+#: .\templates\users\integrations.html:328
+msgid "In the Notification settings:"
+msgstr "在通知设置中："
+
+#: .\templates\users\integrations.html:346
+msgid "Request content type: multipart/form-data"
+msgstr "请求内容类型：multipart/form-data"
+
+#: .\templates\users\integrations.html:347
+msgid "Events: Play and Stop"
+msgstr "事件：播放、停止"
+
+#: .\templates\users\integrations.html:348
+msgid "Limit user events to: Your Emby User"
+msgstr "限制用户事件为：你的 Emby 用户"
+
+#: .\templates\users\integrations.html:349
+msgid "\"Limit library events to\" and \"Limit devices events to\" are optional"
+msgstr "\"限制库事件\" 和 \"限制设备事件\" 是可选项"
+
+#: .\templates\users\notifications.html:7
+msgid "Notifications - Yamtrack"
+msgstr "通知 - Yamtrack"
+
+#: .\templates\users\notifications.html:19
+msgid "Configure how you want to receive notifications about your media."
+msgstr "设置你希望怎样接收媒体通知。"
+
+#: .\templates\users\notifications.html:27
+msgid "Apprise URLs"
+msgstr "Apprise 地址"
+
+#: .\templates\users\notifications.html:39
+msgid "Apprise"
+msgstr "Apprise"
+
+#: .\templates\users\notifications.html:39
+msgid "is a notification service that supports"
+msgstr "是一个通知服务，支持"
+
+#: .\templates\users\notifications.html:43
+msgid "many platforms"
+msgstr "多个平台"
+
+#: .\templates\users\notifications.html:43
+msgid "including:"
+msgstr "包括："
+
+#: .\templates\users\notifications.html:46
+msgid "Discord"
+msgstr "Discord"
+
+#: .\templates\users\notifications.html:47
+msgid "Telegram"
+msgstr "Telegram"
+
+#: .\templates\users\notifications.html:48
+msgid "Slack"
+msgstr "Slack"
+
+#: .\templates\users\notifications.html:49
+msgid "Email"
+msgstr "邮箱"
+
+#: .\templates\users\notifications.html:50
+msgid "Pushover"
+msgstr "Pushover"
+
+#: .\templates\users\notifications.html:51
+msgid "ntfy"
+msgstr "ntfy"
+
+#: .\templates\users\notifications.html:52
+msgid "And many more..."
+msgstr "还有更多……"
+
+#: .\templates\users\notifications.html:55
+msgid "Enter one URL per line. Example:"
+msgstr "每行填一个地址。例如："
+
+#: .\templates\users\notifications.html:61
+msgid "Enter each Apprise URL on a separate line to send notifications to multiple services."
+msgstr "每行填一个 Apprise 地址，可同时通知多个服务。"
+
+#: .\templates\users\notifications.html:66
+msgid "Notification Settings"
+msgstr "通知设置"
+
+#: .\templates\users\notifications.html:75
+msgid "Enable Daily Digest"
+msgstr "启用每日摘要"
+
+#: .\templates\users\notifications.html:78
+msgid "Receive a single notification each day with all media scheduled to release that day"
+msgstr "每天只发一条通知，汇总当天要发行的所有媒体"
+
+#: .\templates\users\notifications.html:97
+msgid "Receive notifications for recently released media"
+msgstr "最近有媒体发行时通知我"
+
+#: .\templates\users\notifications.html:99
+msgid "Get notified when new episodes, chapters, or other media are released"
+msgstr "有新的剧集、章节或其他媒体发布时通知我"
+
+#: .\templates\users\notifications.html:119
+msgid "Test Notifications"
+msgstr "测试通知"
+
+#: .\templates\users\notifications.html:124
+msgid "Save Settings"
+msgstr "保存设置"
+
+#: .\templates\users\notifications.html:134
+msgid "Excluded Media Items"
+msgstr "已排除的媒体"
+
+#: .\templates\users\notifications.html:137
+msgid "Exclude specific media items from notifications:"
+msgstr "从通知中排除指定媒体："
+
+#: .\templates\users\preferences.html:7
+msgid "Preferences - Yamtrack"
+msgstr "偏好设置 - Yamtrack"
+
+#: .\templates\users\preferences.html:16
+msgid "Customize the look and behavior of the application."
+msgstr "调整应用的外观与行为。"
+
+#: .\templates\users\preferences.html:26
+msgid "Hide Hover Overlay on Touch Devices"
+msgstr "在触屏设备上隐藏悬浮操作层"
+
+#: .\templates\users\preferences.html:29
+msgid "Hide the media card hover overlay with action buttons on touch devices for a cleaner mobile experience. On desktop, the overlay will still appear when you hover your mouse over media cards."
+msgstr "在触屏设备上隐藏媒体卡片上带操作按钮的悬浮层，手机端更清爽。桌面端鼠标悬停时仍会显示。"
+
+#: .\templates\users\preferences.html:49
+msgid "Obfuscate Unseen Episodes"
+msgstr "模糊处理未看剧集"
+
+#: .\templates\users\preferences.html:51
+msgid "When enabled, unseen episode images and descriptions will be blurred."
+msgstr "开启后，未看剧集的图片和简介会被模糊处理。"
+
+#: .\templates\users\preferences.html:70
+msgid "Bulk Completion Date"
+msgstr "批量完成日期"
+
+#: .\templates\users\preferences.html:73
+msgid "When marking a TV show or season as completed, its episodes will be marked as completed with this date."
+msgstr "把剧集或某季标记为已通关时，其中各集也会以这个日期标记为已通关。"
+
+#: .\templates\users\preferences.html:92
+msgid "Show progress bar on media items"
+msgstr "在媒体条目上显示进度条"
+
+#: .\templates\users\preferences.html:95
+msgid "Display a progress bar on media items. Items which don't have max progress will be using a dotted line."
+msgstr "在媒体条目上显示进度条。没有总进度的条目会用虚线表示。"
+
+#: .\templates\users\preferences.html:115
+msgid "Hide completed media in recommendations"
+msgstr "推荐中隐藏已通关的媒体"
+
+#: .\templates\users\preferences.html:118
+msgid "Hide media you've already completed from the recommendations section on detail pages."
+msgstr "在详情页的推荐里隐藏你已通关的媒体。"
+
+#: .\templates\users\preferences.html:138
+msgid "Hide zero ratings"
+msgstr "隐藏 0 分"
+
+#: .\templates\users\preferences.html:140
+msgid "Hide the rating badge from media cards when the rating is zero."
+msgstr "评分为 0 时隐藏媒体卡片上的评分角标。"
+
+#: .\templates\users\preferences.html:159
+msgid "Date Format"
+msgstr "日期格式"
+
+#: .\templates\users\preferences.html:161
+msgid "Choose how dates are displayed throughout the application."
+msgstr "选择整个网站中日期的显示方式。"
+
+#: .\templates\users\preferences.html:179
+msgid "Time Format"
+msgstr "时间格式"
+
+#: .\templates\users\preferences.html:181
+msgid "Choose between 12-hour or 24-hour clock display."
+msgstr "选择 12 小时制还是 24 小时制。"
+
+#: .\templates\users\preferences.html:199
+msgid "Week Start Day"
+msgstr "每周起始日"
+
+#: .\templates\users\preferences.html:201
+msgid "Choose which day the week starts on for calendars and statistics."
+msgstr "选择日历和统计中每周从哪天开始。"
+
+#: .\templates\users\preferences.html:219
+msgid "Watch provider region"
+msgstr "播放平台地区"
+
+#: .\templates\users\preferences.html:222
+msgid "Choose the region to show watch providers for. Setting this to disabled will hide the box from the media page."
+msgstr "选择播放平台的地区。设为关闭后，媒体页面将不再显示该模块。"
+
+#: .\templates\users\preferences.html:241
+msgid "Media Types"
+msgstr "媒体类型"
+
+#: .\templates\users\preferences.html:244
+msgid "Control which media types are visible throughout the app (sidebar, search, calendar, notifications)."
+msgstr "控制哪些媒体类型在应用中可见（侧边栏、搜索、日历、通知）。"
+
+#: .\templates\users\preferences.html:274
+msgid "Save Preferences"
+msgstr "保存偏好设置"

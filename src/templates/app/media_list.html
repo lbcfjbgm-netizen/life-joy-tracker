@@ -1,0 +1,806 @@
+{% extends "base.html" %}
+{% load static %}
+{% load app_tags %}
+{% load i18n %}
+
+{% block title %}
+  {% if request.user != target_user %}{{ target_user.username }}'s{% endif %}
+  {{ media_type|media_type_readable_plural }} {% trans "- Yamtrack" %}
+{% endblock title %}
+
+{% block extra_head %}
+  {% comment %}
+    巨屏模式的样式单独一个文件，只在本页加载。
+    作用域全部落在 .lj-showcase.lj-hero 和 main:has(.lj-showcase.lj-hero) 下，
+    书/影/剧和别的页面一条规则都不生效。
+  {% endcomment %}
+  <link rel="stylesheet"
+        type="text/css"
+        href="{% static 'css/hero.css' %}{% get_static_file_mtime 'css/hero.css' %}">
+{% endblock extra_head %}
+
+{% block content %}
+  <h1 class="text-3xl font-bold mb-6">
+    {% if request.user != target_user %}{{ target_user.username }}'s{% endif %}
+    {{ media_type|media_type_readable_plural }}
+  </h1>
+
+  <div x-data="{ sort: '{{ current_sort }}', status: '{{ current_status }}', layout: '{{ current_layout }}', search: '{{ request.GET.search|default:'' }}', statusLabels: {
+    {% for value, label in status_label_choices %}
+      '{{ value }}': '{{ label }}'
+      {% if not forloop.last %},{% endif %}
+
+    {% endfor %}
+    }, sortLabels: {
+    {% for value, label in sort_choices %}
+      '{{ value }}': '{{ label }}'
+      {% if not forloop.last %},{% endif %}
+
+    {% endfor %}
+    }, lead: false, leadIdx: 0,
+    density: '{{ density }}',
+    mediaType: '{{ media_type }}',
+    heroMode: {% if hero_mode %}true{% else %}false{% endif %},
+    genreOpen: false,
+    readGenresOpen() {
+      try { return window.localStorage.getItem('lj.filters') === '1'; } catch (err) { return false; }
+    },
+    writeGenresOpen(v) {
+      try { window.localStorage.setItem('lj.filters', v ? '1' : '0'); } catch (err) { /* 隐私模式下会抛，忽略 */ }
+    },
+    toggleGenres() {
+      this.genreOpen = !this.genreOpen;
+      this.writeGenresOpen(this.genreOpen);
+    },
+    closeGenres() {
+      if (!this.genreOpen) return;
+      this.genreOpen = false;
+      this.writeGenresOpen(false);
+    },
+    readLead() {
+      try { return window.localStorage.getItem('lj.lead') === '1'; } catch (err) { return false; }
+    },
+    writeLead(v) {
+      try { window.localStorage.setItem('lj.lead', v ? '1' : '0'); } catch (err) { /* 隐私模式下会抛，忽略 */ }
+    },
+    /* 密度记忆只认「同一个地址」：存的时候把 location.pathname+search 一起记下来，
+       读的时候必须完全对上才采用。
+       这样能同时满足两件事，又不会串库：
+         · 同一个页面点 8 → 刷新 → 还是 8（地址没变）
+         · 游戏库点巨屏 → 点电影库 → 电影是 12（地址变了，游戏那份不生效）
+         · 电影 → 点回游戏 → 游戏也是 12（回到的是 /admin/game，不是当初那个带参地址）
+       okDensity 只认 4/8/12/16，存过巨屏档 '1' 的一律丢掉。 */
+    okDensity(v) { return (v === '4' || v === '8' || v === '12' || v === '16') ? v : ''; },
+    hereHref() { return window.location.pathname + window.location.search; },
+    readDensity() {
+      try {
+        var v = this.okDensity(window.localStorage.getItem('lj.density'));
+        var at = window.localStorage.getItem('lj.density.href') || '';
+        return (v && at === this.hereHref()) ? v : '';
+      } catch (err) { return ''; }
+    },
+    writeDensity(v) {
+      try {
+        window.localStorage.setItem('lj.density', v);
+        window.localStorage.setItem('lj.density.href', this.hereHref());
+      } catch (err) { /* 隐私模式下会抛，忽略 */ }
+    },
+    /* 换档后可见卡片总数变了：首卡焦点如果落到被藏掉的卡上，拉回第一张。 */
+    setDensity(v) {
+      v = String(v);
+      if (v !== '4' && v !== '8' && v !== '12' && v !== '16') return;
+      /* 巨屏（density=1）是服务端整套版式，18 张 slide 不是同一套 DOM，
+         CSS 藏不出来，只能真的跳回普通网格 —— 这是四档里唯一还会跳的地方。 */
+      if (this.heroMode) {
+        this.writeDensity(v);
+        var u = new URL(window.location.href);
+        u.searchParams.set('layout', 'grid');
+        u.searchParams.set('density', v);
+        u.searchParams.delete('page');
+        window.location.assign(u.toString());
+        return;
+      }
+      /* 先改属性 + 算一遍显示顺序，再记 localStorage：档位以「首帧能对上」为准，
+         存储失败（隐私模式）也不影响这次切换。 */
+      var grid = document.querySelector('.lib-stage > .lib-grid');
+      if (grid) grid.setAttribute('data-show', v);
+      this.density = v;
+      var n = this.shownCards().length;
+      if (n && this.leadIdx >= n) this.leadIdx = 0;
+      this.syncCards();
+      /* 把档位同步进地址栏（不刷新页面）：用户点 8 → 地址变成 ...?density=8，
+         这样下一次刷新/分享/从别的入口回来，后端就能从 URL 读到 8 并写回用户，
+         其他库也跟着沿用。只换参数，不动历史记录，也不触发任何请求。 */
+      try {
+        var here = new URL(window.location.href);
+        here.searchParams.set('density', v);
+        window.history.replaceState(null, '', here.toString());
+      } catch (err) { /* 极老浏览器不支持 replaceState，退回旧行为，不影响这次切换 */ }
+      this.writeDensity(v);
+    },
+    /* 刷新/软导航进来，优先级一目了然：
+       ① 这个「完全相同的地址」上用户亲手点过档位 → 用记下的那个（刷新后保持）
+       ② 否则 URL 明确带了 4/8/12/16 → 以 URL 为准（外部链接、地址栏直达听它的）
+       ③ 都没有 → 保持后端给的默认 12
+       ⚠ 上一版让 localStorage 无条件盖住 URL，于是 data-show 永远是上次点的那个
+       （用户看到的「恒为 12 / 点 4 变 4 张」就是这条引起的），现在反过来了。 */
+    applyDensity() {
+      if (this.heroMode) return;
+      var saved = this.readDensity();
+      var urlV = this.okDensity(new URLSearchParams(window.location.search).get('density'));
+      var target = saved || urlV;
+      if (!target) return;
+      var grid = document.querySelector('.lib-stage > .lib-grid');
+      if (grid) grid.setAttribute('data-show', target);
+      this.density = target;
+    },
+    /* 密度胶囊的位置完全交给 CSS 的 #lj-density-pill 规则（showcase.css 11.0），
+       JS 只负责算一次 right 偏移（要量顶栏动作区宽度，CSS 拿不到）。
+       ⚠ 这里**不再加任何标记类**：上一版靠 init() 加 .lj-density-pill--top，
+       一旦 init 没跑到（退出巨屏、换库、软导航），胶囊就掉回筛选行。
+       JS 只做锦上添花，做砸了也不该影响位置。 */
+    mountDensityPill() {
+      var pill = document.getElementById('lj-density-pill');
+      if (!pill) return;
+      pill.setAttribute('hx-boost', 'false');
+      this.syncPillOffset();
+      var self = this;
+      if (!this._pillResize) {
+        this._pillResize = function () { self.syncPillOffset(); };
+        window.addEventListener('resize', this._pillResize);
+      }
+    },
+    unmountDensityPill() {
+      if (this._pillResize) {
+        window.removeEventListener('resize', this._pillResize);
+        this._pillResize = null;
+      }
+    },
+    /* 胶囊右边界停在顶栏动作区（搜索/筛选/日间）左边 28px。
+       动作区宽度随按钮增减变化，所以每次进入页面现量一次。 */
+    syncPillOffset() {
+      var pill = document.getElementById('lj-density-pill');
+      var actions = document.querySelector('.lj-topnav .lj-tn-actions');
+      if (!pill || !actions) return;
+      var w = actions.getBoundingClientRect().width;
+      if (!w) return;
+      pill.style.setProperty('--lj-dp-right', Math.round(w + 16 + 12) + 'px');
+    },
+    cards() {
+      return Array.prototype.slice.call(document.querySelectorAll('.lib-grid > .libcard'));
+    },
+    /* 当前这一档真正露在屏幕上的卡（CSS 用 display:none 藏掉的都排除） */
+    shownCards() {
+      return this.cards().filter(function (el) {
+        return window.getComputedStyle(el).display !== 'none';
+      });
+    },
+    setLead(on) {
+      this.lead = !!on;
+      if (!this.lead) this.leadIdx = 0;
+      this.writeLead(this.lead);
+      var self = this;
+      window.setTimeout(function () { self.syncCards(); }, 0);
+    },
+    toggleLead() {
+      if (this.layout === 'table') return;
+      this.setLead(!this.lead);
+    },
+    stepLead(d) {
+      if (!this.lead) return;
+      /* 只在「这一档露出来的卡」里绕圈：4 档就只有 4 张，不会转到被 CSS 藏起来的卡上 */
+      var n = this.shownCards().length;
+      if (!n) return;
+      this.leadIdx = ((this.leadIdx + d) % n + n) % n;
+      var self = this;
+      window.setTimeout(function () { self.syncCards(); }, 0);
+    },
+    syncCards() {
+      /* 只认「这一档可见」的卡：被 data-show 规则藏掉的（display:none）不参与
+         首卡排序，否则 4 档下首卡可能落到一张看不见的卡上，整屏空白。 */
+      var list = this.shownCards();
+      var n = list.length;
+      if (!n) return;
+      var focus = ((this.leadIdx % n) + n) % n;
+      var on = this.lead;
+      /* 先把被藏掉的卡上遗留的 lead / order 清干净 */
+      this.cards().forEach(function (el) {
+        if (list.indexOf(el) === -1) {
+          el.classList.remove('libcard--lead', 'is-lead-focus');
+          el.style.order = '';
+        }
+      });
+      list.forEach(function (el, i) {
+        var isLead = on && i === focus;
+        el.classList.toggle('libcard--lead', isLead);
+        el.classList.toggle('is-lead-focus', isLead);
+        el.style.order = on ? String((i - focus + n) % n) : '';
+      });
+      if (!on) return;
+      var card = list[focus];
+      if (!card) return;
+      document.dispatchEvent(new CustomEvent('lj:focus', { detail: { image: card.dataset.image || '' } }));
+      if (card.scrollIntoView) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    },
+    onKey(e) {
+      if (!e || e.defaultPrevented) return;
+      var t = e.target;
+      if (t && t.closest && t.closest('input, textarea, select, [contenteditable]')) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      var fm = window.__focusModalInstance;
+      if (fm && fm.open) return;
+      var code = e.code || '';
+      var key = e.key || '';
+      if (code === 'KeyL' || key === 'l' || key === 'L') {
+        if (this.layout === 'table') return;
+        e.preventDefault();
+        this.toggleLead();
+        return;
+      }
+      if (key === 'ArrowLeft') {
+        if (!this.lead) return;
+        e.preventDefault();
+        this.stepLead(-1);
+      } else if (key === 'ArrowRight') {
+        if (!this.lead) return;
+        e.preventDefault();
+        this.stepLead(1);
+      }
+    },
+    init() {
+      this.lead = this.layout === 'table' ? false : this.readLead();
+      this.genreOpen = this.readGenresOpen();
+      this.applyDensity();
+      this.mountDensityPill();
+      var self = this;
+      this._settle = function () { window.setTimeout(function () { self.syncCards(); }, 0); };
+      document.addEventListener('htmx:afterSettle', this._settle);
+      window.setTimeout(function () { self.syncCards(); }, 0);
+    },
+    destroy() {
+      if (this._settle) document.removeEventListener('htmx:afterSettle', this._settle);
+      this.unmountDensityPill();
+    } }"
+     @keydown.window="onKey($event)">
+
+    <!-- Form to manage state -->
+    <form id="filter-form" class="hidden">
+      <input type="hidden" name="sort" x-model="sort">
+      <input type="hidden" name="status" x-model="status">
+      <input type="hidden" name="search" x-model="search">
+      <input type="hidden" name="layout" x-model="layout">
+      {# 分类筛选：搜索框用 hx-include="#filter-form" 带参，缺了这条搜索一敲分类就丢 #}
+      <input type="hidden" name="genres" value="{{ genres_selected|join:',' }}">
+    </form>
+
+    <div class="flex flex-col md:flex-row gap-4 mb-6">
+      <!-- Search -->
+      <div class="relative grow">
+        <input placeholder="在{% if target_user != request.user %}{{ target_user.username }} 的{% else %}你的{% endif %}列表里搜索{{ media_type_plural }}……"
+               class="w-full py-2 min-h-11 pl-10 pr-4 bg-[#39404b] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-[#4a9eff] appearance-none"
+               type="text"
+               x-model="search"
+               hx-get="{% url 'medialist' target_user.username media_type %}"
+               hx-trigger="keyup changed delay:300ms, search"
+               {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
+               hx-include="#filter-form"
+               hx-indicator="#search-indicator">
+        {% include "app/icons/magnifying-glass.svg" with classes="w-6 h-6 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" %}
+        <div id="search-indicator"
+             class="htmx-indicator absolute right-3 top-1/2 transform -translate-y-1/2">
+          <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-500"></div>
+        </div>
+      </div>
+
+      <div class="flex gap-2 flex-wrap">
+        <!-- Filter by Status -->
+        <div class="relative" x-data="{ open: false }">
+          <button class="flex items-center px-4 py-2 min-h-11 bg-[#39404b] rounded-lg hover:bg-[#454d5a] transition-colors cursor-pointer"
+                  @click="open = !open"
+                  aria-label="按状态筛选"
+                  type="button">
+            {% include "app/icons/funnel.svg" with classes="w-4 h-4 mr-2" %}
+            <span x-text="statusLabels[status] || status" x-cloak></span>
+            {% include "app/icons/chevron-down.svg" with classes="w-4 h-4 ml-2" %}
+          </button>
+
+          <div class="absolute z-10 mt-2 py-1 w-48 bg-[#39404b] rounded-lg shadow-lg overflow-hidden border border-gray-700"
+               x-cloak
+               x-show="open"
+               @click.outside="open = false"
+               x-transition:enter="transition ease-out duration-100"
+               x-transition:enter-start="transform opacity-0 scale-95"
+               x-transition:enter-end="transform opacity-100 scale-100"
+               x-transition:leave="transition ease-in duration-75"
+               x-transition:leave-start="transform opacity-100 scale-100"
+               x-transition:leave-end="transform opacity-0 scale-95">
+            {% for value, label in status_choices %}
+              <button hx-get="{% url 'medialist' target_user.username media_type %}"
+                      {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
+                      hx-include="#filter-form"
+                      hx-indicator="#loading-indicator"
+                      class="block w-full px-4 py-2 min-h-11 text-left text-sm transition-colors cursor-pointer"
+                      :class="status === '{{ value }}' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-300 hover:bg-[#454d5a] hover:text-white'"
+                      @click="status = '{{ value }}'; open = false"
+                      type="button">{{ label }}</button>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Sort by -->
+        <div class="relative" x-data="{ open: false }">
+          <button class="flex items-center px-4 py-2 min-h-11 bg-[#39404b] rounded-lg hover:bg-[#454d5a] transition-colors cursor-pointer"
+                  @click="open = !open"
+                  aria-label="选择排序方式"
+                  type="button">
+            {% include "app/icons/arrows-up-down.svg" with classes="w-4 h-4 mr-2" %}
+            <span x-text="sortLabels[sort] || sort" x-cloak></span>
+            {% include "app/icons/chevron-down.svg" with classes="w-4 h-4 ml-2" %}
+          </button>
+
+          <div class="absolute z-10 mt-2 py-1 w-48 bg-[#39404b] rounded-lg shadow-lg overflow-hidden border border-gray-700"
+               x-cloak
+               x-show="open"
+               @click.outside="open = false"
+               x-transition:enter="transition ease-out duration-100"
+               x-transition:enter-start="transform opacity-0 scale-95"
+               x-transition:enter-end="transform opacity-100 scale-100"
+               x-transition:leave="transition ease-in duration-75"
+               x-transition:leave-start="transform opacity-100 scale-100"
+               x-transition:leave-end="transform opacity-0 scale-95">
+            {% for value, label in sort_choices %}
+              <button hx-get="{% url 'medialist' target_user.username media_type %}"
+                      {% if media_list %} hx-target="{{ layout_class }}" {% else %} hx-target="#empty_list" {% endif %}
+                      hx-include="#filter-form"
+                      hx-indicator="#loading-indicator"
+                      class="block w-full px-4 py-2 min-h-11 text-left text-sm transition-colors cursor-pointer"
+                      :class="sort === '{{ value }}' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-300 hover:bg-[#454d5a] hover:text-white'"
+                      @click="sort = '{{ value }}'; open = false"
+                      type="button">{{ label }}</button>
+            {% endfor %}
+          </div>
+        </div>
+
+        {% comment %}
+          分类筛选（第 3 个下拉）。按钮皮肤照抄「全成就 / 评分」那一对，不另起一套。
+          面板是绝对定位浮层，挂在按钮容器里：展开/收起只改 display，
+          不占文档流，所以 .lib-grid 的高度前后完全一致（硬验收）。
+          每一项都是整页 <a href>（跟密度胶囊一个套路），刻意不用 HTMX：
+          局部替换会跟首卡状态、巨屏挂载点打架。
+          面板刻意不写 role="dialog" —— base.html 的 dialogVisible() 会把
+          任何可见的 role="dialog" 当弹窗并 lockBody()，整页就滚不动了。
+        {% endcomment %}
+        <div class="relative lj-genre-dd"
+             :class="{ 'is-open': genreOpen }"
+             @click.outside="closeGenres()"
+             @keydown.escape.window="closeGenres()">
+          <button class="flex items-center px-4 py-2 min-h-11 bg-[#39404b] rounded-lg hover:bg-[#454d5a] transition-colors cursor-pointer"
+                  @click="toggleGenres()"
+                  :aria-expanded="genreOpen ? 'true' : 'false'"
+                  aria-label="按分类筛选"
+                  type="button">
+            {% include "app/icons/vertical-sliders.svg" with classes="w-4 h-4 mr-2" %}
+            <span>分类</span>
+            {% if genres_selected %}<span class="lj-genre-badge">{{ genres_selected|length }}</span>{% endif %}
+            {% include "app/icons/chevron-down.svg" with classes="w-4 h-4 ml-2 lj-genre-caret" %}
+          </button>
+
+          {% comment %}
+            已选分类的小标签（操作层，走无衬线，不用金句那条左侧竖线）。
+            刻意做成绝对定位浮条、并且不换行只横向滚动：
+            放进文档流会让筛选行换行，把 .lib-grid 整体往下推几十像素。
+          {% endcomment %}
+          {% if genres_selected %}
+            <div class="lj-genre-tags" aria-label="已选分类" x-show="!genreOpen">
+              {% for s in genres_selected %}
+                <a class="lj-genre-tag"
+                   data-genre="{{ s }}"
+                   title="取消「{{ s }}」"
+                   href="?{% if request.GET.search %}search={{ request.GET.search|urlencode }}&{% endif %}{% if request.GET.status %}status={{ request.GET.status|urlencode }}&{% endif %}{% if request.GET.sort %}sort={{ request.GET.sort|urlencode }}&{% endif %}{% if request.GET.layout %}layout={{ request.GET.layout|urlencode }}&{% endif %}{% if request.GET.density %}density={{ request.GET.density|urlencode }}&{% endif %}genres={% for x in genres_selected %}{% if x != s %}{{ x|urlencode }},{% endif %}{% endfor %}">{{ s }}<span class="lj-genre-x" aria-hidden="true">×</span></a>
+              {% endfor %}
+            </div>
+          {% endif %}
+
+          <div class="lj-genre-panel"
+               role="group"
+               aria-label="分类筛选面板"
+               x-show="genreOpen"
+               x-cloak>
+            <div class="lj-genre-head">
+              <b>按分类筛选</b>
+              <small>可多选 · 取并集</small>
+            </div>
+
+            <div class="lj-genre-list">
+              {% for g in genre_options %}
+                {% comment %}
+                  点一项 = 整页跳到「其余已选 + 这一项」。已选的再点一次就把它自己
+                  从列表里剔除（后端会丢掉空的逗号片段，所以多一个尾逗号无害）。
+                {% endcomment %}
+                <a class="lj-genre-row{% if g.name in genres_selected %} is-on{% endif %}"
+                   {% if g.name in genres_selected %}aria-current="true"{% endif %}
+                   data-genre="{{ g.name }}"
+                   href="?{% if request.GET.search %}search={{ request.GET.search|urlencode }}&{% endif %}{% if request.GET.status %}status={{ request.GET.status|urlencode }}&{% endif %}{% if request.GET.sort %}sort={{ request.GET.sort|urlencode }}&{% endif %}{% if request.GET.layout %}layout={{ request.GET.layout|urlencode }}&{% endif %}{% if request.GET.density %}density={{ request.GET.density|urlencode }}&{% endif %}genres={% for x in genres_selected %}{% if x != g.name %}{{ x|urlencode }},{% endif %}{% endfor %}{% if g.name not in genres_selected %}{{ g.name|urlencode }}{% endif %}">
+                  <span class="lj-genre-box" aria-hidden="true"></span>
+                  <span class="lj-genre-name">{{ g.name }}</span>
+                  <span class="lj-genre-num">{{ g.count }}</span>
+                </a>
+              {% empty %}
+                <div class="lj-genre-empty">这个库没有分类。<br>书没有分类体系，面板空着是正常的。</div>
+              {% endfor %}
+            </div>
+
+            <div class="lj-genre-foot">
+              <span>共 {{ genres_total }} 条{% if genres_selected %} · 已选 {{ genres_selected|length }}{% endif %}</span>
+              {% if genres_selected %}
+                <a class="lj-genre-clear" href="{% querystring genres=None %}">清空全部</a>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        {% comment %}
+          已选分类的小标签见上面「分类」按钮容器里的 .lj-genre-tags。
+        {% endcomment %}
+
+        <!-- Layout Toggle + 卡片密度（密度只在 grid 视图下有意义） -->
+        <div class="flex rounded-lg overflow-hidden border border-gray-700">
+          <a :href="`{% url 'medialist' target_user.username media_type %}?${search ? 'search=' + search + '&' : ''}${status !== 'all' ? 'status=' + status + '&' : ''}${sort !== 'score' ? 'sort=' + sort + '&' : ''}layout=grid`"
+             class="p-2 min-h-11 min-w-11 inline-flex items-center justify-center cursor-pointer"
+             :class="layout === 'grid' ? 'bg-indigo-600 text-white' : 'bg-[#39404b] hover:bg-[#454d5a]'"
+             title="Grid View"
+             @click="layout = 'grid'">{% include "app/icons/four-square.svg" with classes="w-5 h-5" %}</a>
+          <a :href="`{% url 'medialist' target_user.username media_type %}?${search ? 'search=' + search + '&' : ''}${status !== 'all' ? 'status=' + status + '&' : ''}${sort !== 'score' ? 'sort=' + sort + '&' : ''}layout=table`"
+             class="p-2 min-h-11 min-w-11 inline-flex items-center justify-center cursor-pointer"
+             :class="layout === 'table' ? 'bg-indigo-600 text-white' : 'bg-[#39404b] hover:bg-[#454d5a]'"
+             title="Table View"
+             @click="layout = 'table'">{% include "app/icons/table.svg" with classes="w-5 h-5" %}</a>
+        </div>
+
+        {% if current_layout != "table" %}
+          {% comment %}
+            P0 教训：每个按钮都必须自带走尺寸的 Tailwind 类（px-3 min-h-11），
+            不能只靠 showcase.css 里那套样式 —— 否则样式没生效时五个按钮会贴成
+            「481216」一团甚至整组看不见。CSS 只做「更好看」的增强。
+          {% endcomment %}
+          {% comment %}
+            顶栏搜索：按用户要求放在密度胶囊左边（同一组里），
+            回车直接进「巨屏 + 关键词」，后端 search 会筛出匹配的游戏，
+            巨屏显示最匹配那一个。只在游戏库出现（其它库没有巨屏）。
+          {% endcomment %}
+          <div id="lj-density-pill"
+               class="lj-density-pill flex rounded-lg overflow-hidden border border-gray-700"
+               role="group"
+               aria-label="卡片密度与巨屏搜索">
+            {% if media_type == "game" %}
+              <form class="lj-tb-search"
+                    method="get"
+                    action="{% url 'medialist' target_user.username media_type %}"
+                    hx-boost="false"
+                    role="search">
+                <input type="hidden" name="layout" value="grid">
+                <input type="hidden" name="density" value="1">
+                <input type="search"
+                       name="search"
+                       value="{{ request.GET.search|default:'' }}"
+                       class="lj-tb-input"
+                       placeholder="巨屏搜游戏"
+                       aria-label="巨屏搜索游戏"
+                       autocomplete="off">
+                <button type="submit" class="lj-tb-btn" aria-label="搜索">{% include "app/icons/magnifying-glass.svg" with classes="w-4 h-4" %}</button>
+              </form>
+            {% endif %}
+            {% comment %}
+              巨屏（density=1，18 条）只给游戏库，而且它是唯一还走服务端的档位：
+              书/影/剧没有横版大图，铺成 100svh 很难看，所以那三类的胶囊里不出现「1」。
+              4 / 8 / 12 / 16 四档全走前端：点一下只改 .lib-grid 的 data-show
+              （CSS 藏掉多余卡片 + 换列数）+ 记进 localStorage，不跳 URL、不发请求。
+              皮肤照抄同排的「并列平铺 / 首卡特写」，两边保持一致。
+            {% endcomment %}
+            {% if media_type == "game" %}
+              <a href="?layout=grid&density=1"
+                 :href="`{% url 'medialist' target_user.username media_type %}?${search ? 'search=' + search + '&' : ''}${status !== 'all' && status !== '全成就' ? 'status=' + encodeURIComponent(status) + '&' : ''}${sort !== 'score' ? 'sort=' + sort + '&' : ''}layout=grid&density=1`"
+                 class="lj-dp-btn px-3 min-h-11 inline-flex items-center justify-center text-sm cursor-pointer"
+                 :class="density === '1' ? 'bg-indigo-600 text-white' : 'bg-[#39404b] hover:bg-[#454d5a] text-gray-300'"
+                 title="巨屏 1 部（整屏，会跳转）">1</a>
+            {% endif %}
+            <button type="button"
+                    class="lj-dp-btn px-3 min-h-11 inline-flex items-center justify-center text-sm cursor-pointer"
+                    :class="density === '4' ? 'bg-indigo-600 text-white' : 'bg-[#39404b] hover:bg-[#454d5a] text-gray-300'"
+                    :aria-pressed="density === '4' ? 'true' : 'false'"
+                    title="大卡 4 张"
+                    @click="setDensity('4')">4</button>
+            <button type="button"
+                    class="lj-dp-btn px-3 min-h-11 inline-flex items-center justify-center text-sm cursor-pointer"
+                    :class="density === '8' ? 'bg-indigo-600 text-white' : 'bg-[#39404b] hover:bg-[#454d5a] text-gray-300'"
+                    :aria-pressed="density === '8' ? 'true' : 'false'"
+                    title="中卡 8 张"
+                    @click="setDensity('8')">8</button>
+            <button type="button"
+                    class="lj-dp-btn px-3 min-h-11 inline-flex items-center justify-center text-sm cursor-pointer"
+                    :class="density === '12' ? 'bg-indigo-600 text-white' : 'bg-[#39404b] hover:bg-[#454d5a] text-gray-300'"
+                    :aria-pressed="density === '12' ? 'true' : 'false'"
+                    title="小卡 12 张"
+                    @click="setDensity('12')">12</button>
+            <button type="button"
+                    class="lj-dp-btn px-3 min-h-11 inline-flex items-center justify-center text-sm cursor-pointer"
+                    :class="density === '16' ? 'bg-indigo-600 text-white' : 'bg-[#39404b] hover:bg-[#454d5a] text-gray-300'"
+                    :aria-pressed="density === '16' ? 'true' : 'false'"
+                    title="最小卡 16 张"
+                    @click="setDensity('16')">16</button>
+          </div>
+
+          {% comment %}
+            并列平铺 / 首卡特写 切换（L 键同效）。皮肤照抄同排的密度胶囊：
+            圆角边框小胶囊 + 选中 bg-indigo-600 text-white，不另起皮肤。
+          {% endcomment %}
+          <div class="flex rounded-lg overflow-hidden border border-gray-700"
+               role="group"
+               aria-label="卡片排布方式">
+            <button type="button"
+                    class="px-3 min-h-11 inline-flex items-center justify-center text-sm cursor-pointer"
+                    :class="lead ? 'bg-[#39404b] hover:bg-[#454d5a] text-gray-300' : 'bg-indigo-600 text-white'"
+                    :aria-pressed="lead ? 'false' : 'true'"
+                    title="并列平铺（一屏不滚）"
+                    @click="setLead(false)">⊞ 并列平铺</button>
+            <button type="button"
+                    class="px-3 min-h-11 inline-flex items-center justify-center text-sm cursor-pointer"
+                    :class="lead ? 'bg-indigo-600 text-white' : 'bg-[#39404b] hover:bg-[#454d5a] text-gray-300'"
+                    :aria-pressed="lead ? 'true' : 'false'"
+                    title="首卡特写（可滚动，L 键切换，← → 换首卡）"
+                    @click="setLead(true)">★ 首卡特写</button>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if not media_list %}
+      <div id="empty_list">
+        {% if request.GET.search or current_status != "All" %}
+          {% include "app/components/empty_state.html" with empty_icon="app/icons/magnifying-glass.svg" empty_title="没有符合条件的条目" empty_description="当前的关键词或状态筛选下一条都没有，不是页面坏了。清掉筛选就能看到全部。" empty_url="?" empty_label="清空筛选" %}
+        {% else %}
+          {% include "app/components/empty_state.html" with empty_icon="app/icons/edit.svg" empty_title="这里还什么都没有" empty_description="开始记录你的条目，留下你的痕迹；如果是第一次用，也可以先去同步 Steam 数据。" empty_url=media_type|sample_search empty_label="去添加条目" %}
+        {% endif %}
+      </div>
+    {% elif current_layout == "grid" %}
+      {% comment %}
+        巨屏挂载点（density=1，只给游戏库）：整屏 100svh 的主视觉 + 底部卡带。
+        下面的 .lib-stage 在巨屏下由 hero.css 藏起来，但那 18 张 .libcard 仍留在
+        DOM 里 —— base.html 的聚焦浮层正是靠 .lib-grid .libcard[data-title] 收数据，
+        所以点封面能直接开浮层，不用另造一套。
+      {% endcomment %}
+      {% if density == "1" %}
+        {% include "app/components/media_hero.html" %}
+      {% endif %}
+      {% comment %}
+        宽屏专用：固定一屏高度 + 超出隐藏，靠两侧箭头翻页（不做窄屏适配）。
+        外层只负责定位和高度，内层 .media-grid 才是真正的卡片网格；
+        搜索/筛选的 hx-target=".media-grid" 指向内层，不会把箭头冲掉。
+      {% endcomment %}
+      <div class="lj-showcase lib-stage"
+           :class="{ 'is-lead': lead }">
+        {% if has_prev_page %}
+          <a class="lib-pager is-prev"
+             href="?layout=grid{% if hero_mode %}&density=1{% endif %}&page={{ prev_page_number }}"
+             aria-label="上一页"
+             title="上一页">
+            {% include "app/icons/chevron-left.svg" with classes="w-5 h-5" %}
+          </a>
+        {% endif %}
+        {% comment %}
+          密度拆成两个属性：
+            data-d    = 这一页实际渲染了几张（固定 16 / 巨屏 18），只当「满档」标识
+            data-show = 当前显示档位（4 / 8 / 12 / 16；巨屏是 1），CSS 按它换列数 + 藏卡
+          翻页链接不再带 density：一页固定 16 条，页码不会因为换密度而变。
+        {% endcomment %}
+        <div class="media-grid lib-grid"
+             data-d="{{ density_data }}"
+             data-show="{{ density }}">
+          {% include "app/components/media_grid_items.html" %}
+        </div>
+        {% if has_next_page %}
+          <a class="lib-pager is-next"
+             href="?layout=grid{% if hero_mode %}&density=1{% endif %}&page={{ next_page_number }}"
+             aria-label="下一页"
+             title="下一页">
+            {% include "app/icons/chevron-right.svg" with classes="w-5 h-5" %}
+          </a>
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="bg-[#2a2f35] p-1 sm:p-4 rounded-lg overflow-hidden overflow-x-auto max-w-[calc(100svw-2rem)] sm:max-w-[calc(100svw-4rem)]">
+        <table class="w-full bg-[#2a2f35]">
+          <thead class="text-left text-gray-400 text-sm">
+            <tr>
+              <th class="p-2 w-15"></th>
+              <th class="p-2 pe-2 sm:pe-8 w-2/5">{% trans "Title" %}</th>
+              {% if show_score_column %}<th class="p-2 text-center">{% trans "Score" %}</th>{% endif %}
+              {% if media_type != MediaTypes.MOVIE.value %}<th class="p-2 text-center whitespace-nowrap">{% trans "Progress" %}</th>{% endif %}
+              {% if media_type == MediaTypes.TV.value %}<th class="p-2 text-center">{% trans "Last Watched" %}</th>{% endif %}
+              <th class="p-2 text-center whitespace-nowrap">{% trans "Status" %}</th>
+              {% if show_start_date_column %}<th class="p-2 text-center hidden sm:table-cell">{% trans "Start Date" %}</th>{% endif %}
+              {% if show_end_date_column %}<th class="p-2 text-center hidden sm:table-cell">{% trans "End Date" %}</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% include "app/components/media_table_items.html" %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+
+    <div id="loading-indicator" class="htmx-indicator text-center h-0 overflow-hidden">
+      <div class="inline-flex justify-center items-center">
+        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500"></div>
+      </div>
+    </div>
+  </div>
+
+  {% comment %}
+    聚焦浮层：整页只有这一个，不在每张卡里复制。
+    数据全部来自卡片上的 data-*（base.html 里的 focusModal() 负责收集）。
+    显隐必须靠 x-show → display:none，不能靠 opacity：
+    base.html 的 dialogVisible() 用 getClientRects() 判断弹窗开没开，
+    盒子还在就会被判成「开着」并把 body 锁死。style="display:none" 只是首帧初值。
+  {% endcomment %}
+  {% if current_layout == "grid" %}
+    <div x-data="focusModal()"
+         x-show="open"
+         @keydown.escape.window="onEsc($event)"
+         @keydown.f.window="onFlip($event)"
+         @keydown.arrow-left.window="onPrev($event)"
+         @keydown.arrow-right.window="onNext($event)"
+         role="dialog"
+         aria-modal="true"
+         aria-label="作品聚焦"
+         data-next-page="{{ next_page_number|default:0 }}"
+         class="lj-showcase lj-modal"
+         style="display:none">
+      <div class="lj-modal-veil" @click="close()"></div>
+
+      <div class="lj-modal-card">
+        <button type="button"
+                class="lj-modal-x"
+                @click="close()"
+                aria-label="关闭（ESC）">✕ <span>ESC</span></button>
+
+        <div class="lj-flip" :class="{ 'is-flipped': flipped }">
+          <!-- 正面 -->
+          <div class="lj-face is-front">
+            <div class="lj-face-inner">
+              <div class="lj-focus-poster">
+                <img :src="cur.imageRelay || cur.image" :alt="cur.title" loading="lazy">
+              </div>
+              <div class="lj-focus-info">
+                <div class="lj-f-num" x-text="numLine"></div>
+                <h2 class="lj-f-title" x-text="cur.title"></h2>
+                <div class="lj-f-en" x-show="cur.titleEn" x-text="cur.titleEn"></div>
+                <div class="lj-f-meta">
+                  <span class="lj-pill" x-show="cur.status" x-text="cur.status"></span>
+                  <span class="lj-hstat" x-show="cur.hours">游玩 <b x-text="cur.hours"></b></span>
+                  <span class="lj-hstat" x-show="cur.achv">成就 <b x-text="cur.achv"></b></span>
+                  <span class="lj-hstat" x-show="cur.cleared">完成 <b x-text="cur.cleared"></b></span>
+                  <span class="lj-hrate" x-show="cur.score">★<span x-text="cur.score"></span><span>/10</span></span>
+                </div>
+                <p class="lj-f-quote" x-show="cur.quote">「<span x-text="cur.quote"></span>」</p>
+                <p class="lj-f-review" x-show="cur.summary" x-text="cur.summary"></p>
+                <div class="lj-f-note" x-show="cur.synopsis">
+                  <b>官方简介</b><span x-text="cur.synopsis"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 背面 -->
+          <div class="lj-face is-back">
+            <div class="lj-face-inner lj-back-inner" :class="{ 'is-noradar': !hasRadar }">
+              <div class="lj-radar-wrap" x-show="hasRadar">
+                <svg viewBox="0 0 200 200" role="img" aria-label="三维雷达">
+                  <polygon points="100,22 167.5,139 32.5,139" fill="none" stroke="currentColor" stroke-opacity=".18" stroke-width="1"/>
+                  <polygon points="100,48.5 144.6,125.7 55.4,125.7" fill="none" stroke="currentColor" stroke-opacity=".12" stroke-width="1"/>
+                  <polygon points="100,74.3 122.3,112.9 77.7,112.9" fill="none" stroke="currentColor" stroke-opacity=".08" stroke-width="1"/>
+                  <line x1="100" y1="100" x2="100" y2="22" stroke="currentColor" stroke-opacity=".14"/>
+                  <line x1="100" y1="100" x2="167.5" y2="139" stroke="currentColor" stroke-opacity=".14"/>
+                  <line x1="100" y1="100" x2="32.5" y2="139" stroke="currentColor" stroke-opacity=".14"/>
+                  <polygon :points="radarPoints" fill="currentColor" fill-opacity=".22"
+                           stroke="currentColor" stroke-opacity=".7" stroke-width="1.5" stroke-linejoin="round"/>
+                  <text x="100" y="14" text-anchor="middle" font-size="10" fill="currentColor" fill-opacity=".75">剧情</text>
+                  <text x="174" y="152" text-anchor="middle" font-size="10" fill="currentColor" fill-opacity=".75">机制</text>
+                  <text x="26" y="152" text-anchor="middle" font-size="10" fill="currentColor" fill-opacity=".75">画面</text>
+                </svg>
+                <div class="lj-radar-cap">Three-Axis</div>
+              </div>
+
+              <div class="lj-back-info">
+                <div class="lj-f-en" x-show="cur.titleEn" x-text="cur.titleEn"></div>
+                <h2 class="lj-back-title" x-text="cur.title"></h2>
+                <div class="lj-archive">
+                  <div><span>类型</span><b x-text="cur.genres || '—'"></b></div>
+                  <div><span>时长</span><b x-text="cur.hours || cur.meta || '—'"></b></div>
+                  <div><span>成就</span><b x-text="cur.achv || '—'"></b></div>
+                  <div><span>完成</span><b x-text="cur.cleared || '—'"></b></div>
+                  <div><span>评分</span><b x-text="cur.score ? ('★ ' + cur.score + ' / 10') : '—'"></b></div>
+                  <div><span>年份</span><b x-text="cur.year || '—'"></b></div>
+                </div>
+                <div class="lj-back-note" x-show="cur.summary">
+                  <em>AI 总结</em><span x-text="cur.summary"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="lj-modal-foot">
+          <button type="button" class="lj-mnav" @click="prev()" aria-label="上一个">‹</button>
+          <span class="lj-m-idx" x-text="indexLabel"></span>
+          <button type="button" class="lj-mnav" @click="next()" aria-label="下一个">›</button>
+          <button type="button" class="lj-mflip" @click="toggle()" aria-label="翻面（F）">⇄ 翻面 · F</button>
+          <a class="lj-mdone" :href="cur.href" aria-label="查看详情">查看详情 ↗</a>
+          <span class="lj-m-hint">← → 切换 · ESC 关闭</span>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+{% endblock content %}
+
+{% block sidebar_own_media %}
+  {% if request.user.is_authenticated %}{{ block.super }}{% endif %}
+{% endblock sidebar_own_media %}
+
+{% block sidebar_external_media_view %}
+  {% if target_user != request.user %}
+    <ul class="space-y-1 mb-6 {% if request.user.is_authenticated %}border-t border-[#2c3136] pt-4{% endif %}">
+      <li>
+        <span class="flex font-bold items-center space-x-3 px-4 py-2 rounded-lg transition-colors duration-200 text-sm text-white">{{ target_user.username }}{% trans "'s Media:" %}</span>
+      </li>
+      {% get_sidebar_media_types target_user as sidebar_media_types %}
+      {% for item in sidebar_media_types %}
+        <li>
+          <a href="{% url 'medialist' username=target_user.username media_type=item.media_type %}"
+             class="flex items-center space-x-3 px-4 py-2 rounded-lg transition-colors duration-200 text-sm {% if media_type == item.media_type %}text-white bg-[#2c3136]{% else %}text-gray-400 hover:text-white hover:bg-[#23272b]{% endif %}">
+            {% icon item.media_type is_active=media_type|str_equals:item.media_type %}
+            <span>{{ item.display_name }}</span>
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+{% endblock sidebar_external_media_view %}
+
+{% block sidebar_utilities %}
+  {% if request.user.is_authenticated %}{{ block.super }}{% endif %}
+{% endblock sidebar_utilities %}
+
+{% block sidebar_logout %}
+  {% if request.user.is_authenticated %}{{ block.super }}{% endif %}
+{% endblock sidebar_logout %}
+
+{% block anonymous_login %}
+  {% if not request.user.is_authenticated %}
+    <div class="p-4 border-t border-[#2c3136] mt-auto">
+      <div class="space-y-2">
+        <a href="{% url 'account_login' %}?next={{ request.path }}"
+           class="mt-4 p-3 rounded-lg w-full flex items-center justify-center gap-2 text-white duration-300 cursor-pointer bg-indigo-600 hover:bg-indigo-700 ">
+          <svg xmlns="http://www.w3.org/2000/svg"
+               width="18"
+               height="18"
+               viewBox="0 0 24 24"
+               fill="none"
+               stroke="currentColor"
+               stroke-width="2"
+               stroke-linecap="round"
+               stroke-linejoin="round">
+            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+            <polyline points="10 17 15 12 10 7"></polyline>
+            <line x1="15" x2="3" y1="12" y2="12"></line>
+          </svg>
+          {% trans "Sign In" %}
+        </a>
+      </div>
+    </div>
+  {% endif %}
+{% endblock anonymous_login %}
+
+{% block search_bar %}
+  {% if request.user.is_authenticated %}{{ block.super }}{% endif %}
+{% endblock search_bar %}

@@ -1,0 +1,76 @@
+__pycache__
+*.pyc
+.env
+.coverage*
+.venv
+src/staticfiles
+site
+src/db/db.sqlite3
+db.sqlite3-shm
+db.sqlite3-wal
+.vscode/launch.json
+.agents
+AGENTS.md
+.claude
+CLAUDE.md
+requests.http
+TODO.txt
+.codex
+.cache
+
+# 本地运行产物（日志/密钥备份/临时脚本），不进版本库
+.env.bak
+.tools/logs/
+.tools/backups/
+.tools/_*.py
+.tools/_*.json
+.tools/*.png
+.tools/archive_scripts/
+*.pid
+
+# 专用 Chrome 配置（存 Steam 登录态，50MB 且含隐私数据），绝不进版本库
+.tools/steam-profile/
+
+# Steam 商店原始抓取数据（68MB / 6693 个 JSON），绝不进版本库
+.tools/raw/
+
+# 临时产物：探测输出、抓取的 html 快照、运行日志（2026-10-25 基线整理）
+.tools/_*
+.tools/*.txt
+.tools/*.html
+.tools/*.log
+.tools/probe_results.json
+.tools/active_nodes.json
+.tools/audit-jobs*.json
+# 临时浏览器配置 / 代理池缓存 / 探测中间数据
+.tools/p3a-chrome/
+.tools/proxy_pool/
+.tools/subraw/
+.tools/ui-probe/
+.tools/ui_backup_*/
+_tmp/
+.env.bak-*
+
+# 2026-10-25 清理出来的历史临时脚本（可还原，不参与构建）
+.tools-archive/
+
+# pytest 会在 src 下留 0 字节临时文件（已知的坑），别让它们混进版本库
+src/tmp*
+tmp/
+*.tmp
+
+# 任何运行日志都不进版本库（含 .tools 之外的，如 .i18nwork/server.log）
+*.log
+
+# 工具自建的缓存目录（各自带 .gitignore，这里再兜一层）
+.pytest_cache/
+.ruff_cache/
+
+# 断点续传的进度文件 + 个人库快照：属于「我自己电脑上的运行产物」，
+# 不是项目代码。别人 clone 下来没有这些文件，脚本会自动从头跑（已验证
+# scripts/progress_cursor.py 对文件缺失是容错的），所以不该跟着仓库走。
+.tools/cn_names_progress.json
+.tools/store_meta_progress.json
+.tools/store_meta_backfill_stats.json
+.tools/scan_headers_progress.json
+.tools/steam_titles_backup.json

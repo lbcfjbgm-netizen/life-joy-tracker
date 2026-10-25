@@ -1,0 +1,480 @@
+/* ==========================================================================
+   hero.css —— 列表页「巨屏模式」（density=1，只给游戏库）
+
+   作用域：所有规则都挂在 .lj-showcase.lj-hero 下，或挂在
+           main#main-content:has(.lj-showcase.lj-hero) 下，别的页面零影响。
+   变量：统一 --lj-hero-* 前缀，不碰 showcase.css 的 --lj-ink / --lj-verm 等。
+   主题：复用站点 html[data-theme]，亮/暗只改遮罩色和卡带兜底色。
+   禁止：没有任何裸元素选择器（body / img / button / h1 一律没有）。
+   ========================================================================== */
+
+/* ---- 0. 根容器：满屏 100svh、底部对齐、内容贴底 --------------------------- */
+.lj-showcase.lj-hero {
+  /* 左侧让开侧栏（展开 256px / 折叠 72px），右侧留安全边距 */
+  --lj-hero-pad-l: calc(256px + clamp(16px, 2vw, 32px));
+  --lj-hero-pad-r: clamp(16px, 2vw, 32px);
+  --lj-hero-pad-t: calc(64px + clamp(6px, 1vh, 14px));
+  --lj-hero-pad-b: clamp(14px, 2.2vh, 26px);
+  --lj-hero-scrim: 33, 37, 41;
+  --lj-hero-ease: cubic-bezier(.22, .8, .24, 1);
+
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  height: 100vh;
+  height: 100svh;
+  /* grid 两行：第 1 行给主区（18 条全叠在 1/1），第 2 行给底部卡带 */
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: stretch;
+  gap: clamp(10px, 1.6vh, 20px);
+  padding: var(--lj-hero-pad-t) var(--lj-hero-pad-r) var(--lj-hero-pad-b) var(--lj-hero-pad-l);
+  overflow: hidden;
+  background: transparent;
+  color: var(--lj-ink);
+}
+html[data-theme="light"] .lj-showcase.lj-hero {
+  --lj-hero-scrim: 245, 241, 232;
+}
+/* 侧栏折叠成 72px 窄条时左边距跟着收，不留一大块空白 */
+html[data-sidebar="collapsed"] .lj-showcase.lj-hero {
+  --lj-hero-pad-l: calc(72px + clamp(16px, 2vw, 32px));
+}
+@media (max-width: 1023px) {
+  .lj-showcase.lj-hero {
+    --lj-hero-pad-l: clamp(16px, 2vw, 32px);
+  }
+}
+
+/* 底部化到纸底：保证文字永远落在干净底色上（背景大图只在上半屏） */
+.lj-showcase.lj-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(to bottom,
+    rgba(var(--lj-hero-scrim), 0) 0%,
+    rgba(var(--lj-hero-scrim), 0) 34%,
+    rgba(var(--lj-hero-scrim), .10) 52%,
+    rgba(var(--lj-hero-scrim), .40) 68%,
+    rgba(var(--lj-hero-scrim), .78) 82%,
+    rgba(var(--lj-hero-scrim), .96) 92%,
+    rgba(var(--lj-hero-scrim), 1) 100%);
+}
+
+/* ---- 1. 背景大图：巨屏自己这一层满屏 cover，不依赖 ambient 的横幅比例 ---- */
+.lj-showcase.lj-hero .lj-hero-bg {
+  display: block;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+/* 背景大图：同样绝对定位叠层，只留 is-on 那一条 */
+.lj-showcase.lj-hero .lj-hero-bg-one {
+  position: absolute;
+  inset: 0;
+  display: none;
+}
+.lj-showcase.lj-hero .lj-hero-bg-one.is-on {
+  display: block;
+}.lj-showcase.lj-hero .lj-hero-bg-one img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* 浓度：巨屏里 JS 调 LJ_AMBIENT.setConcentration(1) → --lj-amb-alpha:1 → 满浓度；
+     离开巨屏设回 null，变量消失，这里 fallback 到 1（巨屏本身就该满图）。 */
+  opacity: var(--lj-amb-alpha, 1);
+  filter: saturate(1.05);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 38%, rgba(0, 0, 0, .86) 56%, rgba(0, 0, 0, .46) 74%, rgba(0, 0, 0, .12) 88%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 38%, rgba(0, 0, 0, .86) 56%, rgba(0, 0, 0, .46) 74%, rgba(0, 0, 0, .12) 88%, transparent 100%);
+}
+.lj-showcase.lj-hero .lj-hero-bg-one.is-none {
+  display: none;
+}
+/* 暗色下压亮度，免得亮图在深夜色底上发白（跟 ambient.css 一个思路） */
+html[data-theme="dark"] .lj-showcase.lj-hero .lj-hero-bg-one img {
+  filter: brightness(.58) saturate(.94);
+}
+
+/* 巨屏期间把 ambient.js 那层横幅藏掉：它按 1920×620 等比铺，铺不满一屏，
+   会跟上面这层满屏图重叠出两张图。浓度照旧由 LJ_AMBIENT.setConcentration(1)
+   写进 --lj-amb-alpha（离开巨屏再设回 null），只是这层不显示。
+   :has() 只在巨屏存在时命中，别的页面、别档位完全不受影响。 */
+html:has(.lj-showcase.lj-hero) .ambient {
+  display: none;
+}
+
+/* ---- 2. 主区：文字贴底 + 右侧竖版封面 ----------------------------------- */
+/* 主区：18 条全部塞进同一个 grid 格子（1/1）叠在一起，靠 display 只留一条。
+   用 grid-area 叠层 + display:none 兜底：哪怕 is-on 漏掉一条也不会互相撑高、
+   不会在文档流里排成 18 层；也绝不会出现「两条同时可见」。 */
+.lj-showcase.lj-hero .lj-hero-main {
+  grid-area: 1 / 1;
+  position: relative;
+  z-index: 2;
+  min-height: 0;
+  min-width: 0;
+  display: none;
+  align-items: flex-end;
+  gap: clamp(18px, 3.2vw, 48px);
+  width: 100%;
+}
+.lj-showcase.lj-hero .lj-hero-main.is-on {
+  display: flex;
+}
+.lj-showcase.lj-hero .lj-hero-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.lj-showcase.lj-hero .lj-hero-kicker {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  font-size: 9.5px;
+  letter-spacing: .24em;
+  color: var(--lj-ink3);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+.lj-showcase.lj-hero .lj-hero-no {
+  color: var(--lj-gold);
+  font-weight: 700;
+  letter-spacing: .16em;
+}
+.lj-showcase.lj-hero .lj-hero-sep {
+  color: var(--lj-line);
+  letter-spacing: 0;
+}
+.lj-showcase.lj-hero .lj-hero-rule {
+  display: inline-block;
+  width: 20px;
+  height: 1px;
+  background: var(--lj-line);
+}
+
+/* 标题：多挂一层 .lj-hero-text，压过 typography.css 里 .lj-serif h2 的 (0,3,1) */
+.lj-showcase.lj-hero .lj-hero-text .lj-hero-title {
+  font-family: var(--lj-serif);
+  font-size: clamp(34px, 4.2vw, 62px);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: .015em;
+  margin: 12px 0 0;
+  color: var(--lj-ink);
+}
+.lj-showcase.lj-hero .lj-hero-en {
+  font-size: clamp(8.5px, .9vw, 10.5px);
+  font-weight: 600;
+  letter-spacing: .32em;
+  color: var(--lj-ink3);
+  text-transform: uppercase;
+  margin-top: 9px;
+}
+
+.lj-showcase.lj-hero .lj-hero-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  font-family: var(--lj-serif);
+  font-size: 11.5px;
+  color: var(--lj-ink2);
+  font-variant-numeric: tabular-nums;
+}
+.lj-showcase.lj-hero .lj-hero-mi {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+.lj-showcase.lj-hero .lj-hero-mi + .lj-hero-mi::before {
+  content: '';
+  display: inline-block;
+  width: 1px;
+  height: 11px;
+  margin: 0 9px;
+  background: var(--lj-line);
+}
+.lj-showcase.lj-hero .lj-hero-mi.is-pill {
+  padding: 2px 9px;
+  margin-right: 9px;
+  border-radius: 999px;
+  border: 1px solid var(--lj-line);
+  font-size: 10px;
+  letter-spacing: .06em;
+}
+.lj-showcase.lj-hero .lj-hero-mi.is-rate {
+  font-family: var(--lj-serif);
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--lj-ink);
+  letter-spacing: .02em;
+}
+.lj-showcase.lj-hero .lj-hero-mi b {
+  color: var(--lj-ink);
+  font-weight: 600;
+}
+
+.lj-showcase.lj-hero .lj-hero-quote {
+  margin: 16px 0 0;
+  padding-left: 13px;
+  border-left: 2px solid var(--lj-verm);
+  font-family: var(--lj-serif);
+  font-size: clamp(12.5px, 1.1vw, 15.5px);
+  line-height: 1.6;
+  color: var(--lj-ink);
+  max-width: 44ch;
+}
+.lj-showcase.lj-hero .lj-hero-syn {
+  margin: 10px 0 0;
+  max-width: 54ch;
+  font-family: var(--lj-serif);
+  font-size: 11px;
+  line-height: 1.78;
+  color: var(--lj-ink2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---- 3. 右侧竖版封面（84~156px，2:3） ----------------------------------- */
+.lj-showcase.lj-hero .lj-hero-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 auto;
+  align-items: stretch;
+}
+.lj-showcase.lj-hero .lj-hero-cover {
+  position: relative;
+  display: block;
+  width: clamp(84px, 10.4vw, 156px);
+  aspect-ratio: 2 / 3;
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--lj-line2);
+  box-shadow: 0 22px 48px -22px rgba(0, 0, 0, .6), 0 2px 6px rgba(0, 0, 0, .18);
+  cursor: pointer;
+  transition: transform .35s var(--lj-hero-ease), box-shadow .35s var(--lj-hero-ease);
+}
+.lj-showcase.lj-hero .lj-hero-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.lj-showcase.lj-hero .lj-hero-cover::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .24), inset 0 0 0 1px rgba(255, 255, 255, .10);
+}
+.lj-showcase.lj-hero .lj-hero-cover-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(var(--lj-hero-scrim), .62);
+  color: #fffcf6;
+  font-size: 9px;
+  letter-spacing: .2em;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .3s var(--lj-hero-ease);
+}
+.lj-showcase.lj-hero .lj-hero-cover:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 30px 60px -22px rgba(0, 0, 0, .66);
+}
+.lj-showcase.lj-hero .lj-hero-cover:hover .lj-hero-cover-mask {
+  opacity: 1;
+}
+.lj-showcase.lj-hero .lj-hero-cover:focus-visible {
+  outline: 2px solid var(--lj-verm);
+  outline-offset: 3px;
+}
+
+.lj-showcase.lj-hero .lj-hero-cap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  font-size: 9px;
+  letter-spacing: .14em;
+  color: var(--lj-ink3);
+  text-transform: uppercase;
+}
+.lj-showcase.lj-hero .lj-hero-cap b {
+  color: var(--lj-ink2);
+  font-weight: 600;
+  letter-spacing: .1em;
+}
+
+/* ---- 4. 底部卡带（3:1 横版缩略图） -------------------------------------
+   Steam 的 library_hero.jpg 实测全是 1920x620（比例 3.097 的宽横幅）。
+   卡带框原来是 16:9（1.778），cover 会把左右各切掉约 43%，人物只剩中间一截。
+   改成 3:1（3.0）后横向裁切降到约 3%，基本等于不裁，仍保持横版观感；
+   宽度按设计稿放大到 156px（窄屏下限 96px），高度自然是 156/3 = 52px。 */
+.lj-showcase.lj-hero .lj-hero-strip {
+  grid-row: 2;
+  grid-column: 1;
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding-right: 104px;
+}
+.lj-showcase.lj-hero .lj-hero-hint {
+  flex: 0 0 auto;
+  font-size: 8.5px;
+  letter-spacing: .18em;
+  color: var(--lj-ink3);
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+.lj-showcase.lj-hero .lj-hero-tape {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 6px 2px;
+  scrollbar-width: none;
+}
+.lj-showcase.lj-hero .lj-hero-tape::-webkit-scrollbar {
+  display: none;
+}
+.lj-showcase.lj-hero .lj-hero-thumb {
+  position: relative;
+  flex: 0 0 auto;
+  /* 156px 是设计稿放大后的定稿值：3:1 下高度 = 156/3 = 52px。
+     9.75vw = 156/1600，保证 1600 宽下正好顶到上限 156px；窄屏退化到下限 96px。 */
+  width: clamp(96px, 9.75vw, 156px);
+  aspect-ratio: 3 / 1;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #2a2f35;
+  opacity: .55;
+  filter: saturate(.7);
+  transition: opacity .28s var(--lj-hero-ease), filter .28s,
+              transform .28s var(--lj-hero-ease), box-shadow .28s;
+}
+.lj-showcase.lj-hero .lj-hero-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* 智能取景：横向居中，纵向略偏上（45%）。3:1 容器配 3.097 的源图时纵向是满幅、
+     横向只裁 3%，这条几乎无感；但万一某张 hero 图是竖版/方图，这条能保住上半身。 */
+  object-position: center 45%;
+}
+.lj-showcase.lj-hero .lj-hero-thumb:hover {
+  opacity: .9;
+  filter: none;
+  transform: translateY(-2px);
+}
+.lj-showcase.lj-hero .lj-hero-thumb.is-cur,
+.lj-showcase.lj-hero .lj-hero-thumb[aria-current="true"] {
+  opacity: 1;
+  filter: none;
+  transform: translateY(-3px);
+  box-shadow: 0 0 0 2px var(--lj-verm), 0 8px 18px rgba(0, 0, 0, .3);
+}
+.lj-showcase.lj-hero .lj-hero-thumb:focus-visible {
+  outline: 2px solid var(--lj-verm);
+  outline-offset: 2px;
+}
+
+/* 没有 library_hero.jpg（约 27% 游戏）：灰底 + 游戏名，绝不破图、绝不塌 */
+.lj-showcase.lj-hero .lj-hero-none {
+  display: none;
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  text-align: center;
+  font-size: 8.5px;
+  line-height: 1.3;
+  letter-spacing: .04em;
+  color: rgba(246, 244, 238, .62);
+  background: linear-gradient(135deg, #3a414c, #2a2f35);
+}
+.lj-showcase.lj-hero .lj-hero-thumb.is-none .lj-hero-none {
+  display: flex;
+}
+.lj-showcase.lj-hero .lj-hero-thumb.is-none img {
+  display: none;
+}
+html[data-theme="light"] .lj-showcase.lj-hero .lj-hero-thumb {
+  background: #e8e0d2;
+}
+html[data-theme="light"] .lj-showcase.lj-hero .lj-hero-none {
+  background: linear-gradient(135deg, #ece5d6, #d9d0bf);
+  color: #4a4436;
+}
+
+/* ---- 5. 翻页箭头挪到卡带右侧（复用 .lib-pager 皮肤） -------------------- */
+.lj-showcase.lj-hero .lib-pager {
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%);
+}
+.lj-showcase.lj-hero .lib-pager.is-prev {
+  left: auto;
+  right: 112px;
+}
+.lj-showcase.lj-hero .lib-pager.is-next {
+  right: 64px;
+}
+.lj-showcase.lj-hero .lib-pager:hover {
+  transform: translateY(-50%);
+}
+
+/* ---- 6. 巨屏存活期间：藏掉原来的网格舞台 + 页面标题 + 筛选控件 -----------   硬约束是「media_list.html 只加 3 处」，所以这些收尾全部交给 :has()：
+   巨屏节点一离开 #main-content，规则自动失效，原页面原样恢复。 */
+main#main-content:has(.lj-showcase.lj-hero) .lj-showcase.lib-stage {
+  display: none;
+}
+main#main-content:has(.lj-showcase.lj-hero) > .container > h1 {
+  display: none;
+}
+/* 搜索框、状态筛选、排序、首卡开关：巨屏下强制收起（离开即恢复） */
+main#main-content:has(.lj-showcase.lj-hero) .relative.grow {
+  display: none;
+}
+main#main-content:has(.lj-showcase.lj-hero) .relative:has(> button[aria-label="按状态筛选"]) {
+  display: none;
+}
+main#main-content:has(.lj-showcase.lj-hero) .relative:has(> button[aria-label="选择排序方式"]) {
+  display: none;
+}
+main#main-content:has(.lj-showcase.lj-hero) [aria-label="卡片排布方式"] {
+  display: none;
+}
+/* 留下的这一行（布局切换 + 密度胶囊）浮在巨屏右上角，且不再占文档高度 */
+main#main-content:has(.lj-showcase.lj-hero) #filter-form + div {
+  position: fixed;
+  top: 74px;
+  right: 18px;
+  z-index: 5;
+  margin: 0;
+}

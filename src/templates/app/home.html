@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% load app_tags %}
+{% load i18n %}
+
+{% block title %}
+  {% trans "Home - Yamtrack" %}
+{% endblock title %}
+
+{% block content %}
+  <div class="space-y-8">
+    <div class="flex flex-col gap-4 sm:grid sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+      <h1 class="text-3xl font-bold sm:col-start-1 sm:justify-self-start">{% trans "Home" %}</h1>
+      <div class="flex flex-wrap items-center justify-center gap-3 sm:col-start-3 sm:justify-self-end">
+        {% comment %}
+        「隐藏未上映」按钮已移除：本库进行中的游戏/书都没有未来事件，
+        这个过滤没有任何作用对象，点了也看不到变化。
+        视图层的 hide_unreleased 参数逻辑保留不动（URL 里带
+        ?hide_unreleased=true 时仍然生效，排序链接也会带上）。
+        {% endcomment %}
+        <div class="relative" x-data="{ open: false }">
+          <button @click="open = !open"
+                  @click.outside="open = false"
+                  class="flex items-center gap-2 rounded-lg border border-gray-700 bg-[#39404b] px-4 py-2 min-h-11 text-sm font-medium text-white transition-colors hover:bg-[#454d5a] cursor-pointer">
+            {% include "app/icons/arrows-up-down.svg" with classes="w-4 h-4" %}
+            <span>{% if current_sort == "upcoming" %}即将上映{% elif current_sort == "recent" %}最近{% elif current_sort == "completion" %}完成度{% elif current_sort == "episodes_left" %}剩余集数{% elif current_sort == "title" %}标题{% else %}{{ current_sort }}{% endif %}</span>
+            {% include "app/icons/chevron-down.svg" with classes="w-4 h-4 text-gray-400" %}
+          </button>
+          <div x-show="open"
+               x-transition:enter="transition ease-out duration-100"
+               x-transition:enter-start="transform opacity-0 scale-95"
+               x-transition:enter-end="transform opacity-100 scale-100"
+               x-transition:leave="transition ease-in duration-75"
+               x-transition:leave-start="transform opacity-100 scale-100"
+               x-transition:leave-end="transform opacity-0 scale-95"
+               class="absolute right-0 z-10 mt-2 w-52 overflow-hidden rounded-lg border border-gray-700 bg-[#39404b] py-1 shadow-lg">
+            {% for value, label in sort_choices %}
+              <a href="{% url 'home' %}?sort={{ value }}{% if hide_unreleased %}&hide_unreleased=true{% endif %}"
+                 class="block w-full px-4 py-2 min-h-11 text-left text-sm transition-colors {% if current_sort == value %}bg-indigo-600 text-white font-medium{% else %}text-gray-300 hover:bg-[#454d5a] hover:text-white{% endif %}">
+                {{ label }}
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="space-y-16">
+      {% for section in home_sections %}
+        {% include "app/components/home_section.html" with section=section %}
+      {% empty %}
+        <div class="flex flex-col items-center justify-center rounded-lg border border-dashed border-gray-700 bg-[#2a2f35] px-6 py-16 text-center">
+          <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#39404b]">
+            {% include "app/icons/eye-closed.svg" with classes="h-8 w-8 text-gray-300" %}
+          </div>
+          <h3 class="text-xl font-semibold text-white">{% trans "All sections are hidden" %}</h3>
+          <p class="mt-2 max-w-md text-sm text-gray-400">
+            {% trans "Every home section is turned off. Open the preferences page and enable In Progress or Planning to see them again." %}
+          </p>
+          <div class="mt-6">
+            <a href="{% url 'preferences' %}"
+               class="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 min-h-11 text-sm font-medium text-white transition-colors hover:bg-indigo-700">
+              {% include "app/icons/settings.svg" with classes="h-4 w-4" %}
+              {% trans "Open preferences" %}
+            </a>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+{% endblock content %}

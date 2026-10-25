@@ -1,0 +1,292 @@
+{% load app_tags %}
+{% load i18n %}
+
+{% comment %}
+  巨屏模式（列表页 density=1，只给游戏库）。
+
+  结构照 ui-redesign/topnav-mockup-v2.html 的 .hero 区块：
+    背景大图 → 左侧文字（序号 / 标题 / 英文名 / 状态·时长·成就·完成·评分 / 金句 / 简介两行）
+    → 右侧竖版封面 → 底部 16:9 横版卡带。
+
+  三条硬约束：
+  1. 不写 <script>：hx-boost 软导航只换 #main-content，换进来的 <script> 不执行。
+     逻辑全部写在下面的 x-data 里，交给 Alpine（base.html 软导航后会重新 initTree）。
+  2. 背景浓度用 window.LJ_AMBIENT（ambient.js 由别的代理维护，只能调不能改）；
+     它没加载好时所有调用都先判空，绝不报错。
+  3. 点封面复用 base.html 已有的 .lj-modal 聚焦浮层（window.__focusModalInstance）。
+     浮层的数据来自页面里那套 .lib-grid .libcard[data-title]（巨屏下它被 CSS 藏起来，
+     只当数据源），所以这里不另造一套、也不改 index 语义。浮层不存在就按 href 跳详情页。
+{% endcomment %}
+
+<div class="lj-showcase lj-hero"
+     x-data="{
+       heroIdx: 0,
+       heroListN: {{ media_list|length }},
+
+       init() {
+         var self = this;
+         // 根节点必须在这里存死：Alpine 的 $el 会随「当前求值的元素」变，
+         // 从卡带按钮的 @click 里调用方法时 this.$el 是那颗按钮，不是巨屏根，
+         // 拿它去 querySelectorAll 会一条都查不到 → 画面停在上一条。
+         this._root = this.$el;
+         // 软导航/局部替换后：重新锁浓度，并把当前条目的背景图再推一次
+         // （ambient.js 自己的 afterSettle 会先按首卡重算，晚 80ms 落回第一条，
+         //   所以这里等它之后再补一次，保证巨屏背景和左侧内容永远同一条）
+         this._onSettle = function () {
+           window.setTimeout(function () { self.ljConcentration(); self.heroPaint(); }, 140);
+         };
+         this._onBeforeSwap = function () {
+           // 离开巨屏这一下（boot 换页前）先把浓度还回默认，防止组件被换掉后没人收尾
+           var amb = window.LJ_AMBIENT;
+           if (amb && amb.setConcentration) amb.setConcentration(null);
+         };
+         document.addEventListener('htmx:afterSettle', this._onSettle);
+         document.addEventListener('htmx:beforeSwap', this._onBeforeSwap);
+         // 键盘直接挂原生 capture 监听，不用 @keydown.arrow-left.window.capture：
+         // Alpine 的键名过滤和修饰符顺序在不同版本里行为不一致，实测会整颗按键丢掉。
+         // 这里在 capture 阶段先吃掉 ← →，再 stopPropagation，外层首卡逻辑收不到。
+         this._onKey = function (e) { self.heroKey(e); };
+         window.addEventListener('keydown', this._onKey, true);
+         this.ljConcentration();
+         this.heroQuietLead();
+         // 首帧一定要有一条可见：模板已经给第 1 条打了 is-on，
+         // 这里再主动刷三次（本帧 / 宏任务 / 200ms），任何加载时机都能收敛到恰好 1 条。
+         this.heroPaint();
+         if (this.$nextTick) this.$nextTick(function () { self.heroPaint(); });
+         window.setTimeout(function () { self.heroPaint(); }, 0);
+         window.setTimeout(function () { self.heroPaint(); }, 200);
+       },
+
+       // 巨屏下把外层那块「首卡特写」关掉（只改内存，不写 localStorage）：
+       // 否则它的 ← → 处理和 lj:focus 广播会跟巨屏抢当前条目和背景图。
+       heroQuietLead() {
+         try {
+           var host = this.$el.parentElement ? this.$el.parentElement.closest('[x-data]') : null;
+           while (host) {
+             var d = window.Alpine && window.Alpine.$data ? window.Alpine.$data(host) : null;
+             if (d && 'lead' in d) { d.lead = false; return; }
+             host = host.parentElement ? host.parentElement.closest('[x-data]') : null;
+           }
+         } catch (err) { /* 拿不到就算了，不影响巨屏本身 */ }
+       },
+
+       destroy() {
+         if (this._onSettle) document.removeEventListener('htmx:afterSettle', this._onSettle);
+         if (this._onBeforeSwap) document.removeEventListener('htmx:beforeSwap', this._onBeforeSwap);
+         if (this._onKey) window.removeEventListener('keydown', this._onKey, true);
+         if (!document.querySelector('.lj-showcase.lj-hero') &&
+             window.LJ_AMBIENT && window.LJ_AMBIENT.setConcentration) {
+           window.LJ_AMBIENT.setConcentration(null);
+         }
+       },
+
+       // 浓度：巨屏还在页面里就锁 1.0，离开立刻还默认值（null = 走页面默认档）
+       ljConcentration() {
+         var amb = window.LJ_AMBIENT;
+         if (!amb || !amb.setConcentration) return;
+         amb.setConcentration(document.querySelector('.lj-showcase.lj-hero') ? 1 : null);
+       },
+
+       heroGo(i) {
+         var n = this.heroListN;
+         if (!n) return;
+         this.heroIdx = ((i % n) + n) % n;
+         this.heroPaint();
+       },
+
+       heroStep(d) { this.heroGo(this.heroIdx + d); },
+
+       heroPaint() {
+         // 根节点用 init 时存下的那个；万一没拿到（极端时序）再兜底查一次。
+         var root = this._root;
+         if (!root || !root.isConnected || !root.classList || !root.classList.contains('lj-hero')) {
+           root = document.querySelector('.lj-showcase.lj-hero');
+           this._root = root;
+         }
+         if (!root) return;
+         var i;
+         // 显隐全部手写（不用 x-show / :class）：
+         // 带 inline display:none 的元素会让 x-show 记住错误初值，切了不显示；
+         // 这里统一按 heroIdx 打 .is-on，样式在 hero.css 里。
+         var slides = root.querySelectorAll('.lj-hero-main');
+         for (i = 0; i < slides.length; i++) slides[i].classList.toggle('is-on', i === this.heroIdx);
+         var bgs = root.querySelectorAll('.lj-hero-bg-one');
+         for (i = 0; i < bgs.length; i++) bgs[i].classList.toggle('is-on', i === this.heroIdx);
+         var thumbs = root.querySelectorAll('.lj-hero-thumb');
+         for (i = 0; i < thumbs.length; i++) {
+           thumbs[i].classList.toggle('is-cur', i === this.heroIdx);
+           thumbs[i].setAttribute('aria-current', i === this.heroIdx ? 'true' : 'false');
+         }
+         var cur = slides[this.heroIdx];
+         var art = cur ? cur.getAttribute('data-art') : '';
+         var amb = window.LJ_AMBIENT;
+         if (amb && amb.setArt) amb.setArt(art || null);
+         var tape = root.querySelector('.lj-hero-tape');
+         if (tape && tape.children[this.heroIdx]) {
+           var th = tape.children[this.heroIdx];
+           tape.scrollLeft = th.offsetLeft - Math.round((tape.clientWidth - th.offsetWidth) / 2);
+         }
+       },
+
+       // 点竖版封面：有浮层就开浮层，没有就按 href 跳详情页（绝不自己造弹窗）
+       heroPick(e) {
+         var fm = window.__focusModalInstance;
+         if (e && e.preventDefault) e.preventDefault();
+         if (fm && fm.root && fm.root.isConnected && fm.collect && fm.show) {
+           fm.collect();
+           fm.show(this.heroIdx);
+           return;
+         }
+         var href = e && e.currentTarget && e.currentTarget.getAttribute('href');
+         if (href) window.location.href = href;
+       },
+
+       // 键盘 ← →：焦点在输入框/下拉里时让路；浮层开着时让给浮层。
+       // 监听用 capture（见下面的 .window.capture），消费掉之后要 stopPropagation，
+       // 免得外层的首卡切换逻辑也收到同一颗按键。
+       heroKey(e) {
+         var t = e && e.target;
+         if (t && t.closest && t.closest('input, textarea, select, [contenteditable]')) return;
+         var fm = window.__focusModalInstance;
+         if (fm && fm.open) return;
+         if (e.ctrlKey || e.metaKey || e.altKey) return;
+         if (e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); this.heroStep(-1); }
+         else if (e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); this.heroStep(1); }
+       }
+     }"
+     aria-label="巨屏模式">
+
+  {% comment %}
+    背景大图（满屏 cover；顶部实、往下渐隐到纸底，见 hero.css 的 ::before）。
+    两级兜底：library_hero.jpg（1920×620，最佳）→ 库里存的 item.image（商店横版
+    header.jpg，460×215）→ 都没有才 is-none 走纯色底 + 光晕。
+    2026 年的新游戏 Steam 还没生成 library_hero.jpg，但 header.jpg 一定在。
+    onerror 里直接改 DOM（不调 Alpine 方法）：软导航换进来的节点的内联处理
+    没有 Alpine 作用域，调 this.xxx() 会直接抛错。
+  {% endcomment %}
+  <div class="lj-hero-bg" aria-hidden="true">
+    {% for media in media_list %}
+      <div class="lj-hero-bg-one{% if forloop.first %} is-on{% endif %}"
+           data-slide-index="{{ forloop.counter0 }}">
+        <img src="{{ media.item.media_id|hero_image|default:media.item.image|relay_image }}"
+             data-fb="{{ media.item.image|relay_image }}"
+             alt=""
+             {% if forloop.counter0 == 0 %}loading="eager"{% else %}loading="lazy"{% endif %}
+             decoding="async"
+             onerror="var f=this.dataset.fb;if(f&&!this.dataset.fbUsed&&this.src.indexOf(f)<0){this.dataset.fbUsed='1';this.classList.add('is-fb');this.src=f}else{this.parentNode.classList.add('is-none')}">
+      </div>
+    {% endfor %}
+  </div>
+
+  {# ---- 主视觉：一条一个条目，只显示 heroIdx 那一条 ---------------------- #}
+  {% for media in media_list %}
+    {% with item=media.item %}
+      <div class="lj-hero-main{% if forloop.first %} is-on{% endif %}"
+           data-slide-index="{{ forloop.counter0 }}"
+           data-art="{{ item.image }}">
+        <div class="lj-hero-text">
+          <div class="lj-hero-kicker">
+            <span class="lj-hero-no">NO.{{ media_list.start_index|add:forloop.counter0|seq_watermark }}</span>
+            <span class="lj-hero-sep">/</span>
+            <span>{{ media_list.paginator.count }} 部</span>
+            <span class="lj-hero-rule"></span>
+            {% if item.release_date %}<span>{{ item.release_date|date:"Y" }}</span>{% endif %}
+            {% if item.release_date and item.genres %}<span class="lj-hero-sep">·</span>{% endif %}
+            {% if item.genres %}<span>{{ item.genres|slice:":2"|join:" · " }}</span>{% endif %}
+          </div>
+
+          <h2 class="lj-hero-title">{{ item.title }}</h2>
+
+          {% if item.title_en and item.title_en != item.title %}
+            <div class="lj-hero-en">{{ item.title_en }}</div>
+          {% endif %}
+
+          <div class="lj-hero-meta">
+            {% if media.status %}
+              <span class="lj-hero-mi is-pill">{{ media.status|media_status_readable }}</span>
+            {% endif %}
+            {% if media.progress %}
+              <span class="lj-hero-mi"><b>{{ media.progress|hours_brief }}h</b>&nbsp;游玩</span>
+            {% endif %}
+            {% if media.achievements_total %}
+              <span class="lj-hero-mi">成就 <b>{{ media.achievements_unlocked }}/{{ media.achievements_total }}</b></span>
+            {% endif %}
+            {% if media.end_date %}
+              <span class="lj-hero-mi">完成 <b>{% if media.completion_estimated %}{{ media.end_date|date:"Y" }}{% else %}{{ media.end_date|date:"Y-m-d" }}{% endif %}</b></span>
+            {% endif %}
+            {% if media.score is not None %}
+              <span class="lj-hero-mi is-rate">★ {{ media.formatted_score }}</span>
+            {% endif %}
+          </div>
+
+          {% if item.ai_copy and item.ai_copy.quote %}
+            <p class="lj-hero-quote">「{{ item.ai_copy.quote }}」</p>
+          {% endif %}
+
+          {% if item.synopsis %}
+            <p class="lj-hero-syn">{{ item.synopsis }}</p>
+          {% endif %}
+        </div>
+
+        <aside class="lj-hero-side">
+          <a class="lj-hero-cover"
+             href="{{ item|media_url }}"
+             @click="heroPick($event)"
+             title="查看详情"
+             aria-label="查看《{{ item.title }}》详情">
+            <img src="{{ item.image|relay_image }}" alt="{{ item.title }} 海报"
+                 {% if forloop.first %}loading="eager"{% else %}loading="lazy"{% endif %} decoding="async">
+            <span class="lj-hero-cover-mask">查看详情</span>
+          </a>
+          <div class="lj-hero-cap">
+            <span>{{ item.genres|slice:":2"|join:" · " }}</span>
+            {% if media.achievements_total %}<b>成就 {{ media.achievements_unlocked }}/{{ media.achievements_total }}</b>{% endif %}
+          </div>
+        </aside>
+      </div>
+    {% endwith %}
+  {% endfor %}
+
+  {% comment %}
+    底部卡带：3:1 横版（源图 library_hero.jpg 实测都是 1920x620 = 3.097 宽横幅，
+    容器做 3:1 几乎不裁；没有 library_hero.jpg 就用 item.image 的 header.jpg
+    （2.14 塞进 3:1 会裁掉左右一些，但比纯灰底好），两级都没有才灰底 + 游戏名。
+  {% endcomment %}
+  <div class="lj-hero-strip">
+    <span class="lj-hero-hint">卡带 · 点击切换</span>
+    <div class="lj-hero-tape">
+      {% for media in media_list %}
+        <button type="button"
+                class="lj-hero-thumb{% if forloop.first %} is-cur{% endif %}"
+                @click="heroGo({{ forloop.counter0 }})"
+                aria-label="切换到《{{ media.item.title }}》">
+          <img src="{{ media.item.media_id|hero_image|default:media.item.image|relay_image }}"
+               data-fb="{{ media.item.image|relay_image }}"
+               alt=""
+               loading="lazy"
+               decoding="async"
+               onerror="var f=this.dataset.fb;if(f&&!this.dataset.fbUsed&&this.src.indexOf(f)<0){this.dataset.fbUsed='1';this.classList.add('is-fb');this.src=f}else{this.parentNode.classList.add('is-none')}">
+          <span class="lj-hero-none">{{ media.item.title }}</span>
+        </button>
+      {% endfor %}
+    </div>
+
+    {# 翻页箭头：沿用站点的 .lib-pager 皮肤，位置由 hero.css 挪到卡带右下角 #}
+    {% if has_prev_page %}
+      <a class="lib-pager is-prev"
+         href="?layout=grid&density=1&page={{ prev_page_number }}"
+         aria-label="上一页"
+         title="上一页">
+        {% include "app/icons/chevron-left.svg" with classes="w-5 h-5" %}
+      </a>
+    {% endif %}
+    {% if has_next_page %}
+      <a class="lib-pager is-next"
+         href="?layout=grid&density=1&page={{ next_page_number }}"
+         aria-label="下一页"
+         title="下一页">
+        {% include "app/icons/chevron-right.svg" with classes="w-5 h-5" %}
+      </a>
+    {% endif %}
+  </div>
+</div>

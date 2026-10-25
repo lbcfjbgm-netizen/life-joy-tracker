@@ -1,0 +1,190 @@
+/* ==========================================================================
+   ambient.css —— 列表页「横版背景大图」环境层（第 1 批：只做背景层）
+
+   作用域：所有规则都挂在 html.lj-ambient-on 下；这个类由 ambient.js 在
+           「确认是列表页 + 首卡能抠到 Steam appid」时才加到 <html> 上。
+           没加类时整份文件一条规则都不生效，其它页面零影响。
+   变量：统一 --lj-amb-* 前缀，不碰站点已有的 --lj-ink3 等变量。
+   主题：复用站点 html[data-theme]，亮色/暗色只改浓度和光晕色。
+   ========================================================================== */
+
+/* ---- 0. 变量与浓度（用户拍板值：亮 0.30 / 暗 0.45） ---------------------- */
+html.lj-ambient-on {
+  --lj-amb-alpha: .45;
+  --lj-amb-alpha-cover: .32;
+  --lj-amb-paper: #212529;
+  --lj-amb-scrim: 33, 37, 41;
+  --lj-amb-glow: 232, 201, 130;
+  --lj-amb-ease: cubic-bezier(.22, .8, .24, 1);
+}
+html.lj-ambient-on[data-theme="light"] {
+  --lj-amb-alpha: .30;
+  --lj-amb-alpha-cover: .26;
+  --lj-amb-paper: #faf7f2;
+  --lj-amb-scrim: 250, 247, 242;
+  --lj-amb-glow: 154, 107, 31;
+}
+
+/* ---- 1. 结构：固定满屏、不接鼠标、压在内容下面 --------------------------- */
+html.lj-ambient-on .ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* 背景图：宽度撑满、高度按 1920×620 原比例自动算（不拉伸、不横向裁切） */
+html.lj-ambient-on .ambient-art {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  opacity: 0;
+  transition: opacity .85s var(--lj-amb-ease), filter .85s var(--lj-amb-ease);
+  will-change: opacity;
+}
+html.lj-ambient-on .ambient-art img {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: saturate(1.06) contrast(1.02);
+  /* 纵向渐隐：顶部实、中下部逐步化到纸底（关键，不许改成横向） */
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 40%, rgba(0,0,0,.88) 56%, rgba(0,0,0,.50) 74%, rgba(0,0,0,.16) 88%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 40%, rgba(0,0,0,.88) 56%, rgba(0,0,0,.50) 74%, rgba(0,0,0,.16) 88%, transparent 100%);
+}
+html.lj-ambient-on .ambient-art.on {
+  opacity: var(--lj-amb-alpha, .30);
+}
+/* 暗色压一点亮度，免得亮图在深色底上发灰 */
+html.lj-ambient-on:not([data-theme="light"]) .ambient-art.on {
+  filter: brightness(.72) saturate(.96);
+}
+/* 图加载失败（约 27% 游戏没有 library_hero.jpg）：整层图藏掉，只留纯色底 + 光晕 */
+html.lj-ambient-on .ambient.no-art .ambient-art {
+  opacity: 0;
+}
+
+/* ---- 1b. 「竖版模式」：书 / 影 / 剧没有横图，拿竖版封面模糊放大铺满 -------- */
+/* 目的只是留一片色块氛围，不追求看清内容。游戏的横版路径完全不受影响。 */
+html.lj-ambient-on .ambient.is-cover .ambient-art {
+  top: 50%;
+  height: 100%;
+  transform: translateY(-50%);
+}
+html.lj-ambient-on .ambient.is-cover .ambient-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* scale 略大于 1：模糊会把画面往内收，放大一点免得四周露白边 */
+  transform: scale(1.12);
+  filter: blur(30px) saturate(1.15) brightness(.90);
+  /* 纵向渐隐保留（横竖两种模式都要），只是收得比横版更快，免得下半截一片死色 */
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 36%, rgba(0,0,0,.80) 52%, rgba(0,0,0,.40) 70%, rgba(0,0,0,.12) 86%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 36%, rgba(0,0,0,.80) 52%, rgba(0,0,0,.40) 70%, rgba(0,0,0,.12) 86%, transparent 100%);
+}
+/* 亮色：模糊后色块本来就重，别再整体压暗（浅纸泛灰会脏）；
+   但封面本身很白时（比如浅色书封）会彻底看不见，所以只压 4% 亮度把色相提出来 */
+html.lj-ambient-on[data-theme="light"] .ambient.is-cover .ambient-art img {
+  filter: blur(30px) saturate(1.18) brightness(.96);
+}
+html.lj-ambient-on[data-theme="light"] .ambient.is-cover .ambient-art.on {
+  opacity: var(--lj-amb-alpha-cover, .26);
+}
+/* 暗色：可以再压一点，免得糊成一块发亮的灰 */
+html.lj-ambient-on:not([data-theme="light"]) .ambient.is-cover .ambient-art.on {
+  opacity: var(--lj-amb-alpha-cover, .32);
+  filter: brightness(.78) saturate(.98);
+}
+
+
+/* 主色光晕 */
+html.lj-ambient-on .ambient-glow {
+  position: absolute;
+  inset: -14%;
+  background: radial-gradient(44% 40% at 46% 33%,
+      rgba(var(--lj-amb-glow), .60) 0%,
+      rgba(var(--lj-amb-glow), .26) 40%,
+      rgba(var(--lj-amb-glow), .06) 62%,
+      transparent 74%);
+  filter: blur(64px) saturate(1.25);
+  opacity: .72;
+  mix-blend-mode: screen;
+}
+html.lj-ambient-on[data-theme="light"] .ambient-glow {
+  inset: -10%;
+  opacity: .20;
+  mix-blend-mode: normal;
+  filter: blur(80px) saturate(1.05);
+  background: radial-gradient(44% 38% at 46% 30%,
+      rgba(var(--lj-amb-glow), .32) 0%,
+      rgba(var(--lj-amb-glow), .12) 52%,
+      transparent 80%);
+}
+
+/* 纵向渐隐到纸底：底部必须和页面底色同色，否则会看到一条硬边 */
+html.lj-ambient-on .ambient-fade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom,
+    rgba(var(--lj-amb-scrim), 0) 0%,
+    rgba(var(--lj-amb-scrim), 0) 26%,
+    rgba(var(--lj-amb-scrim), .10) 44%,
+    rgba(var(--lj-amb-scrim), .42) 60%,
+    rgba(var(--lj-amb-scrim), .80) 76%,
+    rgba(var(--lj-amb-scrim), .97) 88%,
+    var(--lj-amb-paper) 100%);
+}
+html.lj-ambient-on[data-theme="light"] .ambient-fade {
+  background: linear-gradient(to bottom,
+    rgba(var(--lj-amb-scrim), 0) 0%,
+    rgba(var(--lj-amb-scrim), 0) 30%,
+    rgba(var(--lj-amb-scrim), .18) 48%,
+    rgba(var(--lj-amb-scrim), .56) 64%,
+    rgba(var(--lj-amb-scrim), .90) 80%,
+    var(--lj-amb-paper) 93%,
+    var(--lj-amb-paper) 100%);
+}
+
+/* 细颗粒（可选层，只为去掉大色块的「塑料感」） */
+html.lj-ambient-on .ambient-grain {
+  position: absolute;
+  inset: 0;
+  opacity: .045;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ---- 2. 清掉挡在背景前面的不透明底子（否则背景层完全看不见） ------------- */
+/* main.css:3089 把 .bg-[#212529] 覆盖成实色 !important，:3695/:3699 又给这两个
+   容器塞了径向渐变 —— 只在这张列表页上抹掉，别处保持原样。 */
+html.lj-ambient-on body > div.flex.min-h-screen {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+html.lj-ambient-on main#main-content {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+/* 侧栏 aside 故意不动：它自己那层半透明玻璃效果要保留（下半批顶部导航要接它）。 */
+
+/* ---- 3. 关掉左侧 24px 波点装饰层（只关列表页） --------------------------- */
+/* main.css:3674 起的 body > div.flex.min-h-screen::after 是 16rem 固定宽的装饰层，
+   折叠后会溢出到正文。它是 !important 声明，所以这里也必须 !important 才盖得住；
+   主选择器仍挂在 html.lj-ambient-on 下，别的页面不受影响。 */
+html.lj-ambient-on body > div.flex.min-h-screen::after {
+  display: none !important;
+}
+
+/* ---- 4. 全站关闭左侧装饰层 ------------------------------------------------ */
+/* 原第 4 节在这里调 ::after 的三团柔光浓度（暗 .20/.12/.12、亮 .24/.18/.18）
+   和折叠态 opacity: .45。之所以整段删掉：这一整层下面已经全站 display:none，
+   怎么调颜色都不会显示，留着只是死代码。RGB 通道值 main.css 里本来就有，
+   将来若真要恢复氛围，直接删掉下面这条 display:none 即可回头再调。 */
+/* 侧栏已被顶部导航替换（第 3 波），这层 16rem 宽的柔光是给侧栏垫底的，
+   现在没有承载对象，只剩屏幕上一条孤立的彩色竖带（用户报的「左边脏脏的」）。
+   全站统一关掉；main.css 用 !important 声明，这里也必须 !important 才盖得住。
+   只关伪元素装饰，不碰 body / shell / main 的底色，所以页面不会变死白/死黑。 */
+body > div.flex.min-h-screen::after {
+  display: none !important;
+}

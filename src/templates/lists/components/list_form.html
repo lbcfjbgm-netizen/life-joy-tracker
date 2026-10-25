@@ -1,0 +1,76 @@
+{% load widget_tweaks %}
+{% load i18n %}
+
+<div x-show="showModal"
+     x-cloak
+     role="dialog"
+     aria-modal="true"
+     class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+  <div class="bg-[#2a2f35] p-6 rounded-lg w-152 max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-6">
+      <h2 class="text-2xl font-bold">
+        {% if form.instance.pk %}
+          {% trans "Edit List" %}
+        {% else %}
+          {% trans "Create New List" %}
+        {% endif %}
+      </h2>
+      <button @click="showModal = false"
+              aria-label="关闭弹窗"
+              class="text-gray-400 hover:text-white transition-colors cursor-pointer">
+        {% include "app/icons/x.svg" with classes="w-6 h-6" %}
+      </button>
+    </div>
+    <form class="space-y-6" method="post">
+      {% csrf_token %}
+      <input type="hidden" name="list_id" value="{{ custom_list.id }}">
+      {% for field in form %}
+        <div>
+          <label class="block text text-sm font-medium mb-2 text-gray-300">{{ field.label }}</label>
+          {% if field.name != 'collaborators' %}
+            {{ field|add_class:"w-full p-2 bg-[#39404b] rounded-lg text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-[#4a9eff] appearance-none" }}
+          {% else %}
+            {{ field }}
+          {% endif %}
+        </div>
+      {% endfor %}
+
+      {% if form.instance.pk %}
+        {# 保存单独一行、靠右；整表删除另起一区、靠左并加分隔线，避免两个按钮挨在一起误点 #}
+        <div class="flex justify-end mt-6">
+          <button type="submit"
+                  formaction="{% url 'list_edit' %}?next={{ request.path }}"
+                  class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 cursor-pointer">
+            {% trans "Save" %}
+          </button>
+        </div>
+
+        <div class="mt-8 pt-6 border-t border-red-900/60">
+          <p class="text-xs font-semibold uppercase tracking-wide text-red-400 mb-2">{% trans "Danger zone" %}</p>
+          <div class="flex items-start gap-3">
+            <button type="submit"
+                    formaction="{% url 'list_delete' %}?next={{ request.path }}"
+                    {% if custom_list.name %}onclick="return confirm('确定要删除列表「{{ custom_list.name|escapejs }}」及其中的全部条目吗？删除后无法恢复。')"{% else %}onclick="return confirm('确定要删除整个列表及其全部条目吗？此操作无法撤销。')"{% endif %}
+                    class="shrink-0 px-4 py-2 rounded-lg text-sm border transition duration-300 {% if request.user == custom_list.owner %}bg-red-600/10 text-red-400 border-red-600/60 hover:bg-red-600 hover:text-white cursor-pointer{% else %}bg-gray-700/40 text-gray-500 border-gray-600 cursor-not-allowed{% endif %}"
+                    {% if not request.user == custom_list.owner %}disabled{% endif %}>{% trans "Delete" %}</button>
+            <p class="text-xs text-gray-400 pt-2">
+              {% if custom_list.name %}
+                删除整个列表「{{ custom_list.name }}」以及它里面的所有条目，此操作无法撤销。
+              {% else %}
+                删除整个列表以及它里面的所有条目，此操作无法撤销。
+              {% endif %}
+            </p>
+          </div>
+        </div>
+      {% else %}
+        <div class="flex justify-end pt-4">
+          <button type="submit"
+                  formaction="{% url 'list_create' %}?next={{ request.path }}"
+                  class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors cursor-pointer">
+            {% trans "Create List" %}
+          </button>
+        </div>
+      {% endif %}
+    </form>
+  </div>
+</div>

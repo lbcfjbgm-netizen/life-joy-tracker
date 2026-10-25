@@ -1,0 +1,373 @@
+{% load app_tags %}
+{% load i18n %}
+
+{% comment %}
+  横版信息卡（ui-redesign/Gemini-1.html 第 1814 行结构）：
+  左列 2:3 海报 + 右列文字区。只在列表页 grid 视图里用（info_card=True）；
+  统计页/搜索页/详情页等其它地方的引用仍走原来的竖版卡，避免不受样式影响的地方变丑。
+{% endcomment %}
+{% if info_card %}
+  {% comment %}
+    点卡片不再跳详情页：数据全挂在 data-* 上，由列表页那个唯一的聚焦浮层读取。
+    data-index 只是兜底；实际序号由 base.html 的点击代理按 DOM 顺序现算，
+    这样搜索/筛选局部替换掉卡片之后也不会错位。
+  {% endcomment %}
+  <article class="libcard lj-{{ item.media_type }}{% if active %} libcard--active{% endif %}"
+           role="button"
+           tabindex="0"
+           data-title="{{ title|default:item.title }}"
+           data-title-en="{% if item.title_en and item.title_en != item.title %}{{ item.title_en }}{% endif %}"
+           data-year="{% if item.release_date %}{{ item.release_date|date:'Y' }}{% endif %}"
+           data-genres="{{ item.genres|slice:':2'|join:' / ' }}"
+           data-meta="{% if item.media_type == MediaTypes.GAME.value and media.progress %}{{ media.progress|hours_brief }}h 游玩{% elif item.media_type == MediaTypes.MOVIE.value and media.runtime %}{{ media.runtime|hours_brief }}h 时长{% endif %}{% if media.achievements_total %}{% if item.media_type == MediaTypes.GAME.value and media.progress or item.media_type == MediaTypes.MOVIE.value and media.runtime %} · {% endif %}成就 {{ media.achievements_unlocked }}/{{ media.achievements_total }}{% endif %}{% if media.end_date %}{% if media.progress or media.runtime or media.achievements_total %} · {% endif %}完成 {% if media.completion_estimated %}{{ media.end_date|date:'Y' }}{% else %}{{ media.end_date|date:'Y-m-d' }}{% endif %}{% endif %}"
+           data-hours="{% if item.media_type == MediaTypes.GAME.value and media.progress %}{{ media.progress|hours_brief }}h{% elif item.media_type == MediaTypes.MOVIE.value and media.runtime %}{{ media.runtime|hours_brief }}h{% endif %}"
+           data-achv="{% if media.achievements_total %}{{ media.achievements_unlocked }}/{{ media.achievements_total }}{% endif %}"
+           data-cleared="{% if media.end_date %}{% if media.completion_estimated %}{{ media.end_date|date:'Y' }}{% else %}{{ media.end_date|date:'Y-m-d' }}{% endif %}{% endif %}"
+           data-score="{% if media.score is not None %}{{ media.formatted_score }}{% endif %}"
+           data-status="{% if media.status %}{{ media.status|media_status_readable }}{% endif %}"
+           data-quote="{% if item.ai_copy %}{{ item.ai_copy.quote }}{% endif %}"
+           data-summary="{% if item.ai_copy %}{{ item.ai_copy.summary }}{% endif %}"
+           data-synopsis="{{ item.synopsis }}"
+           data-image="{{ item.image }}"
+           data-image-relay="{{ item.image|relay_image }}"
+           data-href="{{ item|media_url }}"
+           data-index="{{ forloop.counter0 }}"
+           data-story="{{ media.story|default_if_none:'' }}"
+           data-mechanic="{{ media.mechanic|default_if_none:'' }}"
+           data-visual="{{ media.visual|default_if_none:'' }}"
+           x-data="{ trackOpen: false, listsOpen: false, historyOpen: false }">
+    <div class="pcard">
+      <a class="block w-full h-full" href="{{ item|media_url }}" tabindex="-1" aria-hidden="true">
+        <img alt="{{ item.title }}"
+             class="lazyload w-full h-full bg-[#3e454d] {% if item.image != IMG_NONE %}object-cover{% endif %}"
+             data-src="{{ item.image|relay_image }}"
+             src="{{ IMG_NONE }}">
+      </a>
+      {% with user=target_user|default:user %}
+        <div class="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 hover-tap:opacity-100{% if user.clickable_media_cards %} pointer-coarse:hidden{% endif %}">
+          {% if request.user == user %}
+            <div class="relative flex items-center justify-center space-x-2.5">
+              {% if item.media_type == MediaTypes.EPISODE.value %}
+                <button @click="trackOpen = true"
+                        aria-label="记录这一集"
+                        class="p-2 min-h-11 min-w-11 inline-flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-full transition-all duration-200 cursor-pointer">
+                  {% if media %}
+                    {% include "app/icons/eye.svg" with classes="w-4 h-4" %}
+                  {% else %}
+                    {% include "app/icons/eye-closed.svg" with classes="w-4 h-4" %}
+                  {% endif %}
+                </button>
+              {% else %}
+                <button class="p-2 min-h-11 min-w-11 inline-flex items-center justify-center bg-indigo-600 text-white rounded-full hover:bg-indigo-500 transition-all duration-200 cursor-pointer"
+                        title="Add to tracker"
+                        aria-label="加入追踪"
+                        hx-get="{% media_view_url 'track_modal' item %}"
+                        hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "instance_id": "{{ media.id }}"}'
+                        hx-target="#{% component_id 'track' item media.id %}"
+                        hx-trigger="click once"
+                        @click="trackOpen = true">{% include "app/icons/edit.svg" with classes="w-4 h-4" %}</button>
+              {% endif %}
+              <button class="p-2 min-h-11 min-w-11 inline-flex items-center justify-center bg-emerald-700 text-white rounded-full hover:bg-emerald-800 transition-all duration-200 cursor-pointer"
+                      title="Add to custom lists"
+                      aria-label="加入自定义列表"
+                      hx-get="{% media_view_url 'lists_modal' item %}"
+                      hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}"}'
+                      hx-target="#{% component_id 'lists' item %}"
+                      hx-trigger="click once"
+                      @click="listsOpen = true">{% include "app/icons/list-add.svg" with classes="w-4 h-4" %}</button>
+              <button class="p-2 min-h-11 min-w-11 inline-flex items-center justify-center bg-amber-600 text-white rounded-full hover:bg-amber-500 transition-all duration-200 cursor-pointer"
+                      title="View your activity history"
+                      aria-label="查看活动历史"
+                      hx-get="{% media_view_url 'history_modal' item %}"
+                      hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}"}'
+                      hx-target="#{% component_id 'history' item %}"
+                      hx-trigger="click once"
+                      @click="historyOpen = true">{% include "app/icons/history.svg" with classes="w-4 h-4" %}</button>
+            </div>
+          {% endif %}
+        </div>
+      {% endwith %}
+    </div>
+
+    <div class="lc-body">
+      <div class="lc-main">
+        <a class="lc-title" href="{{ item|media_url }}" title="{{ title|default:item.title }}">
+          {{ title|default:item.title }}
+          {% if item.title_en and item.title_en != item.title %}<i>{{ item.title_en }}</i>{% endif %}
+        </a>
+
+        {% if item.release_date or item.genres %}
+          <div class="lc-line">
+            {% if item.release_date %}{{ item.release_date|date:"Y" }}{% endif %}
+            {% if item.release_date and item.genres %} · {% endif %}
+            {{ item.genres|slice:":2"|join:" · " }}
+          </div>
+        {% endif %}
+
+        {% with user=target_user|default:user %}
+          {% if media.progress or media.runtime or media.achievements_total or media.end_date %}
+            <div class="lc-line">
+              {% if item.media_type == MediaTypes.GAME.value and media.progress %}
+                <b>{{ media.progress|hours_brief }}h</b> 游玩
+              {% elif item.media_type == MediaTypes.MOVIE.value and media.runtime %}
+                <b>{{ media.runtime|hours_brief }}h</b> 时长
+              {% endif %}
+              {% if media.achievements_total %}
+                {% if item.media_type == MediaTypes.GAME.value and media.progress %} · {% endif %}
+                成就 <b>{{ media.achievements_unlocked }}/{{ media.achievements_total }}</b>
+              {% endif %}
+              {% if media.end_date %}
+                {% if media.progress or media.runtime or media.achievements_total %} · {% endif %}
+                完成
+                {% if media.completion_estimated %}
+                  <b title="记录里只写了 {{ media.end_date|date:'Y' }} 年完成，这是推算的。">{{ media.end_date|date:"Y" }}</b>
+                {% else %}
+                  <b title="完成日期：全部成就解锁的时间（北京时间）">{{ media.end_date|date:"Y-m-d" }}</b>
+                {% endif %}
+              {% endif %}
+            </div>
+          {% endif %}
+
+          {% if media.score|show_media_score:user or media.status %}
+            <div class="lc-row">
+              {% if media.score|show_media_score:user %}
+                <span class="lc-rate">★ {{ media.formatted_score }}</span>
+              {% endif %}
+              {% if media.status %}<span class="lc-state">{{ media.status|media_status_readable }}</span>{% endif %}
+            </div>
+          {% endif %}
+        {% endwith %}
+      </div>
+
+      {% if item.ai_copy or item.synopsis %}
+        <div class="lc-extra">
+          {% if item.ai_copy %}
+            {% if item.ai_copy.quote %}<span class="lc-quote">「{{ item.ai_copy.quote }}」</span>{% endif %}
+            {% if item.ai_copy.summary %}<span class="lc-ai-summary">{{ item.ai_copy.summary }}</span>{% endif %}
+          {% elif item.synopsis %}
+            <span class="lc-review"><b>简介</b>{{ item.synopsis|truncatechars:60 }}</span>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+
+    {% comment %}
+      首卡特写右下角的大号序号水印（只有列表页 grid 首卡会显示）。
+      编号 = 本页第一条的全局序号 + 本卡在本页里的位置，四类（书/影/剧/游）各自
+      用自己的 media_list.start_index，天然独立、不串号；纯数字，交给 seq_watermark 补零。
+      并列平铺模式下由 CSS 置 display:none，视觉不可见。
+    {% endcomment %}
+    {% if media_list %}
+      <span class="lc-ghost" aria-hidden="true">{{ media_list.start_index|add:forloop.counter0|seq_watermark }}</span>
+    {% endif %}
+
+    {% if item.media_type == MediaTypes.EPISODE.value %}
+      {% include "app/components/fill_track_episode.html" with request=request media=item episode=item episode_title=item.title csrf_token=csrf_token TRACK_TIME=TRACK_TIME only %}
+    {% else %}
+      <div x-show="trackOpen"
+           @keydown.escape.window="trackOpen = false"
+           role="dialog"
+           aria-modal="true"
+           class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="w-152 max-h-[90vh] px-4 md:px-0 relative z-60">
+          <div id="{% component_id 'track' item media.id %}"></div>
+        </div>
+      </div>
+    {% endif %}
+
+    <div x-show="listsOpen"
+         @keydown.escape.window="listsOpen = false"
+         role="dialog"
+         aria-modal="true"
+         class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="w-96 max-h-[90vh] px-4 md:px-0 relative z-60">
+        <div id="{% component_id 'lists' item %}"></div>
+      </div>
+    </div>
+
+    <div x-show="historyOpen"
+         @keydown.escape.window="historyOpen = false"
+         role="dialog"
+         aria-modal="true"
+         class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="w-96 max-h-[90vh] px-4 md:px-0 relative z-60">
+        <div id="{% component_id 'history' item %}"></div>
+      </div>
+    </div>
+  </article>
+{% else %}
+  {# 其它页面（搜索 / 统计 / 详情页选季）沿用原来的竖版卡，行为完全不变 #}
+  <div class="lj-card lj-{{ item.media_type }} {% if secondary_color %}bg-[#39404b]{% else %}bg-[#2a2f35]{% endif %} rounded-lg overflow-hidden shadow-lg relative {% if active %}ring-[1.5px] ring-slate-400{% endif %}"
+       x-data="{ trackOpen: false, listsOpen: false, historyOpen: false }">
+    <div class="relative">
+      <a class="lj-poster block" href="{{ item|media_url }}">
+        <img alt="{{ title }}"
+             class="lazyload w-full {% if from_grid %}aspect-2/3{% else %}h-48{% endif %} bg-[#3e454d] {% if item.image != IMG_NONE %}object-cover{% endif %}"
+             data-src="{{ item.image|relay_image }}"
+             src="{{ IMG_NONE }}">
+      </a>
+      {% with user=target_user|default:user %}
+        {% if media.status %}
+          <div class="absolute top-2 left-2 bg-gray-900/90 text-white text-xs px-2 py-1 rounded-lg flex items-center shadow-md">
+            {% if media.status|status_config %}
+              <div class="w-4 h-4 {{ media.status|status_color }} {% if media.start_date or media.end_date %}mr-1.5{% endif %}">
+                {% include media.status|status_icon %}
+              </div>
+            {% endif %}
+            {% if media.end_date is not None %}
+              {% if media.completion_estimated %}
+                <span class="text-sm text-white"
+                      title="这是推算的，不是精确时间：记录里只写了 {{ media.end_date|date:'Y' }} 年完成。"
+                      aria-label="推算的完成年份：{{ media.end_date|date:'Y' }} 年，不是精确日期">
+                  {{ media.end_date|date:"Y" }}<span class="text-gray-400 text-xs ml-0.5">约</span>
+                </span>
+              {% else %}
+                <span class="text-sm text-white">{{ media.end_date|date_format:user }}</span>
+              {% endif %}
+            {% elif media.start_date is not None %}
+              <span class="text-sm text-white">{{ media.start_date|date_format:user }}</span>
+            {% endif %}
+          </div>
+        {% endif %}
+
+        {% if media.score|show_media_score:user %}
+          <div class="absolute {% if from_grid %}sm:top-2 sm:right-2 sm:left-auto{% endif %} top-10 left-2 bg-gray-900/90 text-white text-xs px-2 py-1 rounded-lg flex items-center shadow-md">
+            {% include "app/icons/star.svg" with classes="w-4 h-4 text-yellow-400 mr-1 fill-current" %}
+            <span class="text-sm text-white">{{ media.formatted_score }}</span>
+          </div>
+        {% endif %}
+      {% endwith %}
+
+      {% if media.progress and media_type != MediaTypes.MOVIE.value %}
+        <div class="absolute bottom-2 left-2 bg-gray-900/90 text-white text-xs px-2 py-1 rounded-lg flex items-center shadow-md">
+          <span class="text-sm text-white">
+            {{ media.formatted_progress }}
+            {% if media.max_progress %}/ {{ media.max_progress }}{% endif %}
+          </span>
+        </div>
+      {% endif %}
+
+      {% if media.repeats > 1 %}
+        <div class="absolute bottom-20 left-2 sm:bottom-10 sm:right-2 sm:left-auto bg-gray-900/90 text-white text-xs px-2 py-1 rounded-lg flex items-center shadow-md">
+          {% include "app/icons/repeat.svg" with classes="w-4 h-4 text-slate-200 mr-1" %}
+          <span class="text-sm text-white">{{ media.repeats }}</span>
+        </div>
+      {% endif %}
+
+      {% if media.achievements_total or media.is_all_achievements %}
+        <div class="absolute bottom-2 right-2 max-sm:bottom-11 max-sm:left-2 max-sm:justify-center bg-gray-900/90 text-white text-xs px-2 py-1 rounded-lg flex items-center shadow-md"
+             title="{% trans 'Achievements' %}{% if media.is_all_achievements %}（全成就）{% endif %}">
+          {% include "app/icons/trophy.svg" with classes="w-4 h-4 text-amber-400 mr-1" %}
+          {% if media.achievements_total %}
+            <span class="text-sm text-white">{{ media.achievements_unlocked }}/{{ media.achievements_total }}</span>
+          {% endif %}
+          {% if media.is_all_achievements %}
+            <span class="{% if media.achievements_total %}ml-1.5 pl-1.5 border-l border-white/30 {% endif %}text-xs font-medium text-amber-300">全成就</span>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      {% with user=target_user|default:user %}
+        <div class="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 hover-tap:opacity-100{% if user.clickable_media_cards %} pointer-coarse:hidden{% endif %}">
+          <a href="{{ item|media_url }}"
+             aria-hidden="true"
+             tabindex="-1"
+             class="absolute inset-0"></a>
+          {% if request.user == user %}
+            <div class="relative flex items-center justify-center space-x-2.5">
+              {% if item.media_type == MediaTypes.EPISODE.value %}
+                <button @click="trackOpen = true"
+                        aria-label="记录这一集"
+                        class="p-2.5 min-h-11 min-w-11 inline-flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-full transition-all duration-200 cursor-pointer">
+                  {% if media %}
+                    {% include "app/icons/eye.svg" with classes="w-4 h-4" %}
+                  {% else %}
+                    {% include "app/icons/eye-closed.svg" with classes="w-4 h-4" %}
+                  {% endif %}
+                </button>
+              {% else %}
+                <button class="p-2.5 min-h-11 min-w-11 inline-flex items-center justify-center bg-indigo-600 text-white rounded-full hover:bg-indigo-500 transition-all duration-200 cursor-pointer"
+                        title="Add to tracker"
+                        aria-label="加入追踪"
+                        hx-get="{% media_view_url 'track_modal' item %}"
+                        hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "instance_id": "{{ media.id }}"}'
+                        hx-target="#{% component_id 'track' item media.id %}"
+                        hx-trigger="click once"
+                        @click="trackOpen = true">{% include "app/icons/edit.svg" with classes="w-4 h-4" %}</button>
+              {% endif %}
+              <button class="p-2.5 min-h-11 min-w-11 inline-flex items-center justify-center bg-emerald-700 text-white rounded-full hover:bg-emerald-800 transition-all duration-200 cursor-pointer"
+                      title="Add to custom lists"
+                      aria-label="加入自定义列表"
+                      hx-get="{% media_view_url 'lists_modal' item %}"
+                      hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}"}'
+                      hx-target="#{% component_id 'lists' item %}"
+                      hx-trigger="click once"
+                      @click="listsOpen = true">{% include "app/icons/list-add.svg" with classes="w-4 h-4" %}</button>
+              <button class="p-2.5 min-h-11 min-w-11 inline-flex items-center justify-center bg-amber-600 text-white rounded-full hover:bg-amber-500 transition-all duration-200 cursor-pointer"
+                      title="View your activity history"
+                      aria-label="查看活动历史"
+                      hx-get="{% media_view_url 'history_modal' item %}"
+                      hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}"}'
+                      hx-target="#{% component_id 'history' item %}"
+                      hx-trigger="click once"
+                      @click="historyOpen = true">{% include "app/icons/history.svg" with classes="w-4 h-4" %}</button>
+            </div>
+          {% endif %}
+        </div>
+      {% endwith %}
+    </div>
+
+    <div class="p-3">
+      <a href="{{ item|media_url }}"
+         class="block min-h-11 py-1.5 text-sm font-semibold text-white hover:text-indigo-400 transition duration-300 line-clamp-2"
+         title="{{ title }}">{{ title }}</a>
+      {% if item.release_date %}
+        <div class="text-xs text-gray-400 mt-1">{{ item.release_date|date:"Y" }}</div>
+      {% endif %}
+      {% if item.genres %}
+        <div class="flex flex-wrap gap-1 mt-1.5">
+          {% for genre in item.genres|slice:":2" %}
+            <span class="px-1.5 py-0.5 bg-violet-600/25 text-violet-200 rounded text-[0.65rem] leading-tight">{{ genre }}</span>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+
+    {% if item.media_type == MediaTypes.EPISODE.value %}
+      {% include "app/components/fill_track_episode.html" with request=request media=item episode=item episode_title=title csrf_token=csrf_token TRACK_TIME=TRACK_TIME only %}
+    {% else %}
+      <div x-show="trackOpen"
+           @keydown.escape.window="trackOpen = false"
+           role="dialog"
+           aria-modal="true"
+           class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="w-152 max-h-[90vh] px-4 md:px-0 relative z-60">
+          <div id="{% component_id 'track' item media.id %}"></div>
+        </div>
+      </div>
+    {% endif %}
+
+    <div x-show="listsOpen"
+         @keydown.escape.window="listsOpen = false"
+         role="dialog"
+         aria-modal="true"
+         class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="w-96 max-h-[90vh] px-4 md:px-0 relative z-60">
+        <div id="{% component_id 'lists' item %}"></div>
+      </div>
+    </div>
+
+    <div x-show="historyOpen"
+         @keydown.escape.window="historyOpen = false"
+         role="dialog"
+         aria-modal="true"
+         class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="w-96 max-h-[90vh] px-4 md:px-0 relative z-60">
+        <div id="{% component_id 'history' item %}"></div>
+      </div>
+    </div>
+    {% with user=target_user|default:user %}
+      {% include "app/components/progress_bar.html" with media=media user=user only %}
+    {% endwith %}
+  </div>
+{% endif %}

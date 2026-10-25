@@ -1,0 +1,118 @@
+{% load app_tags %}
+{% load i18n %}
+
+{% for media in media_list %}
+  <tr class="hover:bg-[#39404b] transition-colors cursor-pointer hover-tap"
+      x-data="{ trackOpen: false }"
+      {% if forloop.last and media_list.has_next %} hx-get="{% url 'medialist' target_user.username media_type %}?page={{ media_list.next_page_number }}" hx-trigger="revealed threshold:200px" hx-swap="afterend" hx-include="#filter-form" hx-indicator="#loading-indicator" {% endif %}>
+    <td class="p-2 relative">
+      <img alt="{{ media.item }}"
+           class="lazyload min-w-10 w-10 h-10 object-cover rounded-lg {% if request.user == target_user %}parent-hover-tap:hidden{% endif %}"
+           data-src="{{ media.item.image|relay_image }}"
+           src="{{ IMG_NONE }}">
+      {% if request.user == target_user %}
+        <button class="w-10 h-10 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors items-center justify-center hidden cursor-pointer parent-hover-tap:flex"
+                aria-label="编辑这条记录"
+                hx-get="{% media_view_url 'track_modal' media.item %}"
+                hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "instance_id": "{{ media.id }}"}'
+                hx-target="#{% component_id 'track' media.item media.id %}"
+                hx-trigger="click once"
+                @click="trackOpen = true">{% include "app/icons/edit.svg" with classes="w-4 h-4" %}</button>
+
+        {# Track Modal #}
+        <div x-show="trackOpen"
+             @keydown.escape.window="trackOpen = false"
+             role="dialog"
+             aria-modal="true"
+             class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div class="w-152 max-h-[90vh] px-4 md:px-0 relative z-60">
+            <div id="{% component_id 'track' media.item media.id %}"></div>
+          </div>
+        </div>
+      {% endif %}
+    </td>
+    <td class="p-2 pe-2 sm:pe-8 font-medium">
+      <div class=" flex justify-between items-center">
+        <a href="{{ media.item|media_url }}"
+           class="inline-flex items-center min-h-11 hover:text-indigo-400 transition-colors line-clamp-1">{{ media.item }}</a>
+
+        {% comment %}
+          奖杯格只放「解锁数/总数」，不再重复写「全成就」——
+          同一行的状态列已经显示「全成就」了（见下面 status 那一格），
+          两处都写会在同一行出现两次。没有成就清单的不显示格子，避免只剩一个空奖杯。
+        {% endcomment %}
+        {% if media.achievements_total %}
+          <div class="flex items-center ml-2 shrink-0 max-sm:hidden"
+               title="{% trans 'Achievements' %}">
+            {% include "app/icons/trophy.svg" with classes="w-4 h-4 text-amber-400 mr-1" %}
+            <span class="text-sm text-white">{{ media.achievements_unlocked }}/{{ media.achievements_total }}</span>
+          </div>
+        {% endif %}
+
+        {% if media.repeats > 1 %}
+          <div class="flex items-center">
+            {% include "app/icons/repeat.svg" with classes="w-4 h-4 text-slate-200 mr-1" %}
+            <span class="text-sm text-white">{{ media.repeats }}</span>
+          </div>
+        {% endif %}
+      </div>
+    </td>
+    {% if show_score_column %}
+      {% if media.score is not None %}
+        <td class="p-2 text-center">
+          <div class="flex items-center justify-center">
+            {% include "app/icons/star.svg" with classes="w-4 h-4 text-yellow-400 mr-1 fill-current" %}
+            <span class="text-white -mt-0.75">{{ media.formatted_score }}</span>
+          </div>
+        </td>
+      {% else %}
+        <td class="p-2 text-center">
+          <div class="flex items-center justify-center">
+            {% include "app/icons/star.svg" with classes="w-4 h-4 text-gray-400 mr-1 fill-current" %}
+          </div>
+        </td>
+      {% endif %}
+    {% endif %}
+
+    {# Progress field #}
+    {% if media_type != MediaTypes.MOVIE.value %}
+      <td class="p-2 text-center sm:whitespace-nowrap">
+        {{ media.formatted_progress }}
+        {% if media.max_progress %}/ {{ media.max_progress }}{% endif %}
+      </td>
+      {% if media_type == MediaTypes.TV.value %}<td class="p-2 text-center">{{ media.last_watched }}</td>{% endif %}
+    {% endif %}
+
+    <td class="p-2 text-center whitespace-nowrap">{{ media|media_status_readable }}</td>
+
+    {% if show_start_date_column %}
+      {% if media.start_date %}
+        <td class="p-2 text-center hidden sm:table-cell">{{ media.start_date|date_format:target_user }}</td>
+      {% else %}
+        <td class="p-2 text-center hidden sm:table-cell">
+          <span class="text-gray-500">-</span>
+        </td>
+      {% endif %}
+    {% endif %}
+
+    {% if show_end_date_column %}
+      {% if media.end_date %}
+        {% comment %}
+          列表页的结束日期列：推算值只写年份 + （推算），真实解锁时间照旧显示完整日期。
+        {% endcomment %}
+        {% if media.completion_estimated %}
+          <td class="p-2 text-center hidden sm:table-cell"
+              title="这是推算的，不是精确时间：记录里只写了 {{ media.end_date|date:'Y' }} 年完成。">
+            {{ media.end_date|date:"Y" }} 年<span class="text-gray-500 text-xs ml-1">（推算）</span>
+          </td>
+        {% else %}
+          <td class="p-2 text-center hidden sm:table-cell">{{ media.end_date|date_format:target_user }}</td>
+        {% endif %}
+      {% else %}
+        <td class="p-2 text-center hidden sm:table-cell">
+          <span class="text-gray-500">-</span>
+        </td>
+      {% endif %}
+    {% endif %}
+  </tr>
+{% endfor %}

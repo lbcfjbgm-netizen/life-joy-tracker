@@ -1,0 +1,133 @@
+{% load app_tags %}
+
+{% for media in media_list.items %}
+  {% component_id 'track' media.item media.id as track_component_id %}
+  {% component_id 'lists' media.item as lists_component_id %}
+  {% component_id 'history' media.item as history_component_id %}
+  <div id="home-media-{{ media.item.media_type }}-{{ media.id }}"
+       class="bg-[#2a2f35] rounded-lg overflow-hidden shadow-lg transition-all duration-300"
+       x-data="{ trackOpen: false, listsOpen: false, historyOpen: false, cardMenuOpen: false }">
+    <div class="relative">
+      <a href="{{ media.item|media_url }}">
+        <img alt="{{ media }}"
+             class="lazyload w-full aspect-2/3 {% if media.item.image != IMG_NONE %}object-cover{% endif %}"
+             data-src="{{ media.item.image|relay_image }}"
+             src="{{ IMG_NONE }}">
+      </a>
+
+      {% if media.next_event and not media.next_event.is_max_datetime %}
+        <div class="absolute top-2 left-1/2 flex max-w-[98%] -translate-x-1/2 items-center gap-1.5 rounded-lg bg-black/80 px-2 py-1.5 shadow-md whitespace-nowrap">
+          {% if home_status == Status.PLANNING.value %}
+            {% include "app/icons/clock.svg" with classes="w-3.5 h-3.5 text-sky-400" %}
+          {% else %}
+            {% include "app/icons/clock.svg" with classes="w-3.5 h-3.5 text-indigo-400" %}
+          {% endif %}
+          <span class="text-xs font-medium text-white drop-shadow-sm truncate">
+            {% if media.next_event.content_number %}
+              {{ media.item.media_type|short_unit }}{{ media.next_event.content_number }} •
+            {% endif %}
+            {{ media.next_event.datetime|natural_day:user }}
+          </span>
+        </div>
+      {% endif %}
+
+      <div class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 hover-tap:opacity-100{% if user.clickable_media_cards %} pointer-coarse:hidden{% endif %}">
+        <a href="{{ media.item|media_url }}"
+           aria-hidden="true"
+           tabindex="-1"
+           class="absolute inset-0 z-0"></a>
+
+        <div class="relative z-10 flex items-center justify-center space-x-2.5">
+          <button class="cursor-pointer rounded-full bg-indigo-600 p-2.5 min-h-11 min-w-11 inline-flex items-center justify-center text-white transition-all duration-200 hover:scale-110 hover:bg-indigo-500 hover:shadow-[0_0_15px_rgba(99,102,241,0.5)]"
+                  title="Add to tracker"
+                  aria-label="加入追踪"
+                  hx-get="{% media_view_url 'track_modal' media.item %}"
+                  hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "instance_id": "{{ media.id }}"}'
+                  hx-target="#{{ track_component_id }}"
+                  hx-trigger="click once"
+                  @click="trackOpen = true">{% include "app/icons/edit.svg" with classes="w-4 h-4" %}</button>
+
+          <button class="cursor-pointer rounded-full bg-emerald-700 p-2.5 min-h-11 min-w-11 inline-flex items-center justify-center text-white transition-all duration-200 hover:scale-110 hover:bg-emerald-800 hover:shadow-[0_0_15px_rgba(16,185,129,0.5)]"
+                  title="Add to custom lists"
+                  aria-label="加入自定义列表"
+                  hx-get="{% media_view_url 'lists_modal' media.item %}"
+                  hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}"}'
+                  hx-target="#{{ lists_component_id }}"
+                  hx-trigger="click once"
+                  @click="listsOpen = true">{% include "app/icons/list-add.svg" with classes="w-4 h-4" %}</button>
+
+          <button class="cursor-pointer rounded-full bg-amber-600 p-2.5 min-h-11 min-w-11 inline-flex items-center justify-center text-white transition-all duration-200 hover:scale-110 hover:bg-amber-500 hover:shadow-[0_0_15px_rgba(245,158,11,0.5)]"
+                  title="View your activity history"
+                  aria-label="查看活动历史"
+                  hx-get="{% media_view_url 'history_modal' media.item %}"
+                  hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}"}'
+                  hx-target="#{{ history_component_id }}"
+                  hx-trigger="click once"
+                  @click="historyOpen = true">{% include "app/icons/history.svg" with classes="w-4 h-4" %}</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="p-3">
+      <a href="{{ media.item|media_url }}"
+         class="line-clamp-1 block min-h-11 py-3 text-center text-sm font-semibold text-white transition duration-300 {% if home_status == Status.PLANNING.value %}hover:text-sky-400{% else %}hover:text-indigo-400{% endif %}"
+         title="{{ media }}">{{ media }}</a>
+    </div>
+
+    {% if home_status == Status.PLANNING.value %}
+      {% if user.progress_bar %}<div class="h-1.25 {{ Status.PLANNING.value|status_background_color }}"></div>{% endif %}
+
+      {# 已暂停（含原来的计划中）：没有 +/- 按钮，只留一行轻量信息（状态 + 时长，有才显示），保持卡片干净 #}
+      <div class="flex min-w-0 items-center gap-1.5 px-2 pb-3 pt-2 sm:px-3">
+        {% if media.progress %}
+          <div class="flex min-w-0 flex-1 items-center gap-1 text-[11px] font-medium text-sky-400 sm:text-xs">
+            {% include "app/icons/clock.svg" with classes="w-3.5 h-3.5 shrink-0" %}
+            <span class="truncate">{{ media.formatted_progress }}</span>
+          </div>
+        {% else %}
+          <span class="flex-1"></span>
+        {% endif %}
+        <span class="flex shrink-0 items-center gap-1 rounded-md bg-gray-700/80 px-1 py-0.5 text-xs {{ Status.PLANNING.value|status_color }}"
+              title="{{ Status.PLANNING.value|media_status_readable }}">
+          <span class="h-3 w-3">{% include Status.PLANNING.value|status_icon %}</span>
+          {# 窄屏只留图标，把宽度让给时长；文字在 title 里仍可悬停查看 #}
+          <span class="hidden sm:inline">{{ Status.PLANNING.value|media_status_readable }}</span>
+        </span>
+      </div>
+    {% else %}
+      <div id="progress-{{ media.item.media_type }}-{{ media.id }}">
+        {% include "app/components/progress_changer.html" with media=media user=user csrf_token=csrf_token MediaTypes=MediaTypes home_status=home_status Status=Status only %}
+      </div>
+    {% endif %}
+
+    <div x-show="trackOpen"
+         @keydown.escape.window="trackOpen = false"
+         role="dialog"
+         aria-modal="true"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div class="relative z-60 max-h-[90vh] w-152 px-4 md:px-0">
+        <div id="{{ track_component_id }}"></div>
+      </div>
+    </div>
+
+    <div x-show="listsOpen"
+         @keydown.escape.window="listsOpen = false"
+         role="dialog"
+         aria-modal="true"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div class="relative z-60 max-h-[90vh] w-96 px-4 md:px-0">
+        <div id="{{ lists_component_id }}"></div>
+      </div>
+    </div>
+
+    <div x-show="historyOpen"
+         @keydown.escape.window="historyOpen = false"
+         role="dialog"
+         aria-modal="true"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div class="relative z-60 max-h-[90vh] w-96 px-4 md:px-0">
+        <div id="{{ history_component_id }}"></div>
+      </div>
+    </div>
+  </div>
+{% endfor %}

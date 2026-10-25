@@ -1,0 +1,1624 @@
+/* ==========================================================================
+   showcase.css —— 列表卡片皮肤（横版信息卡 · 宽屏专用）
+
+   来源：ui-redesign/Gemini-1.html 第 754–933 行 .libcard / .lc-* / .lib-grid。
+   作用域：所有选择器都挂在 .lj-showcase 下，没有裸元素选择器。
+   主题：复用站点现有 html[data-theme] / .scheme-dark，不引入设计稿 applyTheme()。
+   宽屏专用：不做窄屏 media query。
+   ========================================================================== */
+
+/* ---- 0. 变量 ------------------------------------------------------------- */
+.lj-showcase {
+  --lj-ink: #f6f4ee;
+  --lj-ink2: rgba(246, 244, 238, .70);
+  --lj-ink3: rgba(246, 244, 238, .42);
+  --lj-verm: #d9564a;
+  --lj-gold: #e8c982;
+  --lj-line: rgba(255, 255, 255, .12);
+  --lj-line2: rgba(255, 255, 255, .08);
+  --lj-panel: #fffcf6;
+  --lj-hair: rgba(255, 255, 255, .10);
+  --lj-radius: 14px;
+  --lj-skylight: inset 0 1px 0 rgba(255, 255, 255, .08);
+  --lj-ease: cubic-bezier(.22, .8, .24, 1);
+  --lj-mark: var(--lj-gold);
+  --lj-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif;
+}
+
+/* 亮色（Gemini-1 日间色板） */
+html[data-theme="light"] .lj-showcase {
+  --lj-ink: #181613;
+  --lj-ink2: rgba(24, 22, 19, .80);
+  --lj-ink3: rgba(28, 26, 23, .68);
+  --lj-verm: #b4362c;
+  --lj-gold: #9a6b1f;
+  --lj-line: rgba(48, 34, 18, .13);
+  --lj-line2: rgba(48, 34, 18, .08);
+  --lj-panel: #fffcf6;
+  --lj-hair: rgba(48, 34, 18, .11);
+  --lj-skylight: inset 0 1px 0 rgba(255, 255, 255, .92);
+}
+
+/* 三类印色（media_type → .lj-game / .lj-book / .lj-movie / .lj-tv） */
+html[data-theme="dark"] .lj-showcase .lj-game,
+html.scheme-dark .lj-showcase .lj-game { --lj-mark: #d9564a; }
+html[data-theme="dark"] .lj-showcase .lj-book,
+html.scheme-dark .lj-showcase .lj-book { --lj-mark: #5f93b8; }
+html[data-theme="dark"] .lj-showcase .lj-movie,
+html[data-theme="dark"] .lj-showcase .lj-tv,
+html[data-theme="dark"] .lj-showcase .lj-season,
+html[data-theme="dark"] .lj-showcase .lj-episode,
+html.scheme-dark .lj-showcase .lj-movie,
+html.scheme-dark .lj-showcase .lj-tv,
+html.scheme-dark .lj-showcase .lj-season,
+html.scheme-dark .lj-showcase .lj-episode { --lj-mark: #6fa37c; }
+
+html[data-theme="light"] .lj-showcase .lj-game { --lj-mark: #a8332a; }
+html[data-theme="light"] .lj-showcase .lj-book { --lj-mark: #2f5a7a; }
+html[data-theme="light"] .lj-showcase .lj-movie,
+html[data-theme="light"] .lj-showcase .lj-tv,
+html[data-theme="light"] .lj-showcase .lj-season,
+html[data-theme="light"] .lj-showcase .lj-episode { --lj-mark: #3f6a4a; }
+
+/* ---- 1. 舞台 + 密度网格（宽屏专用，一屏不滚动，左右翻页） ----------------- */
+/* 一屏高度：1600×1000 下减掉顶栏 + 标题 + 筛选栏 + 底部留白，正好不出纵向滚动条 */
+.lj-showcase.lib-stage {
+  position: relative;
+  height: calc(100dvh - 297px);
+  min-height: 420px;
+}.lj-showcase .lib-grid {
+  display: grid;
+  gap: 14px 18px;
+  height: 100%;
+  overflow: hidden;
+  --pw: 96px;
+  --lcpad: 13px;
+}
+.lj-showcase .lib-grid[data-show="4"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  --pw: 190px;
+  --lcpad: 15px;
+}
+.lj-showcase .lib-grid[data-show="8"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  --pw: 96px;
+  --lcpad: 11px;
+}
+.lj-showcase .lib-grid[data-show="12"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  --pw: 88px;
+  --lcpad: 11px;
+}
+.lj-showcase .lib-grid[data-show="16"] {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  gap: 10px 14px;
+  --pw: 74px;
+  --lcpad: 10px;
+}
+
+/* ---- 1.1 密度 = 纯前端开关（data-show，不请求服务器） ---------------------
+   后端一次固定渲染 16 张（巨屏 18 张），浏览里点密度只改 .lib-grid 的 data-show：
+   上面 1 节的四档选择器负责换列数，这里负责藏掉多出来的卡片。
+   16 档一张都不藏。隐藏用 :nth-child，所以只对「列表页这套带 data-show 的网格」
+   生效；统计 / 搜索 / 自定义列表那套网格没有 data-show，一条都命不中。
+   首卡模式（.is-lead）下这张规则仍在：首卡永远排第 1 位（syncCards 只按
+   可见卡重算出场顺序），所以它不会被 nth-child 藏掉。 */
+.lj-showcase .lib-grid[data-show="4"] > .libcard:nth-child(n + 5),
+.lj-showcase .lib-grid[data-show="8"] > .libcard:nth-child(n + 9),
+.lj-showcase .lib-grid[data-show="12"] > .libcard:nth-child(n + 13) {
+  display: none;
+}
+
+/* ---- 2. 卡片本体 --------------------------------------------------------- */
+.lj-showcase .libcard {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--pw) minmax(0, 1fr);
+  gap: 14px;
+  /* 顶部对齐：内容比卡片高时只往底部溢出，标题永远不会被削掉上半截
+     （原来是 center，超出的部分上下各溢出，顶部那半行正好被 overflow:hidden 裁掉） */
+  align-items: start;
+  padding: var(--lcpad);
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--lj-radius);
+  /* 半透明卡座：让后面那层背景大图透出来（用户拍板值，别再调） */
+  background: rgba(12, 10, 22, .80);
+  border: 1px solid rgba(255, 255, 255, .10);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .08);
+  text-align: left;
+  color: inherit;
+  transition: background .35s var(--lj-ease), border-color .35s var(--lj-ease),
+              transform .35s var(--lj-ease), box-shadow .35s var(--lj-ease);
+}
+.lj-showcase .libcard:hover {
+  border-color: color-mix(in srgb, var(--lj-mark) 55%, transparent);
+  transform: translateY(-2px);
+}
+
+/* 日间：象牙卡座，半透明（底色必须压过站点 main.css:3062 的 background-color:#fffdf8 !important，
+   所以这里的 !important 不能去掉） */
+html[data-theme="light"] .lj-showcase .libcard {
+  background: rgba(255, 252, 246, .62) !important;
+  border: 1px solid rgba(48, 34, 18, .10);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .92),
+              0 2px 5px rgba(48, 34, 18, .06),
+              0 16px 36px -12px rgba(48, 34, 18, .15);
+}
+html[data-theme="light"] .lj-showcase .libcard:hover {
+  background: rgba(255, 255, 255, .80) !important;
+  border-color: rgba(48, 34, 18, .22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .92),
+              0 4px 10px rgba(48, 34, 18, .08),
+              0 22px 44px -16px rgba(48, 34, 18, .20);
+  transform: translateY(-2px);
+}
+
+/* ---- 3. 左列海报（2:3，宽 = --pw） --------------------------------------- */
+.lj-showcase .pcard {
+  position: relative;
+  display: block;
+  width: var(--pw);
+  aspect-ratio: 2 / 3;
+  max-height: 100%;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #eae2d2;
+  isolation: isolate;
+}
+.lj-showcase .pcard img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform .9s var(--lj-ease);
+}
+.lj-showcase .libcard:hover .pcard img {
+  transform: scale(1.035);
+}
+.lj-showcase .pcard::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .10);
+  pointer-events: none;
+}
+html[data-theme="light"] .lj-showcase .pcard::after {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .92),
+              inset 0 0 0 1px rgba(48, 34, 18, .14);
+}
+
+/* ---- 4. 右列文字区 ------------------------------------------------------ */
+.lj-showcase .lc-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+  /* 撑满卡片内容高度，并且允许子项收缩：内容超出时先压简介，不往上顶标题 */
+  height: 100%;
+  justify-content: flex-start;
+  min-height: 0;
+}
+.lj-showcase .lc-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  /* 标题区永远按内容占位，不参与收缩 */
+  flex: 0 0 auto;
+}
+.lj-showcase .lc-extra {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.lj-showcase .lc-title {
+  font-size: 15.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: .01em;
+  color: var(--lj-ink);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  /* -webkit-box 负责多行截断，这里只保证它不被 flex 压缩 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.lj-showcase .lc-title:hover { color: var(--lj-ink); }
+.lj-showcase .lc-title i {
+  /* 英文名独立占一行，不跟中文标题抢那 2 行的额度 */
+  display: block;
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: .2em;
+  color: var(--lj-ink3);
+  margin-top: 4px;
+  text-transform: uppercase;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-height: 1.6em;
+}
+.lj-showcase .lc-line {
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--lj-ink2);
+  overflow-wrap: anywhere;
+}
+.lj-showcase .lc-line b {
+  color: var(--lj-ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.lj-showcase .lc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.lj-showcase .lc-rate {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--lj-gold);
+}
+.lj-showcase .lc-state {
+  font-size: 9.5px;
+  letter-spacing: .08em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--lj-line);
+  color: var(--lj-ink2);
+  white-space: nowrap;
+}
+html[data-theme="light"] .lj-showcase .lc-state {
+  border-color: rgba(154, 107, 31, .35);
+  background: rgba(154, 107, 31, .10);
+  color: var(--lj-gold);
+}
+.lj-showcase .lc-review {
+  font-size: 10.5px;
+  line-height: 1.62;
+  color: var(--lj-ink3);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  /* 简介是可以牺牲的那一块：空间不够时先压它，绝不影响标题 */
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.lj-showcase .lc-review b {
+  font-weight: 600;
+  color: var(--lj-ink2);
+  letter-spacing: .06em;
+  margin-right: 3px;
+}
+html[data-theme="light"] .lj-showcase .lc-review { color: var(--lj-ink2); }
+html[data-theme="light"] .lj-showcase .lc-review b { color: var(--lj-ink3); }
+
+/* AI 金句：左侧朱砂竖线 + 引号包住，和官方简介视觉区分 */
+.lj-showcase .lc-quote {
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--lj-ink);
+  padding-left: 8px;
+  border-left: 2px solid var(--lj-verm);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  flex: 0 1 auto;
+}
+html[data-theme="light"] .lj-showcase .lc-quote {
+  color: var(--lj-ink);
+  border-left-color: var(--lj-verm);
+}
+
+/* AI 一句话总结：更弱一级，可被压缩 */
+.lj-showcase .lc-ai-summary {
+  font-size: 10px;
+  line-height: 1.55;
+  color: var(--lj-ink3);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+html[data-theme="light"] .lj-showcase .lc-ai-summary { color: var(--lj-ink3); }
+
+/* 密集档位收紧 */
+.lj-showcase .lib-grid[data-show="12"] .lc-quote { font-size: 9.5px; -webkit-line-clamp: 2; }
+.lj-showcase .lib-grid[data-show="12"] .lc-ai-summary { display: none; }
+.lj-showcase .lib-grid[data-show="16"] .lc-quote { font-size: 9px; -webkit-line-clamp: 1; }
+.lj-showcase .lib-grid[data-show="16"] .lc-ai-summary { display: none; }
+
+/* 密度微调：大卡放大字号，密档收紧 */
+.lj-showcase .lib-grid[data-show="4"] .lc-title { font-size: 21px; }
+.lj-showcase .lib-grid[data-show="4"] .lc-title i { font-size: 10px; }
+.lj-showcase .lib-grid[data-show="4"] .lc-line { font-size: 12px; }
+.lj-showcase .lib-grid[data-show="4"] .lc-rate { font-size: 16px; }
+.lj-showcase .lib-grid[data-show="4"] .lc-review { font-size: 12px; }
+.lj-showcase .lib-grid[data-show="8"] .lc-title { font-size: 14.5px; }
+.lj-showcase .lib-grid[data-show="12"] .lc-title { font-size: 13.5px; }
+/* 12 档每行只有 165px 高，收紧行高和间距，把内容塞回卡片里 */
+.lj-showcase .lib-grid[data-show="12"] .lc-body { gap: 4px; }
+.lj-showcase .lib-grid[data-show="12"] .lc-line { font-size: 9.5px; line-height: 1.4; }
+.lj-showcase .lib-grid[data-show="16"] .lc-title { font-size: 12.5px; }
+.lj-showcase .lib-grid[data-show="16"] .lc-line { font-size: 9.5px; }
+/* 16 档空间最小：英文名和官方简介都不显示，只留核心信息 + 一行 AI 金句
+   （实测放开 .lc-extra 后四档仍 0 越界、标题 0 裁切） */
+.lj-showcase .lib-grid[data-show="16"] .lc-title i { display: none; }
+.lj-showcase .lib-grid[data-show="16"] .lc-review { display: none; }
+
+/* ---- 5. 左右翻页箭头（覆盖在舞台两侧，不占高度） ------------------------- */
+.lj-showcase .lib-pager {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 6;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(12, 10, 22, .62);
+  border: 1px solid rgba(255, 255, 255, .16);
+  color: #f6f4ee;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .38);
+  transition: background .25s var(--lj-ease), transform .25s var(--lj-ease);
+}
+.lj-showcase .lib-pager:hover {
+  background: rgba(18, 15, 32, .9);
+  border-color: rgba(224, 161, 60, .6);
+}
+.lj-showcase .lib-pager.is-prev { left: -8px; }
+.lj-showcase .lib-pager.is-next { right: -8px; }
+html[data-theme="light"] .lj-showcase .lib-pager {
+  background: rgba(255, 252, 246, .92);
+  border: 1px solid rgba(48, 34, 18, .16);
+  color: #181613;
+  box-shadow: 0 6px 18px -6px rgba(48, 34, 18, .28),
+              inset 0 1px 0 rgba(255, 255, 255, .92);
+}
+html[data-theme="light"] .lj-showcase .lib-pager:hover {
+  background: #ffffff;
+  border-color: rgba(48, 34, 18, .30);
+}
+.lj-showcase .lib-pager svg { width: 20px; height: 20px; }
+
+/* ---- 6. 键盘可达 -------------------------------------------------------- */
+.lj-showcase .libcard a:focus-visible,
+.lj-showcase .libcard:focus-visible,
+.lj-showcase .lib-pager:focus-visible {
+  outline: 2px solid var(--lj-mark);
+  outline-offset: 3px;
+}
+
+/* ---- 6b. 聚焦浮层（点卡片打开，可 3D 翻面） -------------------------------
+   来源：Gemini-1.html 第 946–1183 行 .modal / .flip / .face / .modal-foot。
+   关键约束：显隐由 Alpine 的 x-show（display）控制，关闭态绝不写 opacity:0 ——
+   base.html 的 dialogVisible() 用 getClientRects() 判断弹窗开没开，
+   盒子还在就会被判成「开着」，body 被 lockBody 锁死、整页滚不动。
+   这里只做「打开时」的入场动画（animation），关掉时 display:none 直接生效。
+   不加 backdrop-filter：浅纸上泛灰会脏。
+   -------------------------------------------------------------------------- */
+.lj-showcase.lj-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(12px, 3vw, 46px);
+}
+.lj-modal .lj-modal-veil {
+  position: absolute;
+  inset: 0;
+  background: rgba(7, 5, 14, .84);
+}
+html[data-theme="light"] .lj-modal .lj-modal-veil {
+  background: rgba(244, 239, 229, .92);
+}
+
+.lj-modal .lj-modal-card {
+  position: relative;
+  width: min(1120px, 94vw);
+  /* 高度跟着内容走（设计稿 .modal-card 也是 height:auto）：
+     固定高度会让正面标题上下各空一大片。两面的高度由 grid 叠层里更高的那张决定。 */
+  height: auto;
+  max-height: min(86vh, 780px);
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 20px;
+  border: 1px solid var(--lj-line);
+  background: linear-gradient(150deg, #16121f, #0a0813);
+  box-shadow: 0 40px 90px -26px rgba(0, 0, 0, .82),
+              inset 0 1px 0 rgba(255, 255, 255, .07);
+  color: var(--lj-ink);
+  perspective: 1800px;
+  animation: lj-modal-in .42s var(--lj-ease) both;
+}
+@keyframes lj-modal-in {
+  from { transform: translateY(16px) scale(.985); }
+  to { transform: none; }
+}
+html[data-theme="light"] .lj-modal .lj-modal-card {
+  border-color: rgba(48, 34, 18, .13);
+  background: linear-gradient(155deg, #fffcf6 0%, #f5f1e8 100%);
+  box-shadow: 0 36px 86px -22px rgba(48, 34, 18, .28),
+              0 4px 16px rgba(48, 34, 18, .08),
+              inset 0 1px 0 rgba(255, 255, 255, .92);
+}
+
+/* 右上关闭 */
+.lj-modal .lj-modal-x {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 12;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--lj-line);
+  background: rgba(8, 6, 16, .5);
+  font-size: 10.5px;
+  letter-spacing: .14em;
+  color: var(--lj-ink2);
+  cursor: pointer;
+  transition: background .3s var(--lj-ease), color .3s var(--lj-ease);
+}
+.lj-modal .lj-modal-x:hover { background: rgba(255, 255, 255, .14); color: var(--lj-ink); }
+html[data-theme="light"] .lj-modal .lj-modal-x {
+  background: var(--lj-panel);
+  border-color: rgba(48, 34, 18, .14);
+  color: var(--lj-ink2);
+}
+html[data-theme="light"] .lj-modal .lj-modal-x:hover {
+  background: #fff;
+  color: var(--lj-verm);
+}
+
+/* ---- 3D 翻面（设计稿 1019–1047 行的核心机制） ---------------------------- */
+.lj-modal .lj-flip {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  transform-style: preserve-3d;
+  transition: transform .85s cubic-bezier(.4, .05, .2, 1);
+}
+.lj-modal .lj-flip.is-flipped { transform: rotateY(180deg); }
+.lj-modal .lj-face {
+  grid-area: 1 / 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  padding: clamp(16px, 2vw, 32px);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+.lj-modal .lj-face.is-back { transform: rotateY(180deg); }
+.lj-modal .lj-face-inner {
+  display: flex;
+  align-items: center;
+  gap: clamp(16px, 2.4vw, 38px);
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+  padding-right: 2px;
+}
+.lj-modal .lj-face-inner::-webkit-scrollbar { display: none; }
+
+/* 正面：海报 + 信息 */
+.lj-modal .lj-focus-poster {
+  flex: 0 0 auto;
+  align-self: center;
+  width: clamp(140px, 16vw, 226px);
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #2a2536;
+  isolation: isolate;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, .5),
+              inset 0 0 0 1px rgba(255, 255, 255, .12);
+}
+.lj-modal .lj-focus-poster img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+html[data-theme="light"] .lj-modal .lj-focus-poster {
+  background: #eae2d2;
+  box-shadow: 0 18px 40px -18px rgba(48, 34, 18, .3),
+              inset 0 0 0 1px rgba(48, 34, 18, .14);
+}
+
+.lj-modal .lj-focus-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: clamp(8px, 1.1vh, 14px);
+  padding-right: clamp(0px, 1.4vw, 18px);
+}
+.lj-modal .lj-f-num {
+  font-size: 10.5px;
+  letter-spacing: .3em;
+  color: var(--lj-ink3);
+  font-variant-numeric: tabular-nums;
+}
+.lj-modal .lj-f-title {
+  margin: 0;
+  font-size: clamp(24px, 3vw, 44px);
+  font-weight: 700;
+  line-height: 1.08;
+  color: var(--lj-ink);
+  text-wrap: balance;
+}
+.lj-modal .lj-f-en {
+  font-size: 11px;
+  letter-spacing: .26em;
+  color: var(--lj-ink2);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.lj-modal .lj-f-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px 12px;
+  margin-top: 2px;
+}
+.lj-modal .lj-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid var(--lj-line);
+  background: rgba(255, 255, 255, .06);
+  font-size: 11px;
+  letter-spacing: .06em;
+  font-weight: 600;
+  color: var(--lj-ink2);
+  white-space: nowrap;
+}
+html[data-theme="light"] .lj-modal .lj-pill {
+  background: var(--lj-panel);
+  border-color: rgba(48, 34, 18, .13);
+  color: var(--lj-ink);
+}
+.lj-modal .lj-hstat {
+  font-size: 12px;
+  letter-spacing: .04em;
+  color: var(--lj-ink2);
+  white-space: nowrap;
+}
+.lj-modal .lj-hstat b {
+  color: var(--lj-ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.lj-modal .lj-hrate {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -.02em;
+  color: var(--lj-gold);
+  font-variant-numeric: tabular-nums;
+}
+.lj-modal .lj-hrate span {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--lj-ink3);
+  letter-spacing: .04em;
+}
+.lj-modal .lj-f-quote {
+  margin: 0;
+  padding-left: 13px;
+  border-left: 2.5px solid var(--lj-verm);
+  font-size: clamp(13px, 1.15vw, 15.5px);
+  line-height: 1.7;
+  font-weight: 500;
+  color: var(--lj-ink);
+}
+.lj-modal .lj-f-review {
+  margin: 0;
+  font-size: clamp(11.5px, .95vw, 12.5px);
+  line-height: 1.75;
+  color: var(--lj-ink2);
+}
+.lj-modal .lj-f-note {
+  margin-top: auto;
+  padding-top: 11px;
+  border-top: 1px dashed var(--lj-line);
+  font-size: 11.5px;
+  line-height: 1.75;
+  color: var(--lj-ink3);
+}
+.lj-modal .lj-f-note b {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 10.5px;
+  letter-spacing: .08em;
+  color: var(--lj-gold);
+}
+
+/* 背面：雷达 + 档案表 + 总结 */
+.lj-modal .lj-back-inner {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(14px, 2.6vw, 40px);
+  width: 100%;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.lj-modal .lj-back-inner::-webkit-scrollbar { display: none; }
+.lj-modal .lj-back-inner.is-noradar { grid-template-columns: minmax(0, 1fr); }
+.lj-modal .lj-radar-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.lj-modal .lj-radar-wrap svg {
+  display: block;
+  width: clamp(200px, 22vw, 300px);
+  max-height: 46vh;
+  height: auto;
+  overflow: visible;
+  color: var(--lj-ink2);
+}
+html[data-theme="light"] .lj-modal .lj-radar-wrap svg { color: var(--lj-mark); }
+.lj-modal .lj-radar-cap {
+  font-size: 9px;
+  letter-spacing: .26em;
+  color: var(--lj-ink3);
+  text-transform: uppercase;
+}
+.lj-modal .lj-back-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.lj-modal .lj-back-title {
+  margin: 0;
+  font-size: clamp(18px, 1.9vw, 26px);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--lj-ink);
+}
+.lj-modal .lj-back-note {
+  font-size: clamp(11.5px, 1vw, 13px);
+  line-height: 1.85;
+  color: var(--lj-ink2);
+  border-left: 2.5px solid var(--lj-verm);
+  padding-left: 14px;
+}
+.lj-modal .lj-back-note em {
+  display: block;
+  margin-bottom: 7px;
+  font-style: normal;
+  font-size: 9.5px;
+  letter-spacing: .28em;
+  color: var(--lj-ink3);
+  text-transform: uppercase;
+}
+.lj-modal .lj-archive {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 14px;
+  padding: 10px 0;
+  border-top: 1px dashed var(--lj-line);
+  border-bottom: 1px dashed var(--lj-line);
+}
+.lj-modal .lj-archive div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.lj-modal .lj-archive span {
+  font-size: 9.5px;
+  letter-spacing: .16em;
+  color: var(--lj-ink3);
+  white-space: nowrap;
+}
+.lj-modal .lj-archive b {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--lj-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 底部工具条 */
+.lj-modal .lj-modal-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px clamp(14px, 2vw, 28px) clamp(12px, 1.8vh, 18px);
+  border-top: 1px solid var(--lj-line2);
+}
+.lj-modal .lj-mnav {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--lj-line);
+  background: transparent;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--lj-ink2);
+  cursor: pointer;
+  transition: background .3s var(--lj-ease), color .3s var(--lj-ease),
+              border-color .3s var(--lj-ease);
+}
+.lj-modal .lj-mnav:hover {
+  background: rgba(255, 255, 255, .13);
+  border-color: color-mix(in srgb, var(--lj-mark) 60%, transparent);
+  color: var(--lj-ink);
+}
+.lj-modal .lj-m-idx {
+  font-size: 11px;
+  letter-spacing: .2em;
+  color: var(--lj-ink2);
+  font-variant-numeric: tabular-nums;
+}
+.lj-modal .lj-mflip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--lj-line);
+  background: transparent;
+  font-size: 10.5px;
+  letter-spacing: .12em;
+  color: var(--lj-ink2);
+  cursor: pointer;
+  transition: background .3s var(--lj-ease), color .3s var(--lj-ease);
+}
+.lj-modal .lj-mflip:hover {
+  background: rgba(255, 255, 255, .13);
+  color: var(--lj-ink);
+}
+.lj-modal .lj-mdone {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--lj-line);
+  font-size: 10.5px;
+  letter-spacing: .12em;
+  color: var(--lj-ink2);
+  text-decoration: none;
+  transition: background .3s var(--lj-ease), color .3s var(--lj-ease);
+}
+.lj-modal .lj-mdone:hover { background: rgba(255, 255, 255, .13); color: var(--lj-ink); }
+.lj-modal .lj-m-hint {
+  margin-left: auto;
+  font-size: 10px;
+  letter-spacing: .14em;
+  color: var(--lj-ink3);
+}
+html[data-theme="light"] .lj-modal .lj-mnav,
+html[data-theme="light"] .lj-modal .lj-mflip,
+html[data-theme="light"] .lj-modal .lj-mdone {
+  background: var(--lj-panel);
+  border-color: rgba(48, 34, 18, .14);
+  color: var(--lj-ink2);
+}
+html[data-theme="light"] .lj-modal .lj-mnav:hover,
+html[data-theme="light"] .lj-modal .lj-mflip:hover,
+html[data-theme="light"] .lj-modal .lj-mdone:hover {
+  background: #fff;
+  color: var(--lj-verm);
+  border-color: var(--lj-verm);
+}
+
+/* 浮层里的按钮键盘焦点要看得见 */
+.lj-modal .lj-modal-x:focus-visible,
+.lj-modal .lj-mnav:focus-visible,
+.lj-modal .lj-mflip:focus-visible,
+.lj-modal .lj-mdone:focus-visible {
+  outline: 2px solid var(--lj-mark);
+  outline-offset: 3px;
+}
+
+/* 列表页里挂了 data-title 的卡片 = 可点开浮层，给个手型 */
+.lj-showcase .libcard[data-title] { cursor: pointer; }
+
+/* ---- 7. 无 data-d 的横版网格（统计 / 搜索 / 详情页季列表 / 自定义列表） -----
+   这些页面把 .lj-showcase 直接挂在网格自己身上（同一个元素带三个类），
+   所以必须用复合选择器 .lj-showcase.lib-grid，不能靠后代选择器。
+   默认 3 列，不做一屏高度限制，卡片按内容自然撑高。 */
+.lj-showcase.lib-grid {
+  display: grid;
+  gap: 14px 18px;
+  --pw: 88px;
+  --lcpad: 12px;
+}
+.lj-showcase.lib-grid:not([data-d]) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 1280px) {
+  .lj-showcase.lib-grid:not([data-d]) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+/* 详情页季列表 / 关联条目：卡片更窄一点，免得一屏放不下几条还把页面撑高 */
+.lj-showcase.lib-grid.lib-grid--tight {
+  --pw: 60px;
+  --lcpad: 10px;
+  gap: 10px 14px;
+}
+.lj-showcase.lib-grid.lib-grid--tight .lc-title { font-size: 13.5px; }
+.lj-showcase.lib-grid.lib-grid--tight .lc-line { font-size: 10px; }
+.lj-showcase.lib-grid.lib-grid--tight .lc-review { display: none; }
+
+/* 合集里"当前这一部"的高亮（详情页关联条目沿用红色描边） */
+.lj-showcase .libcard.libcard--active {
+  box-shadow: 0 0 0 1.5px rgba(226, 232, 240, .75), 0 12px 30px rgba(0, 0, 0, .42);
+}
+html[data-theme="light"] .lj-showcase .libcard.libcard--active {
+  box-shadow: 0 0 0 1.5px rgba(48, 34, 18, .55),
+              0 2px 5px rgba(48, 34, 18, .06),
+              0 16px 36px -12px rgba(48, 34, 18, .15);
+}
+
+/* ---- 8. 其它页面的竖版卡（搜索 / 统计 / 详情页）只保留最小皮肤 -------------
+   列表页 grid 已经换成上面的横版卡；这里不给竖版卡做新设计，
+   只保证它的海报圆角和 hover 放大还能用（旧规则已随横版改造删除）。 */
+.lj-showcase .lj-card .lj-poster {
+  display: block;
+  overflow: hidden;
+  border-radius: 10px;
+}
+.lj-showcase .lj-card .lj-poster img {
+  transition: transform .9s var(--lj-ease);
+}
+.lj-showcase .lj-card:hover .lj-poster img {
+  transform: scale(1.035);
+}
+
+/* ==========================================================================
+   9. 首卡特写（★ 首卡特写 按钮 / L 键 / ← → 换人）
+   --------------------------------------------------------------------------
+   开关状态落在 .lib-stage 的 is-lead 类上（由 media_list.html 外层 x-data 维护，
+   软导航换页面后 base.html 的 Alpine.initTree 会重新初始化它）。
+   基础规则（第 1 节：.lib-stage 固定高度 + .lib-grid flex:1 + 四档网格）
+   一个字都不动，所有变化都写在 .is-lead 分支里，保证关掉之后回到原来的一屏不滚。
+   ========================================================================== */
+
+/* ---- 9.1 水印默认不可见：并列平铺模式下必须是 display:none ---------------- */
+.lj-showcase .lc-ghost {
+  display: none;
+}
+
+/* ---- 9.2 首卡模式：放开舞台高度，允许纵向滚动 ---------------------------- */
+/* 基础 .lj-showcase.lib-stage 是 height:calc(100dvh - 297px) + 网格 overflow:hidden；
+   这里只把高度约束和外层裁切放开，不给 .lib-grid 加新高度，行高回到 auto。 */
+.lj-showcase.lib-stage.is-lead {
+  height: auto;
+  min-height: 0;
+  padding-bottom: 28px;
+}
+.lj-showcase.lib-stage.is-lead .lib-grid {
+  height: auto;
+  overflow: visible;
+  /* 基础规则给每档写了 repeat(4, minmax(0,1fr))；放开高度后改回按内容自然撑，
+     否则 1fr 会按"平均分"算，首卡那行被拉得巨高、下面的卡挤在一起。 */
+  grid-template-rows: none;
+  grid-auto-rows: auto;
+  align-content: start;
+}
+
+/* ---- 9.3 首卡（★ 排在第一位那张）：跨 2 列 + 放大 ------------------------ */
+/* 首卡模式下所有卡片高度都回到「内容决定」：基础规则的 height:100% 是为了一屏等高，
+   这里放开才不会让首卡那行的普通卡被拉成一个大空盒子。 */
+.lj-showcase.is-lead .lib-grid > .libcard {
+  height: auto;
+  align-self: start;
+}
+.lj-showcase.is-lead .lib-grid .libcard.libcard--lead {
+  /* 跨 2 列；16 档只有 4 列，不会溢出 */
+  grid-column: span 2;
+  grid-template-columns: calc(var(--pw) * 1.72) minmax(0, 1fr);
+  align-items: start;
+  gap: clamp(14px, 1.8vw, 26px);
+  padding: clamp(12px, 1.4vw, 20px);
+  /* 高度让内容（海报 2:3）自己撑，不写 min-height：
+     写了会在 16 档这种小海报档位里留一大片空白 */
+}
+/* 关键：首卡模式下普通卡的海报是「宽决定高」，别继承基础规则的 height:100%
+   （交接文档坑 2：否则没被拉高的普通卡海报会塌成一条） */
+.lj-showcase.is-lead .lib-grid .libcard:not(.libcard--lead) .pcard {
+  width: var(--pw);
+  height: auto;
+}
+.lj-showcase.is-lead .lib-grid .libcard.libcard--lead .pcard {
+  width: calc(var(--pw) * 1.72);
+  height: auto;
+  max-height: 340px;
+  align-self: start;
+}
+/* 4 档 --pw=190，1.72 倍是 327×490；只用 max-height 收高度，宽度仍严格按 1.72 倍 */
+.lj-showcase.is-lead .lib-grid[data-show="4"] .libcard.libcard--lead .pcard {
+  max-height: 300px;
+}
+.lj-showcase.is-lead .lib-grid .libcard.libcard--lead .lc-title {
+  font-size: clamp(19px, 2.1vw, 30px);
+  line-height: 1.16;
+  -webkit-line-clamp: 3;
+}
+.lj-showcase.is-lead .lib-grid .libcard.libcard--lead .lc-title i {
+  display: block;
+  font-size: 10.5px;
+  margin-top: 5px;
+  max-height: none;
+}
+.lj-showcase.is-lead .lib-grid .libcard.libcard--lead .lc-line {
+  font-size: 12px;
+  line-height: 1.6;
+}
+.lj-showcase.is-lead .lib-grid .libcard.libcard--lead .lc-rate {
+  font-size: 19px;
+}
+.lj-showcase.is-lead .lib-grid .libcard.libcard--lead .lc-state {
+  font-size: 10px;
+  padding: 3px 9px;
+}
+/* 首卡里内容可以多露几行（金句 / 简介 / 手札） */
+.lj-showcase.is-lead .lib-grid .libcard.libcard--lead .lc-quote {
+  font-size: 12.5px;
+  line-height: 1.66;
+  padding-left: 11px;
+  -webkit-line-clamp: 4;
+}
+.lj-showcase.is-lead .lib-grid .libcard.libcard--lead .lc-review {
+  font-size: 11.5px;
+  line-height: 1.78;
+  -webkit-line-clamp: 4;
+}
+.lj-showcase.is-lead .lib-grid .libcard.libcard--lead .lc-ai-summary {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+/* ---- 9.4 大号序号水印（只在首卡里、只在首卡模式里可见） ------------------- */
+.lj-showcase.is-lead .lib-grid .libcard.libcard--lead .lc-ghost {
+  display: block;
+  position: absolute;
+  right: -2px;
+  bottom: -14px;
+  z-index: 1;
+  font-size: clamp(90px, 11vw, 190px);
+  font-weight: 900;
+  line-height: .78;
+  letter-spacing: -.05em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, .075);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+html[data-theme="light"] .lj-showcase.is-lead .lib-grid .libcard.libcard--lead .lc-ghost {
+  color: rgba(48, 34, 18, .07);
+}
+/* 首卡正文压在更上层（别被水印盖住），并改成左右两栏：
+   左边标题/数据，右边金句/简介/手札 —— 跨了 2 列之后右半边才不会空一片。 */
+.lj-showcase.is-lead .lib-grid .libcard.libcard--lead .lc-body {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: clamp(14px, 1.8vw, 28px);
+  height: auto;
+}
+.lj-showcase.is-lead .lib-grid .libcard.libcard--lead .lc-main {
+  flex: 0 1 auto;
+  max-width: 46%;
+  min-width: 0;
+  gap: 7px;
+}
+.lj-showcase.is-lead .lib-grid .libcard.libcard--lead .lc-extra {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: visible;
+  padding-left: clamp(14px, 1.6vw, 26px);
+  border-left: 1px solid var(--lj-line2);
+  gap: 8px;
+}
+
+/* ---- 9.5 密度微调：16 档列多，首卡收一收，避免把整行撑爆 ------------------ */
+.lj-showcase.is-lead .lib-grid[data-show="16"] .libcard.libcard--lead {
+  grid-template-columns: calc(var(--pw) * 1.5) minmax(0, 1fr);
+  gap: 12px;
+  padding: 11px;
+}
+.lj-showcase.is-lead .lib-grid[data-show="16"] .libcard.libcard--lead .pcard {
+  width: calc(var(--pw) * 1.5);
+}
+.lj-showcase.is-lead .lib-grid[data-show="16"] .libcard.libcard--lead .lc-title {
+  font-size: clamp(15px, 1.5vw, 20px);
+}
+.lj-showcase.is-lead .lib-grid[data-show="16"] .libcard.libcard--lead .lc-ghost {
+  font-size: clamp(72px, 8vw, 120px);
+}
+.lj-showcase.is-lead .lib-grid[data-show="4"] .libcard.libcard--lead .lc-ghost {
+  font-size: clamp(110px, 13vw, 190px);
+}
+
+/* ---- 9.6 换焦点（← →）时首卡轻微回弹，让"换人了"看得见 ------------------ */
+.lj-showcase .libcard.is-lead-focus {
+  animation: lj-lead-in .38s var(--lj-ease) both;
+}
+@keyframes lj-lead-in {
+  from { opacity: .55; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lj-showcase .libcard.is-lead-focus { animation: none; }
+}
+
+/* ==========================================================================
+   10. 分类筛选下拉面板（代理 E）
+   作用域：全部挂在 .lj-genre-* 下，没有裸元素选择器。
+   浮层：面板 position:absolute，相对「分类」按钮容器定位，不占文档流 ——
+        展开/收起时 .lib-grid 的 getBoundingClientRect().height 前后必须相等。
+   显隐：Alpine 的 x-show（display:none），绝不写 opacity:0 ——
+        base.html 的 dialogVisible() 靠 getClientRects() 判断弹窗开没开。
+   ========================================================================== */
+.lj-genre-dd {
+  --lj-genre-w: 300px;
+  --lj-genre-max-h: 300px;
+}
+/* 已选数量角标 */
+.lj-genre-badge {
+  margin-left: 6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: #fff;
+  background: #4f46e5;
+  font-variant-numeric: tabular-nums;
+}
+/* 按钮上的小箭头跟着展开态翻个面 */
+.lj-genre-caret {
+  transition: transform .18s var(--lj-ease);
+}
+.lj-genre-dd:has(.lj-genre-panel:not([style*="display: none"])) .lj-genre-caret {
+  transform: rotate(180deg);
+}
+
+/* ---- 10.1 浮层面板本体 ------------------------------------------------ */
+.lj-genre-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 260px;
+  width: var(--lj-genre-w);
+  max-width: min(var(--lj-genre-w), calc(100vw - 32px));
+  max-height: var(--lj-genre-max-h);
+  overflow: hidden;
+  border-radius: 12px;
+  /* 肤色照抄同排的「全成就 / 评分」下拉：深色 #39404b + 1px 灰边 */
+  background: #39404b;
+  border: 1px solid #374151;
+  color: #d1d5db;
+  box-shadow: 0 24px 60px -18px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .06);
+}
+html[data-theme="light"] .lj-genre-panel {
+  background: #efe9dc;
+  border-color: #ddd2bd;
+  color: #4f483e;
+}
+.lj-genre-panel .lj-genre-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, .10);
+  flex: 0 0 auto;
+}
+.lj-genre-panel .lj-genre-head b {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+.lj-genre-panel .lj-genre-head small {
+  font-size: 10px;
+  letter-spacing: .04em;
+  opacity: .62;
+}
+
+/* 列表自己滚动：面板整体高度受限，分类再多也不撑页面 */
+.lj-genre-panel .lj-genre-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  scrollbar-width: thin;
+}
+.lj-genre-panel .lj-genre-list::-webkit-scrollbar {
+  width: 6px;
+}
+.lj-genre-panel .lj-genre-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, .18);
+  border-radius: 3px;
+}
+
+/* 一行：勾选框 + 分类名 + 数量 */
+.lj-genre-panel .lj-genre-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 30px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.3;
+  text-decoration: none;
+  transition: background .16s var(--lj-ease), color .16s var(--lj-ease);
+  cursor: pointer;
+}
+.lj-genre-panel .lj-genre-box {
+  position: relative;
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  border: 1px solid currentColor;
+  opacity: .55;
+  transition: background .16s var(--lj-ease), border-color .16s var(--lj-ease), opacity .16s;
+}
+.lj-genre-panel .lj-genre-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lj-genre-panel .lj-genre-num {
+  flex: 0 0 auto;
+  font-size: 11px;
+  opacity: .7;
+  font-variant-numeric: tabular-nums;
+}
+/* 选中态：勾选框填色 + 打勾，文字提亮加粗 */
+.lj-genre-panel .lj-genre-row.is-on .lj-genre-box {
+  opacity: 1;
+  background: #4f46e5;
+  border-color: #4f46e5;
+}
+.lj-genre-panel .lj-genre-row.is-on .lj-genre-box::after {
+  content: "";
+  position: absolute;
+  left: 4.5px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(42deg);
+}
+.lj-genre-panel .lj-genre-row.is-on .lj-genre-name {
+  font-weight: 600;
+}
+.lj-genre-panel .lj-genre-row.is-on .lj-genre-num {
+  opacity: .9;
+}
+/* 书库：没有任何分类时的占位，不许塌 */
+.lj-genre-panel .lj-genre-empty {
+  padding: 18px 12px;
+  font-size: 12px;
+  line-height: 1.7;
+  text-align: center;
+  opacity: .72;
+}
+
+/* 底部：总数 + 清空全部 */
+.lj-genre-panel .lj-genre-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 14px 10px;
+  border-top: 1px solid rgba(255, 255, 255, .10);
+  font-size: 11px;
+  opacity: .78;
+  font-variant-numeric: tabular-nums;
+}
+.lj-genre-panel .lj-genre-clear {
+  font-size: 11.5px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  text-decoration: none;
+  opacity: 1;
+  transition: background .16s var(--lj-ease), color .16s var(--lj-ease);
+  cursor: pointer;
+}
+.lj-genre-panel .lj-genre-clear:hover {
+  background: rgba(217, 86, 74, .18);
+  color: #f08a80;
+}
+
+/* ---- 10.2 已选分类小标签（绝对定位浮条：贴在按钮正下方，不占文档流） ---- */
+.lj-genre-tags {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  max-width: min(520px, calc(100vw - 32px));
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.lj-genre-tags::-webkit-scrollbar {
+  display: none;
+}
+.lj-genre-tag {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px 0 10px;
+  border-radius: 13px;
+  font-size: 12px;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  border: 1px solid rgba(246, 244, 238, .18);
+  background: rgba(255, 255, 255, .06);
+  transition: background .16s var(--lj-ease), border-color .16s var(--lj-ease), color .16s var(--lj-ease);
+  cursor: pointer;
+}
+.lj-genre-panel .lj-genre-row:hover,
+.lj-genre-tag:hover {
+  background: rgba(255, 255, 255, .10);
+}
+html[data-theme="light"] .lj-genre-panel .lj-genre-row:hover,
+html[data-theme="light"] .lj-genre-tag:hover {
+  background: rgba(48, 34, 18, .10);
+}
+.lj-genre-tag .lj-genre-x {
+  font-size: 13px;
+  line-height: 1;
+  opacity: .55;
+}
+.lj-genre-tag:hover .lj-genre-x {
+  opacity: 1;
+  color: #f08a80;
+}
+
+/* ---- 10.3 亮色主题微调（面板/标签的描边和勾选框反色） ------------------- */
+html[data-theme="light"] .lj-genre-panel {
+  box-shadow: 0 24px 60px -20px rgba(48, 34, 18, .30), inset 0 1px 0 rgba(255, 255, 255, .92);
+}
+html[data-theme="light"] .lj-genre-panel .lj-genre-head,
+html[data-theme="light"] .lj-genre-panel .lj-genre-foot {
+  border-color: rgba(48, 34, 18, .12);
+}
+html[data-theme="light"] .lj-genre-panel .lj-genre-list::-webkit-scrollbar-thumb {
+  background: rgba(48, 34, 18, .20);
+}
+html[data-theme="light"] .lj-genre-tag {
+  border-color: rgba(48, 34, 18, .18);
+  background: rgba(48, 34, 18, .05);
+}
+html[data-theme="light"] .lj-genre-tag:hover {
+  background: rgba(48, 34, 18, .10);
+  border-color: rgba(48, 34, 18, .28);
+}
+html[data-theme="light"] .lj-genre-panel .lj-genre-clear:hover {
+  background: rgba(180, 54, 44, .12);
+  color: #b4362c;
+}
+
+/* ---- 10.4 窄屏：面板贴右对齐收窄，绝不溢到屏幕外 ----------------------- */
+@media (max-width: 1200px) {
+  .lj-genre-dd {
+    --lj-genre-w: 260px;
+  }
+}
+@media (max-width: 900px) {
+  .lj-genre-panel {
+    left: auto;
+    right: 0;
+    --lj-genre-w: 240px;
+  }
+  .lj-genre-tags {
+    max-width: calc(100vw - 32px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lj-genre-caret { transition: none; }
+}
+
+
+/* ==========================================================================
+   11. 密度胶囊钉在顶栏右侧（对标设计稿）+ 顶栏巨屏搜索框
+   --------------------------------------------------------------------------
+   硬规矩（都是实测踩出来的，别再改回去）：
+     · 用 ID 选择器 #lj-density-pill 直接定位，**不依赖任何 JS 加的类**。
+       上一版靠 .lj-density-pill--top 这个由 Alpine init() 加上的类，
+       一旦某次 init 没跑到（换库、退出巨屏、软导航），胶囊就掉回筛选行，
+       用户看到的就是「时而在上面、时而在下面」。
+     · z-index 必须 > 顶栏的 50，否则被整条顶栏盖住（看不见）。
+     · 所有库（游戏/电影/剧集/书籍）一视同仁，都在顶栏右侧。
+     · 巨屏页 hero.css 会把整条筛选行 fixed 到 top:74，产生层叠上下文把胶囊困住，
+       所以这里必须把那条定位取消（11.4）。
+   ========================================================================== */
+
+/* ---- 11.0 胶囊本体：所有列表页、所有媒体类型统一钉顶栏 ------------------ */
+.lj-density-pill {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  gap: 0;
+}
+#lj-density-pill {
+  position: fixed;
+  top: 16px;
+  right: var(--lj-dp-right, 252px);
+  z-index: 51;
+  height: 32px;
+  margin: 0;
+  padding: 2px;
+  border: 1px solid #2c3136;
+  border-radius: 999px;
+  background: #23272b;
+  overflow: hidden;
+  box-shadow: 0 10px 24px -18px rgba(0, 0, 0, .55);
+}
+html[data-theme="light"] #lj-density-pill {
+  border-color: #ddd2bd;
+  background: #fffdf8;
+  box-shadow: 0 10px 24px -18px rgba(72, 55, 30, .35);
+}
+/* 顶栏高 64、胶囊高 32，top:16 正好垂直居中 */
+
+/* 按钮：基础尺寸由模板 Tailwind 类保底，这里只做紧凑化与配色 */
+#lj-density-pill .lj-dp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: 30px;
+  min-height: 26px;
+  height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #a2a7ad;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .04em;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color .2s ease, background .2s ease;
+}
+#lj-density-pill .lj-dp-btn:hover {
+  color: #e8e6e1;
+  background: #2c3136;
+}
+/* 选中档：描金边 + 金字（对齐设计稿，不是实心块） */
+#lj-density-pill .lj-dp-btn.is-on,
+#lj-density-pill .lj-dp-btn.bg-indigo-600 {
+  color: #e8c982;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px #e8c982;
+}
+#lj-density-pill .lj-dp-btn:focus-visible {
+  outline: 2px solid #e8c982;
+  outline-offset: 1px;
+}
+html[data-theme="light"] #lj-density-pill .lj-dp-btn { color: #6d6355; }
+html[data-theme="light"] #lj-density-pill .lj-dp-btn:hover { color: #26221c; background: #e4dbc9; }
+/* 亮色选中档：必须是「实色底 + 白字」。
+   原因：input.css 里有一条 [data-theme="light"] .text-white.bg-indigo-600 { color:#fff !important }，
+   而模板给选中档同时挂了 text-white 和 bg-indigo-600，所以文字被钉死成白色。
+   这里如果只描金边、底色透明，就变成白字压近白纸底（#fffdf8），对比度 1.02，整档看不见。
+   所以亮色下改成实心靛蓝底（#4f39f6 = 本项目 Tailwind 里 indigo-600 的实际渲染值，
+   和同排「并列平铺 / 首卡特写」选中态同一个色），白字对比度 6.46。 */
+html[data-theme="light"] #lj-density-pill .lj-dp-btn.is-on,
+html[data-theme="light"] #lj-density-pill .lj-dp-btn.bg-indigo-600 {
+  color: #fff;
+  background: #4f39f6;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .22);
+}
+
+/* ---- 11.1 顶栏里的巨屏搜索框（游戏库才渲染，位于 1/4/8/12/16 左边） ---- */
+#lj-density-pill .lj-tb-search {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex: 0 0 auto;
+  width: clamp(92px, 10vw, 140px);
+  height: 26px;
+  margin: 0;
+  padding: 0 2px 0 8px;
+  border-right: 1px solid rgba(255, 255, 255, .12);
+}
+#lj-density-pill .lj-tb-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #e8e6e1;
+  font-size: 11.5px;
+  letter-spacing: .02em;
+}
+#lj-density-pill .lj-tb-input::placeholder { color: #767c84; letter-spacing: .02em; }
+#lj-density-pill .lj-tb-input:focus { outline: none; }
+#lj-density-pill .lj-tb-input::-webkit-search-cancel-button { appearance: none; }
+#lj-density-pill .lj-tb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #a2a7ad;
+  cursor: pointer;
+  transition: color .2s ease, background .2s ease;
+}
+#lj-density-pill .lj-tb-btn:hover { color: #e8e6e1; background: #2c3136; }
+#lj-density-pill .lj-tb-btn:focus-visible { outline: 2px solid #e8c982; outline-offset: 1px; }
+html[data-theme="light"] #lj-density-pill .lj-tb-search { border-right-color: rgba(48, 34, 18, .14); }
+html[data-theme="light"] #lj-density-pill .lj-tb-input { color: #26221c; }
+html[data-theme="light"] #lj-density-pill .lj-tb-input::placeholder { color: #8d8375; }
+html[data-theme="light"] #lj-density-pill .lj-tb-btn { color: #6d6355; }
+html[data-theme="light"] #lj-density-pill .lj-tb-btn:hover { color: #26221c; background: #e4dbc9; }
+
+/* 窄屏顶栏太挤，胶囊整颗收起（顶栏的搜索/筛选/日间优先） */
+@media (max-width: 1180px) {
+  #lj-density-pill { display: none; }
+}
+
+/* ---- 11.2 筛选行：搜索框收窄，右边那排按钮才有地方站 -------------------- */
+main#main-content .relative.grow:has(> input[type="text"]) {
+  flex: 1 1 300px;
+  max-width: 520px;
+}
+
+/* ---- 11.3 巨屏页：顶栏以外的东西全部收掉 -------------------------------
+   hero.css 把 `#filter-form + div`（整条筛选行）fixed 到 top:74/right:18/z-index:5。
+   这条规则带来两个后果，都必须抵消：
+     ① 创建层叠上下文 → 胶囊的 z-index:51 只在内部比较，被顶栏盖住（看不见）；
+     ② 胶囊被带到 y=74，看着像「跑到下面去了」。
+   解法：巨屏下让筛选行回到普通流，并把它里面的东西全收起 —— 巨屏不需要布局切换、
+   状态/排序/分类，密度胶囊自己已经是 fixed 独立的，不受影响。
+   （hero.css 不许改，所以覆盖写在这里。） */
+main#main-content:has(.lj-showcase.lj-hero) #filter-form + div {
+  position: static;
+  inset: auto;
+  top: auto;
+  right: auto;
+  z-index: auto;
+  margin: 0;
+}
+/* ⚠ 不能写 `x > *:not(#pill)`：胶囊外面还包着一层 .flex.gap-2，
+   那条规则会把外层容器一起 display:none，胶囊跟着消失（实测 0×0）。
+   正确做法：把筛选行里的控件逐类收起，唯独胶囊自己强制恢复成 flex。 */
+main#main-content:has(.lj-showcase.lj-hero) #filter-form + div .relative { display: none; }
+main#main-content:has(.lj-showcase.lj-hero) #filter-form + div a[href*="layout="] { display: none; }
+main#main-content:has(.lj-showcase.lj-hero) #filter-form + div [aria-label="卡片排布方式"] { display: none; }
+main#main-content:has(.lj-showcase.lj-hero) #lj-density-pill {
+  display: flex !important;
+  position: fixed !important;
+  top: 16px !important;
+  /* hero 本身是 position:fixed; inset:0; z-index:2，会盖住顶栏那一片，
+     点下去命中的是 hero 而不是胶囊。把胶囊抬到 hero 之上（仍低于顶栏 50 之外
+     的层级用 52 保证可点，但不影响顶栏自身按钮）。 */
+  z-index: 52 !important;
+  pointer-events: auto !important;
+}
+/* hero 满屏的那层背景不吃指针事件，避免它挡住顶栏右侧的控件 */
+main#main-content:has(.lj-showcase.lj-hero) .lj-showcase.lj-hero {
+  pointer-events: none;
+}
+main#main-content:has(.lj-showcase.lj-hero) .lj-showcase.lj-hero > * {
+  pointer-events: auto;
+}
+main#main-content:has(.lj-showcase.lj-hero) .lj-genre-dd {
+  display: none;
+}
+
+/* ---- 12. 巨屏简介：两行硬截会咬在半个词上，放宽到五行 ------------------
+   问题：.lj-hero-syn 在 hero.css 里写死 -webkit-line-clamp: 2，中文两行只能
+   装约 54 个字，收尾断成「…在升级树中不断进阶，最…」这种半截词（实测可视
+   高 39.2px、内容实高 59px，18 条里 10 条被截）。
+   做法：hero.css 只在本页后加载、且不许改，所以覆盖写在这里，靠更长的选择器
+   拿权重（.lj-showcase.lj-hero .lj-hero-text .lj-hero-syn 比原规则多一层）。
+   行数是逐档实测定的：3 行还剩 2 条被截，4 行还剩 1 条，5 行时 18 条全部
+   完整收尾（最长那条内容实高 98px = 5 行整，正好装下）。
+   版式：巨屏主区是 grid 的 minmax(0,1fr)，内容靠底对齐、上半屏是空的大图，
+   多两行不会顶出 100svh，也不会盖住第 2 行的底部卡带（1024x600 / 1280x800 /
+   1600x1000 / 1920x1080 / 2560x1440 逐档量过；把标题、金句、简介全部灌到最长
+   的压力测试也没顶出、没盖住卡带）。简介本身短于五行时高度自动收缩，不受影响。 */
+.lj-showcase.lj-hero .lj-hero-text .lj-hero-syn {
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+}

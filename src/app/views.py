@@ -1,0 +1,1596 @@
+import logging
+from pathlib import Path
+from urllib.parse import urlencode
+
+from django.apps import apps
+from django.conf import settings
+from django.contrib import messages
+from django.contrib.auth.decorators import login_not_required
+from django.core.cache import cache
+from django.core.paginator import Paginator
+from django.db import IntegrityError, connection
+from django.db.models import Prefetch, Q, prefetch_related_objects
+from django.http import Http404, HttpResponse, HttpResponseBadRequest, JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils import timezone
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
+
+from app import config, helpers, history_processor, i18n_zh, image_relay, status_filters
+from app import home as home_helpers
+from app import statistics as stats
+from app import playtime as stats_playtime
+from app import near_complete as near_complete_agg
+from app import year_in_review as year_review
+from app.forms import EpisodeForm, ManualItemForm, get_form_class
+from app.models import (
+    TV,
+    BasicMedia,
+    Episode,
+    Item,
+    MediaTypes,
+    Season,
+    Sources,
+    Status,
+    UserMessage,
+)
+from app.providers import manual, services, tmdb
+from app.templatetags import app_tags
+from events.models import Event
+from users.models import (
+    DateFormatChoices,
+    HomeSortChoices,
+    MediaSortChoices,
+    MediaStatusChoices,
+    User,
+)
+
+logger = logging.getLogger(__name__)
+
+# Highest page number the search page will pass on to a provider. Steam's
+# results arrive in a single batch and are sliced locally, so a huge page
+# number is only a very large offset; capping keeps that bounded.
+MAX_SEARCH_PAGE = 1000
+
+
+@require_GET
+def home(request):
+    """Home page with the media items currently in progress.
+
+    首页只留「进行中」一个分区。原来还渲染「已暂停」（Paused，958 个游戏）
+    和「计划中」（Planning，2086 个游戏）两个分区，这两个货架在本机几乎没人看，
+    却要各自跑一遍排序，所以整块去掉了；书的口径见 app/home.py。
+    """
+    sort_by = request.user.update_preference("home_sort", request.GET.get("sort"))
+    media_type_to_load = request.GET.get("load_media_type")
+    section_to_load = request.GET.get("load_status", Status.IN_PROGRESS.value)
+    hide_unreleased_param = request.GET.get("hide_unreleased")
+    hide_unreleased = request.user.update_preference(
+        "home_hide_unreleased",
+        None if hide_unreleased_param is None else hide_unreleased_param == "true",
+    )
+    items_limit = 14
+
+    # If this is an HTMX request to load more items for a specific media type
+    if request.headers.get("HX-Request") and media_type_to_load:
+        list_by_type = home_helpers.get_home_media_types(
+            request,
+            sort_by,
+            section_to_load,
+            items_limit,
+            media_type_to_load,
+            hide_unreleased=hide_unreleased,
+        )
+        return render(
+            request,
+            "app/components/home_grid.html",
+            {
+                "media_list": list_by_type.get(
+                    media_type_to_load,
+                    {"items": [], "total": 0},
+                ),
+                "home_status": section_to_load,
+            },
+        )
+
+    # 首页只保留「进行中」一个分区：已暂停（Paused）和计划中（Planning）
+    # 两个分区整块不再构建，连查询都不发。
+    enabled_sections = request.user.get_enabled_home_sections()
+    section_keys = [
+        section_key
+        for section_key in (Status.IN_PROGRESS.value,)
+        if section_key in enabled_sections
+    ]
+
+    home_sections = [
+        home_helpers.build_home_section(
+            section_key,
+            home_helpers.get_home_media_types(
+                request,
+                sort_by,
+                section_key,
+                items_limit,
+                hide_unreleased=hide_unreleased,
+            ),
+        )
+        for section_key in section_keys
+    ]
+
+    context = {
+        "home_sections": home_sections,
+        "current_sort": sort_by,
+        "sort_choices": i18n_zh.tr_choices(HomeSortChoices.choices),
+        "hide_unreleased": hide_unreleased,
+        "items_limit": items_limit,
+    }
+    return render(request, "app/home.html", context)
+
+
+@require_POST
+def progress_edit(request, media_type, instance_id):
+    """Increase or decrease the progress of a media item from home page."""
+    operation = request.POST["operation"]
+    hide_unreleased = request.user.home_hide_unreleased
+    home_status = request.POST.get("home_status")
+    # 详情页的快捷动作（+30 分钟 / 标记完成）复用同一个端点，只是换一份局部模板回来
+    detail = request.POST.get("detail") == "1"
+
+    media = helpers.get_owned_media_or_404(
+        request, media_type, instance_id, prefetch=True
+    )
+
+    if operation == "increase":
+        media.increase_progress()
+    elif operation == "decrease":
+        media.decrease_progress()
+    elif operation == "complete":
+        media.status = Status.COMPLETED.value
+        if not media.end_date:
+            media.end_date = timezone.now().replace(second=0, microsecond=0)
+        media.save()
+
+    if media_type == MediaTypes.SEASON.value:
+        # clear prefetch cache to get the updated episodes
+        media.refresh_from_db()
+        prefetch_related_objects(
+            [media],
+            Prefetch(
+                "episodes",
+                queryset=Episode.objects.select_related("item"),
+            ),
+            Prefetch(
+                "item__event_set",
+                queryset=Event.objects.all(),
+                to_attr="prefetched_events",
+            ),
+        )
+
+    # 详情页快捷动作：同一端点、换一份局部模板（首页那套不动）
+    if detail:
+        media.refresh_from_db()
+        return render(
+            request,
+            "app/components/detail_progress_actions.html",
+            {
+                "media": media,
+                "media_type": media_type,
+                "Status": Status,
+            },
+        )
+
+    if hide_unreleased and home_status == Status.IN_PROGRESS.value:
+        if media_type == MediaTypes.SEASON.value:
+            BasicMedia.objects.annotate_max_progress([media], media_type)
+        BasicMedia.objects._annotate_next_event([media])
+
+        if not home_helpers.is_active_in_progress_media(media):
+            response = HttpResponse()
+            response["HX-Retarget"] = f"#home-media-{media.item.media_type}-{media.id}"
+            response["HX-Reswap"] = "delete"
+            return response
+
+    context = {
+        "media": media,
+        "home_status": home_status,
+    }
+    return render(
+        request,
+        "app/components/progress_changer.html",
+        context,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 分类（genres）筛选
+#
+# ?genres=动作,角色扮演，逗号分隔、多选取并集。genres 是 Item 上的 JSONField
+# （models.py:102），SQLite 后端不支持 Django 的 contains 查找（会抛
+# NotSupportedError），所以这里统一走 JSON1 的 json_each 写成 SQL 子查询，
+# 分类名全部用 %s 占位参数化，绝不拼进字符串。
+# ---------------------------------------------------------------------------
+
+# 中文输入法很容易打出全角逗号，两种都当分隔符
+_GENRE_SEPARATORS = {"，": ","}
+
+# json_each 只对合法 JSON 数组展开；这两个守卫条件避免脏数据直接炸整页
+_JSON_GENRES_GUARD = "json_valid(i.genres) AND json_type(i.genres) = 'array'"
+
+
+def _parse_genres_param(raw):
+    """把 ?genres=动作,角色扮演 解析成去重后的分类名列表。
+
+    半角/全角逗号都当分隔符，去首尾空格、丢掉空串、保持用户输入的顺序；
+    参数缺失或全是空串时返回空列表（= 不筛选）。
+    """
+    if not raw:
+        return []
+    for full_width, half_width in _GENRE_SEPARATORS.items():
+        raw = raw.replace(full_width, half_width)
+
+    parsed = []
+    for piece in raw.split(","):
+        name = piece.strip()
+        if name and name not in parsed:
+            parsed.append(name)
+    return parsed
+
+
+def _item_ids_for_genres(genres):
+    """返回命中任一分类的 Item id 子查询（未命中任何分类则为 None）。
+
+    genres 是 JSONField，SQLite 不支持 contains 查找，所以用 json_each 展开成
+    行再比较；分类名走参数绑定，中文不参与拼接。
+    """
+    if not genres:
+        return None
+    placeholders = ", ".join(["%s"] * len(genres))
+    return Item.objects.extra(
+        where=[
+            "json_valid(genres)"
+            " AND EXISTS (SELECT 1 FROM json_each(genres) je"
+            f" WHERE je.value IN ({placeholders}))",
+        ],
+        params=list(genres),
+    ).values("id")
+
+
+def _genres_in_media_type(media_type, names):
+    """从 names 里筛出该媒体类型确实拥有的分类（库级校验）。
+
+    这里故意不看状态 / 搜索：某个分类在当前档位下可能一条都没有（例如
+    「竞速」在某个状态下 0 条），但它本身是真实分类，不能被当成脏参数丢掉，
+    否则用户选了分类切个状态，筛选会静默失效。真·不存在的分类才返回不到。
+    """
+    if not names:
+        return set()
+    placeholders = ", ".join(["%s"] * len(names))
+    sql = (
+        "SELECT DISTINCT je.value FROM app_item i JOIN json_each(i.genres) je "
+        f"WHERE i.media_type = %s AND {_JSON_GENRES_GUARD} "
+        f"AND je.value IN ({placeholders})"
+    )
+    with connection.cursor() as cursor:
+        cursor.execute(sql, [media_type, *names])
+        return {row[0] for row in cursor.fetchall()}
+
+
+def _genre_options(queryset, media_type):
+    """一条 SQL 算出每个分类在「当前状态 + 搜索」下的条数，按数量倒序。
+
+    分类清单完全从当前 media_type 的实际数据里来（不写死任何名单），
+    所以书（book）这类没有分类的媒体类型自然得到空列表。
+    count 的语义是「只再选中这一个分类会剩多少条」，不叠加已选分类，
+    面板上的「动作 77」就是靠这个数字。
+    """
+    # 取基础筛选（状态 + 搜索）的 SQL，作为分类聚合的白名单。
+    # 分类最多 51 个，但这里只发一条聚合查询，不做 51 次往返。
+    sql, params = queryset.order_by().values("item_id").query.sql_with_params()
+    aggregate_sql = (
+        "SELECT je.value AS name, COUNT(DISTINCT i.id) AS c "
+        "FROM app_item i "
+        "JOIN json_each(i.genres) je "
+        f"WHERE i.media_type = %s AND {_JSON_GENRES_GUARD} "
+        f"AND i.id IN ({sql}) "
+        "GROUP BY je.value ORDER BY c DESC, name ASC"
+    )
+    with connection.cursor() as cursor:
+        cursor.execute(aggregate_sql, [media_type, *params])
+        return [{"name": name, "count": count} for name, count in cursor.fetchall()]
+
+
+@login_not_required
+@require_GET
+def media_list(request, username, media_type):
+    """Return the media list page."""
+    target_user = get_object_or_404(User, username=username)
+
+    # if user is looking at own page then update preferences
+    if request.user == target_user:
+        layout = target_user.update_preference(
+            f"{media_type}_layout",
+            request.GET.get("layout"),
+        )
+        sort_filter = target_user.update_preference(
+            f"{media_type}_sort",
+            request.GET.get("sort"),
+        )
+        status_filter = target_user.update_preference(
+            f"{media_type}_status",
+            request.GET.get("status"),
+        )
+    else:
+        # privacy check then media type check
+        if target_user.profile_private:
+            msg = "User not found"
+            raise Http404(msg)
+
+        enabled_media_types = target_user.get_enabled_media_types()
+        if not enabled_media_types:
+            msg = "User doesn't have any media types enabled"
+            raise Http404(msg)
+
+        if media_type not in enabled_media_types:
+            return redirect(
+                "medialist",
+                username=target_user.username,
+                media_type=enabled_media_types[0],
+            )
+
+        layout = target_user.get_valid_preference(
+            f"{media_type}_layout",
+            request.GET.get("layout"),
+        )
+        sort_filter = target_user.get_valid_preference(
+            f"{media_type}_sort",
+            request.GET.get("sort"),
+        )
+        status_filter = target_user.get_valid_preference(
+            f"{media_type}_status",
+            request.GET.get("status"),
+        )
+
+    search_query = request.GET.get("search", "")
+    page = request.GET.get("page", 1)
+
+    # 巨屏搜索（density=1 + search=关键词）：URL 里没带 status 时**不沿用**上回存的
+    # 状态偏好。用户方案是「搜到一个就在屏幕上铺开那一个的巨幕」，而存下来的偏好
+    # 往往是「已暂停 / 全成就」，实测搜 Hades 命中 4 条、筛完剩 0 条 → 屏幕一片空白，
+    # 看起来就像搜索坏了。所以这一种请求把状态强行拉到「全部」，其余请求照旧。
+    hero_search_mode = (
+        media_type == MediaTypes.GAME.value
+        and request.GET.get("density") == "1"
+        and bool(request.GET.get("search"))
+    )
+    if hero_search_mode and not request.GET.get("status"):
+        status_filter = MediaStatusChoices.ALL
+
+    # 下拉四档里「全成就」是界面造出来的伪状态，库里没有这个取值，
+    # 存进 *_status 字段会违反 check constraint，所以只对本次请求生效。
+    requested_status = request.GET.get("status")
+    if requested_status in status_filters.FILTER_VALUES:
+        status_filter = requested_status
+    # 游戏列表的默认档位是「全成就」：URL 里没带 status（从侧栏、详情页返回、
+    # 统计页跳过来）就先落到这一档；带了 status 说明用户自己点过某一档，
+    # 上面那句 update_preference 已经照旧把真实状态写库，这里不再插手。
+    # 伪值只在本次请求里生效，不写回数据库，所以下次不带参数进来仍是全成就。
+    elif (
+        not requested_status
+        and media_type == MediaTypes.GAME.value
+        and not hero_search_mode
+    ):
+        status_filter = status_filters.ALL_ACHIEVEMENTS
+
+    # Prepare status filter for database query
+    if not status_filter:
+        status_filter = MediaStatusChoices.ALL
+    # 老偏好里可能还存着 Planning（当年是单独一档），现在并进「已暂停」
+    status_filter = status_filters.normalize(status_filter)
+
+    # Fallback for legacy "score" default: when nothing in this library has a
+    # score, sorting by score is effectively random. Use playtime progress
+    # instead (a real, always-present field) without touching the model default
+    # (which would require a migration).
+    if sort_filter == MediaSortChoices.SCORE:
+        media_model = apps.get_model(app_label="app", model_name=media_type)
+        has_any_score = media_model.objects.filter(
+            user=target_user,
+        ).exclude(score__isnull=True).exists()
+        if not has_any_score:
+            sort_filter = MediaSortChoices.PROGRESS
+
+    # Get media list with filters applied
+    media_queryset = BasicMedia.objects.get_media_list(
+        user=target_user,
+        media_type=media_type,
+        status_filter=status_filter,
+        sort_filter=sort_filter,
+        search=search_query,
+    ).select_related("item", "item__ai_copy")
+    # AI 金句是 Item 上的反向 OneToOne（related_name="ai_copy"）。用 select_related
+    # 一次 JOIN 带回来，避免每张卡片一次查询（N+1）。没有 AI 文案的条目在模板里
+    # 用 {% if item.ai_copy %} 判断，缺对象时是假值，不会抛异常。
+
+    # 分类面板的候选清单：只取「状态 + 搜索」这一层，不含本次已选分类，
+    # 这样每个分类的 count 都是「单独再选中它会剩多少条」。
+    genre_options = _genre_options(media_queryset, media_type)
+    # 传了库里不存在的分类名就忽略；全被忽略后 genres_selected 为空，
+    # 等价于不筛选（不会退化成空结果，也不会生成空的 IN ()）。
+    requested_genres = _parse_genres_param(request.GET.get("genres"))
+    known_genre_names = _genres_in_media_type(media_type, requested_genres)
+    genres_selected = [
+        name for name in requested_genres if name in known_genre_names
+    ]
+
+    # 分类筛选：多选取并集，命中任一即算。位置必须在 Paginator 之前，
+    # 否则 num_pages 还是未过滤的总数，翻页会翻出空白页。
+    genre_item_ids = _item_ids_for_genres(genres_selected)
+    if genre_item_ids is not None:
+        media_queryset = media_queryset.filter(item_id__in=genre_item_ids)
+
+    # 每页条数固定 16 条（4×4），密度档位（4/8/12/16）改由前端 CSS 控制：
+    # 后端一次渲染满 16 张，浏览器里点密度只改 data-show，隐藏多余卡片 + 换列数，
+    # 不跳 URL、不重新请求服务器。所以 density 参数只用来决定「首帧的档位」，
+    # 不再决定抓多少条（书籍/影/剧/游戏的翻页页码因此也不再随密度变化）。
+    #
+    # 巨屏（density=1，18 条）是唯一还走服务端的档位，而且只给游戏库：
+    # 书/影/剧没有 3:1 横版大图，铺满 100svh 很难看。
+    # density=1 落在别的库上必须干净地退回 12 档，不能沿用上一轮的数字。
+    # 密度三级（用户要「选的 4/8/12/16 记住」）：
+    #   ① URL 带了合法档位（4/8/12/16）→ 用它，并写回用户，之后任何入口都能沿用
+    #   ② URL 没带 → 用用户身上存的 list_density（空串当没存）
+    #   ③ 库里也是空 → 兜底 12
+    # 下面这几条原有特殊规则逐条保留，一个字没动：
+    #   · auto → 16     · 巨屏只在「游戏库 且 URL 里 density=1」时成立（看 URL，不看库）
+    #   · density=1 落在非游戏库干净退回 12     · 合法只有 {4,8,12,16}，脏值一律 12
+    #   · 巨屏 18 条 / 普通 16 条     · 写库只写 4/8/12/16，永不写 "1"（DB 有约束）
+    VALID_DENSITIES = {"4", "8", "12", "16"}
+    density_param_given = request.GET.get("density") is not None
+    density_raw = request.GET.get("density", "")
+    if density_raw == "auto":  # 老链接里的 auto 就是 16 档
+        density_raw = "16"
+    hero_mode = media_type == MediaTypes.GAME.value and density_raw == "1"
+    if hero_mode:
+        density_show = "1"
+        items_per_page = 18
+    else:
+        # 只认四档；"1"（巨屏档）和任何脏值一律落到 12。
+        # 这样「游戏库点巨屏 → 点电影库」时，URL 里残留的 density=1
+        # 不会让电影库变成 4 张卡或半截巨屏。
+        if density_raw in VALID_DENSITIES:
+            # ① URL 给了合法档位：以它为准，顺手记住（只记 4/8/12/16）
+            density_show = density_raw
+            if request.user == target_user:
+                target_user.update_preference("list_density", density_raw)
+        elif density_param_given:
+            # URL 明确给了个不能用的值（"1" 落在非游戏库、脏值）：干净退回 12，
+            # 不读记忆 —— 这是原有规则，一个字不能变。
+            density_show = "12"
+        else:
+            # ② URL 根本没带 density：读库里的记忆
+            saved = getattr(target_user, "list_density", "") or ""
+            # ③ 库里也没有 → 兜底 12
+            density_show = saved if saved in VALID_DENSITIES else "12"
+        items_per_page = 16
+    density_param = density_show
+    paginator = Paginator(media_queryset, items_per_page)
+    media_page = paginator.get_page(page)
+
+    BasicMedia.objects.annotate_max_progress(
+        media_page.object_list,
+        media_type,
+    )
+
+    # Hide columns that would render as "all dashes" on this page.
+    # Pure in-memory checks over the already-fetched page (max 32 rows),
+    # no extra queries and no N+1.
+    page_items = list(media_page.object_list)
+    show_score_column = any(item.score is not None for item in page_items)
+    show_start_date_column = any(item.start_date for item in page_items)
+    show_end_date_column = any(item.end_date for item in page_items)
+
+    context = {
+        "media_type": media_type,
+        "media_type_plural": app_tags.media_type_readable_plural(media_type).lower(),
+        "media_list": media_page,
+        "current_layout": layout,
+        "layout_class": ".media-grid" if layout == "grid" else "tbody",
+        "current_sort": sort_filter,
+        "current_status": status_filter,
+        # 卡片密度档位（4 / 8 / 12 / 16，巨屏另有 1）。
+        #   density      = 当前档位，模板写在 data-show 上，CSS 据此隐藏多余卡片 + 换列数
+        #   density_data = 这一页实际渲染了几张（固定 16，巨屏 18），写在 data-d 上
+        #                  —— CSS 只拿它当「满档版式」的标识，不再代表列数
+        "density": density_param,
+        "density_data": items_per_page,
+        "hero_mode": hero_mode,
+        "has_prev_page": media_page.has_previous(),
+        "has_next_page": media_page.has_next(),
+        "prev_page_number": media_page.previous_page_number()
+        if media_page.has_previous()
+        else None,
+        "next_page_number": media_page.next_page_number()
+        if media_page.has_next()
+        else None,
+        "page_number": media_page.number,
+        "total_pages": paginator.num_pages,
+        "sort_choices": i18n_zh.tr_choices(MediaSortChoices.choices),
+        # 下拉只给四档：全成就 / 已通关 / 进行中 / 已暂停。
+        # 老值（All / Planning / Dropped）仍要能显示标签，所以另有 status_label_choices。
+        # 书和影视没有成就系统，这两类按媒体类型换词（已读完 / 已观看 等），
+        # 取值和筛选逻辑完全不变，游戏仍是原来那四档。
+        "status_choices": i18n_zh.tr_choices(status_filters.filter_choices_for(media_type)),
+        "status_label_choices": i18n_zh.tr_choices(status_filters.label_choices_for(media_type)),
+        "target_user": target_user,
+        "show_score_column": show_score_column,
+        "show_start_date_column": show_start_date_column,
+        "show_end_date_column": show_end_date_column,
+        # 分类筛选面板（第 2 波前端用）。genres_total 取分页后的总数，
+        # 和 total_pages 同源，保证「筛了之后有 N 条」跟翻页对得上。
+        "genres_selected": genres_selected,
+        "genre_options": genre_options,
+        "genres_total": paginator.count,
+    }
+
+    # Handle HTMX requests for partial updates. Soft-navigation requests (e.g.
+    # after saving from an edit modal) need the full page for the body swap.
+    if request.headers.get("HX-Request") and not request.headers.get(
+        "X-Soft-Navigation"
+    ):
+        # Filtering from empty list
+        if request.headers.get("HX-Target") == "empty_list":
+            # If still empty, keep user in the same page
+            if not media_page.object_list:
+                return HttpResponse(status=204)
+            response = HttpResponse()
+            response["HX-Redirect"] = reverse(
+                "medialist", args=[target_user.username, media_type]
+            )
+            return response
+        if layout == "grid":
+            template_name = "app/components/media_grid_items.html"
+        else:
+            template_name = "app/components/media_table_items.html"
+    else:
+        template_name = "app/media_list.html"
+
+    return render(request, template_name, context)
+
+
+def _search_local_items(query, media_type, source, limit):
+    """Return local items whose title or stored alias matches ``query``.
+
+    The Steam store search only knows the store title, so a game stored under a
+    different Chinese (title_zh) or English (title_en) name never comes back.
+    Both aliases live on the Item, so they are matched here and the hit is
+    labelled with the name the user actually typed.
+    """
+    matches = (
+        Item.objects.filter(media_type=media_type, source=source)
+        .filter(
+            Q(title__icontains=query)
+            | Q(title_zh__icontains=query)
+            | Q(title_en__icontains=query),
+        )
+        .order_by("title")[:limit]
+    )
+
+    needle = query.casefold()
+    results = []
+    for item in matches:
+        title = item.title
+        for alias in (item.title_zh, item.title_en):
+            if alias and needle in alias.casefold() and alias != title:
+                title = f"{title}（{alias}）"
+                break
+        results.append(
+            {
+                "media_id": item.media_id,
+                "source": item.source,
+                "media_type": item.media_type,
+                "title": title,
+                "image": item.image,
+                "release_year": item.release_date.year if item.release_date else None,
+            },
+        )
+    return results
+
+
+@require_GET
+def media_search(request):
+    """Return the media search page."""
+    media_type = request.user.update_preference(
+        "last_search_type",
+        request.GET.get("media_type") or MediaTypes.GAME.value,
+    )
+    query = request.GET.get("q", "").strip()
+    if not query:
+        messages.info(request, "请输入要搜索的名称。")
+    # A hand-edited or stale page param must not crash the page: anything that
+    # is not a sane page number falls back to the first page instead of
+    # reaching a provider as an absurd offset.
+    try:
+        page = int(request.GET.get("page") or 1)
+    except (TypeError, ValueError):
+        page = 1
+    if page < 1 or page > MAX_SEARCH_PAGE:
+        page = 1
+    layout = request.GET.get("layout", "grid")
+
+    # only receives source when searching with secondary source
+    source = request.GET.get(
+        "source",
+        config.get_default_source_name(media_type).value,
+    )
+
+    # 搜索必须「要么很快出结果，要么很快说清为什么没结果」。
+    # store.steampowered.com 从本机连不通（ConnectTimeout），以前一个搜索请求会把
+    # 连接超时（120 秒）等满，浏览器那边 45～60 秒就断了，用户看到的就是一直转圈，
+    # 运气不好还吃个 500。现在把两种情况分开：
+    #   · 服务连不上 → 渲染降级页（200 + 中文提示），几秒内返回
+    #   · 真没搜到   → 还是原来的空结果页
+    # ⚠ 只接 provider 的异常。KeyError / AttributeError 这类真 bug 必须照常冒出去。
+    degraded = None
+    try:
+        data = services.search(media_type, query, page, source)
+    except services.ProviderUnavailableError as exc:
+        degraded = {
+            "kind": "unavailable",
+            "message": f"{exc.provider_label} 现在连不上（网络超时），不是关键词搜错了。",
+            "hint": "稍等一两分钟再搜一次。想立刻用的话，可以换个数据源试试。",
+        }
+        data = helpers.format_search_response(page, settings.PER_PAGE, 0, [])
+    except services.ProviderAPIError as exc:
+        code = f"HTTP {exc.status_code}" if exc.status_code else "网络异常"
+        degraded = {
+            "kind": "error",
+            "message": f"{exc.provider_label} 返回了错误（{code}），这次搜索没做完。",
+            "hint": "换一个数据源，或过一会儿再试。",
+        }
+        data = helpers.format_search_response(page, settings.PER_PAGE, 0, [])
+
+    # The provider only knows the store titles, so a game stored under a
+    # different Chinese (title_zh) or English (title_en) name is invisible.
+    # Both aliases live on the local Item, so their matches are merged in ahead
+    # of the provider results; anything the provider already returned is kept
+    # once, and only the first page is topped up.
+    if query and page == 1 and media_type == MediaTypes.GAME.value:
+        known = {(result["source"], str(result["media_id"])) for result in data["results"]}
+        local = [
+            result
+            for result in _search_local_items(
+                query, media_type, source, settings.PER_PAGE
+            )
+            if (result["source"], str(result["media_id"])) not in known
+        ]
+        if local:
+            data["results"] = (local + data["results"])[: settings.PER_PAGE]
+            data["total_results"] += len(local)
+            data["total_pages"] = data["total_results"] // settings.PER_PAGE + 1
+            # 线上挂了但本地库里有这款游戏：那几条照样显示，只是页头多一句说明。
+            # 这样断网时「搜我自己的游戏」依然能用，也不会让人以为库里数据丢了。
+            if degraded is not None:
+                degraded["local_count"] = len(local)
+
+    # Enrich search results with user tracking data
+    if data.get("results"):
+        data["results"] = helpers.enrich_items_with_user_data(
+            request, data["results"], "search"
+        )
+
+    context = {
+        "data": data,
+        "source": source,
+        "media_type": media_type,
+        "layout": layout,
+        "degraded": degraded,
+    }
+
+    return render(request, "app/search.html", context)
+
+
+@require_GET
+def media_details(request, source, media_type, media_id, title):  # noqa: ARG001 title for URL
+    """Return the details page for a media item."""
+    media_metadata = services.get_media_metadata(media_type, media_id, source)
+    user_medias = BasicMedia.objects.filter_media_prefetch(
+        request.user,
+        media_id,
+        media_type,
+        source,
+    )
+    current_instance = user_medias[0] if user_medias else None
+
+    # Steam achievements are stored per user on the game itself, the metadata
+    # of the item can only guess which tracked game to read them from
+    total_achievements = getattr(current_instance, "achievements_total", 0)
+    if total_achievements:
+        media_metadata["achievements"] = {
+            "total": total_achievements,
+            "unlocked": current_instance.achievements_unlocked,
+            "percent": current_instance.achievement_percent,
+        }
+
+    if current_instance is not None:
+        helpers.refresh_item_image_if_missing(
+            current_instance.item, media_metadata.get("image")
+        )
+
+    # Enrich related items with user tracking data
+    if media_metadata.get("related"):
+        for section_name, related_items in media_metadata["related"].items():
+            if related_items:
+                media_metadata["related"][section_name] = (
+                    helpers.enrich_items_with_user_data(
+                        request, related_items, section_name
+                    )
+                )
+
+    if media_type in ["tv", "movie"]:
+        watch_providers = tmdb.filter_providers(
+            media_metadata.get("providers"), request.user.watch_provider_region
+        )
+    else:
+        watch_providers = None
+
+    context = {
+        "media": media_metadata,
+        "media_type": media_type,
+        "user_medias": user_medias,
+        "current_instance": current_instance,
+        "watch_providers": watch_providers,
+        "watch_provider_region": request.user.watch_provider_region,
+    }
+    return render(request, "app/media_details.html", context)
+
+
+@require_GET
+def season_details(request, source, media_id, title, season_number):  # noqa: ARG001 For URL
+    """Return the details page for a season."""
+    tv_with_seasons_metadata = services.get_media_metadata(
+        "tv_with_seasons",
+        media_id,
+        source,
+        [season_number],
+    )
+    season_metadata = tv_with_seasons_metadata[f"season/{season_number}"]
+
+    user_medias = BasicMedia.objects.filter_media_prefetch(
+        request.user,
+        media_id,
+        MediaTypes.SEASON.value,
+        source,
+        season_number=season_number,
+    )
+
+    current_instance = user_medias[0] if user_medias else None
+    episodes_in_db = current_instance.episodes.all() if current_instance else []
+
+    if current_instance is not None:
+        helpers.refresh_item_image_if_missing(
+            current_instance.item, season_metadata.get("image")
+        )
+
+    if source == Sources.MANUAL.value:
+        season_metadata["episodes"] = manual.process_episodes(
+            season_metadata,
+            episodes_in_db,
+        )
+    else:
+        season_metadata["episodes"] = tmdb.process_episodes(
+            season_metadata,
+            episodes_in_db,
+        )
+
+    # Enrich related items with user tracking data
+    if season_metadata.get("related"):
+        for section_name, related_items in season_metadata["related"].items():
+            if related_items:
+                season_metadata["related"][section_name] = (
+                    helpers.enrich_items_with_user_data(
+                        request,
+                        related_items,
+                        section_name,
+                    )
+                )
+
+    context = {
+        "media": season_metadata,
+        "tv": tv_with_seasons_metadata,
+        "media_type": MediaTypes.SEASON.value,
+        "user_medias": user_medias,
+        "current_instance": current_instance,
+        "watch_providers": tmdb.filter_providers(
+            season_metadata.get("providers"), request.user.watch_provider_region
+        ),
+        "watch_provider_region": request.user.watch_provider_region,
+    }
+    return render(request, "app/media_details.html", context)
+
+
+@require_POST
+def update_media_score(request, media_type, instance_id):
+    """Update the user's score for a media item."""
+    media = helpers.get_owned_media_or_404(request, media_type, instance_id)
+
+    try:
+        score = float(request.POST.get("score"))
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"success": False, "error": "invalid score"},
+            status=400,
+        )
+    if not 0 <= score <= 10:
+        return JsonResponse(
+            {"success": False, "error": "score out of range"},
+            status=400,
+        )
+    media.score = score
+    media.save()
+    logger.info(
+        "%s score updated to %s",
+        media,
+        score,
+    )
+
+    return JsonResponse(
+        {
+            "success": True,
+            "score": score,
+        },
+    )
+
+
+@require_POST
+def sync_metadata(request, source, media_type, media_id, season_number=None):
+    """Refresh the metadata for a media item."""
+    if source == Sources.MANUAL.value:
+        msg = "Manual items cannot be synced."
+        messages.error(request, msg)
+        return HttpResponse(
+            msg,
+            status=400,
+            headers={"HX-Redirect": request.POST.get("next", "/")},
+        )
+
+    cache_key = f"{source}_{media_type}_{media_id}"
+    if media_type == MediaTypes.SEASON.value:
+        cache_key += f"_{season_number}"
+
+    ttl = cache.ttl(cache_key)
+    logger.debug("%s - Cache TTL for: %s", cache_key, ttl)
+
+    if ttl is not None and ttl > (settings.CACHE_TIMEOUT - 3):
+        msg = "The data was recently synced, please wait a few seconds."
+        messages.error(request, msg)
+        logger.error(msg)
+    else:
+        deleted = cache.delete(cache_key)
+        logger.debug("%s - Old cache deleted: %s", cache_key, deleted)
+
+        metadata = services.get_media_metadata(
+            media_type,
+            media_id,
+            source,
+            [season_number],
+        )
+        item, _ = Item.objects.update_or_create(
+            media_id=media_id,
+            source=source,
+            media_type=media_type,
+            season_number=season_number,
+            defaults={
+                "title": metadata["title"],
+                "image": metadata["image"],
+            },
+        )
+        title = metadata["title"]
+        if season_number:
+            title += f" - Season {season_number}"
+
+        if media_type == MediaTypes.SEASON.value:
+            metadata["episodes"] = tmdb.process_episodes(
+                metadata,
+                [],
+            )
+
+            # Create a dictionary of existing episodes keyed by episode number
+            existing_episodes = {
+                ep.episode_number: ep
+                for ep in Item.objects.filter(
+                    source=source,
+                    media_type=MediaTypes.EPISODE.value,
+                    media_id=media_id,
+                    season_number=season_number,
+                )
+            }
+
+            episodes_to_update = []
+            episode_count = 0
+
+            for episode_data in metadata["episodes"]:
+                episode_number = episode_data["episode_number"]
+                if episode_number in existing_episodes:
+                    episode_item = existing_episodes[episode_number]
+                    episode_item.title = metadata["title"]
+                    episode_item.image = episode_data["image"]
+                    episodes_to_update.append(episode_item)
+                    episode_count += 1
+
+            logger.info(
+                "Found %s existing episodes to update for %s",
+                episode_count,
+                title,
+            )
+
+            if episodes_to_update:
+                updated_count = Item.objects.bulk_update(
+                    episodes_to_update,
+                    ["title", "image"],
+                    batch_size=100,
+                )
+                logger.info(
+                    "Successfully updated %s episodes for %s",
+                    updated_count,
+                    title,
+                )
+
+        item.fetch_releases(delay=False)
+
+        msg = f"{title} was synced to {Sources(source).label} successfully."
+        messages.success(request, msg)
+
+    if request.headers.get("HX-Request"):
+        return HttpResponse(
+            status=204,
+            headers={
+                "HX-Redirect": request.POST["next"],
+            },
+        )
+    return helpers.redirect_back(request)
+
+
+@require_GET
+def track_modal(
+    request,
+    source,
+    media_type,
+    media_id,
+    season_number=None,
+):
+    """Return the tracking form for a media item."""
+    instance_id = request.GET.get("instance_id")
+    if instance_id:
+        media = BasicMedia.objects.get_media(
+            request.user,
+            media_type,
+            instance_id,
+        )
+    elif request.GET.get("is_create"):
+        media = None
+    else:
+        # no specific instance, try to find the first one
+        user_medias = BasicMedia.objects.filter_media(
+            request.user,
+            media_id,
+            media_type,
+            source,
+            season_number=season_number,
+        )
+        media = user_medias.first()
+        if media:
+            instance_id = media.id
+
+    initial_data = {
+        "media_id": media_id,
+        "source": source,
+        "media_type": media_type,
+        "season_number": season_number,
+        "instance_id": instance_id,
+    }
+
+    if media:
+        title = media.item
+        if media_type == MediaTypes.GAME.value:
+            initial_data["progress"] = helpers.minutes_to_hhmm(media.progress)
+    else:
+        title = services.get_media_metadata(
+            media_type,
+            media_id,
+            source,
+            [season_number],
+        )["title"]
+        if media_type == MediaTypes.SEASON.value:
+            title += f" S{season_number}"
+
+    form = i18n_zh.tr_form_labels(
+        get_form_class(media_type)(instance=media, initial=initial_data),
+    )
+
+    return render(
+        request,
+        "app/components/fill_track.html",
+        {
+            "title": title,
+            "form": form,
+            "media": media,
+            "return_url": request.GET["return_url"],
+        },
+    )
+
+
+@require_POST
+def media_save(request):
+    """Save or update media data to the database."""
+    media_id = request.POST["media_id"]
+    source = request.POST["source"]
+    media_type = request.POST["media_type"]
+    season_number = request.POST.get("season_number")
+    instance_id = request.POST.get("instance_id")
+
+    if instance_id:
+        instance = helpers.get_owned_media_or_404(request, media_type, instance_id)
+    else:
+        metadata = services.get_media_metadata(
+            media_type,
+            media_id,
+            source,
+            [season_number],
+        )
+        item, _ = Item.objects.get_or_create(
+            media_id=media_id,
+            source=source,
+            media_type=media_type,
+            season_number=season_number,
+            defaults={
+                "title": metadata["title"],
+                "image": metadata["image"],
+            },
+        )
+        model = apps.get_model(app_label="app", model_name=media_type)
+        instance = model(item=item, user=request.user)
+
+    # Validate the form and save the instance if it's valid
+    form_class = get_form_class(media_type)
+    form = form_class(request.POST, instance=instance)
+    if form.is_valid():
+        form.save()
+        logger.info("%s saved successfully.", form.instance)
+    else:
+        logger.error(form.errors.as_json())
+        for field, errors in form.errors.items():
+            for error in errors:
+                messages.error(
+                    request,
+                    f"{field.replace('_', ' ').title()}: {error}",
+                )
+
+    return helpers.redirect_back(request)
+
+
+@require_POST
+def media_delete(request):
+    """Delete media data from the database."""
+    instance_id = request.POST["instance_id"]
+    media_type = request.POST["media_type"]
+    media = helpers.get_owned_media_or_404(request, media_type, instance_id)
+    media.delete()
+    logger.info("%s deleted successfully.", media)
+
+    return helpers.redirect_back(request)
+
+
+@require_POST
+def mark_user_messages_shown(request):
+    """Mark all unseen persistent messages for the user as shown."""
+    message_ids = [
+        int(message_id)
+        for message_id in request.POST.getlist("message_ids")
+        if message_id.isdigit()
+    ]
+    if not message_ids:
+        return HttpResponse(status=204)
+
+    UserMessage.objects.filter(
+        id__in=message_ids,
+        user=request.user,
+        shown_at__isnull=True,
+    ).update(shown_at=timezone.now())
+    return HttpResponse(status=204)
+
+
+@require_POST
+def episode_save(request):
+    """Handle the creation, deletion, and updating of episodes for a season."""
+    media_id = request.POST["media_id"]
+    season_number = int(request.POST["season_number"])
+    episode_number = int(request.POST["episode_number"])
+    source = request.POST["source"]
+
+    form = EpisodeForm(request.POST)
+    if not form.is_valid():
+        logger.error("Form validation failed: %s", form.errors)
+        return HttpResponseBadRequest("Invalid form data")
+
+    try:
+        related_season = Season.objects.get(
+            item__media_id=media_id,
+            item__source=source,
+            item__season_number=season_number,
+            item__episode_number=None,
+            user=request.user,
+        )
+    except Season.DoesNotExist:
+        tv_with_seasons_metadata = services.get_media_metadata(
+            "tv_with_seasons",
+            media_id,
+            source,
+            [season_number],
+        )
+        season_metadata = tv_with_seasons_metadata[f"season/{season_number}"]
+
+        item, _ = Item.objects.get_or_create(
+            media_id=media_id,
+            source=Sources.TMDB.value,
+            media_type=MediaTypes.SEASON.value,
+            season_number=season_number,
+            defaults={
+                "title": tv_with_seasons_metadata["title"],
+                "image": season_metadata["image"],
+            },
+        )
+        related_season = Season.objects.create(
+            item=item,
+            user=request.user,
+            score=None,
+            status=Status.IN_PROGRESS.value,
+            notes="",
+        )
+
+        logger.info("%s did not exist, it was created successfully.", related_season)
+
+    related_season.watch(
+        episode_number,
+        form.cleaned_data["end_date"],
+        form.cleaned_data["notes"],
+    )
+
+    return helpers.redirect_back(request)
+
+
+@require_http_methods(["GET", "POST"])
+def create_entry(request):
+    """Return the form for manually adding media items."""
+    if request.method == "GET":
+        # Honour the user's media type switches: a type turned off in the
+        # preferences (comic, boardgame, ...) should not be offered here either.
+        enabled_types = request.user.get_enabled_media_types()
+        media_types = [
+            media_type
+            for media_type in MediaTypes.values
+            if media_type in enabled_types
+            or media_type == MediaTypes.EPISODE.value
+        ]
+        return render(request, "app/create_entry.html", {"media_types": media_types})
+
+    # Process the form submission
+    form = ManualItemForm(request.POST, user=request.user)
+    if not form.is_valid():
+        # Handle form validation errors
+        logger.error(form.errors.as_json())
+        helpers.form_error_messages(form, request)
+        return redirect("create_entry")
+
+    # Try to save the item
+    try:
+        item = form.save()
+    except IntegrityError:
+        # Handle duplicate item
+        media_name = form.cleaned_data["title"]
+        if form.cleaned_data.get("season_number"):
+            media_name += f" - Season {form.cleaned_data['season_number']}"
+        if form.cleaned_data.get("episode_number"):
+            media_name += f" - Episode {form.cleaned_data['episode_number']}"
+
+        logger.exception("%s already exists in the database.", media_name)
+        messages.error(request, f"{media_name} already exists in the database.")
+        return redirect("create_entry")
+
+    # Prepare and validate the media form
+    updated_request = request.POST.copy()
+    updated_request.update({"source": item.source, "media_id": item.media_id})
+    media_form = get_form_class(item.media_type)(updated_request)
+
+    if not media_form.is_valid():
+        # Handle media form validation errors
+        logger.error(media_form.errors.as_json())
+        helpers.form_error_messages(media_form, request)
+
+        # Delete the item since the media creation failed
+        item.delete()
+        logger.info("%s was deleted due to media form validation failure", item)
+        return redirect("create_entry")
+
+    # Save the media instance
+    media_form.instance.user = request.user
+    media_form.instance.item = item
+
+    # Handle relationships based on media type
+    if item.media_type == MediaTypes.SEASON.value:
+        media_form.instance.related_tv = form.cleaned_data["parent_tv"]
+    elif item.media_type == MediaTypes.EPISODE.value:
+        media_form.instance.related_season = form.cleaned_data["parent_season"]
+
+    media_form.save()
+
+    # Success message
+    msg = f"{item} added successfully."
+    messages.success(request, msg)
+    logger.info(msg)
+
+    return redirect("create_entry")
+
+
+@require_GET
+def search_parent_tv(request):
+    """Return the search results for parent TV shows."""
+    query = request.GET.get("q", "").strip()
+
+    if len(query) <= 1:
+        return render(request, "app/components/search_parent_tv.html")
+
+    logger.debug(
+        "%s - Searching for TV shows with query: %s",
+        request.user.username,
+        query,
+    )
+
+    parent_tvs = TV.objects.filter(
+        user=request.user,
+        item__source=Sources.MANUAL.value,
+        item__media_type=MediaTypes.TV.value,
+        item__title__icontains=query,
+    )[:5]
+
+    return render(
+        request,
+        "app/components/search_parent_tv.html",
+        {"results": parent_tvs, "query": query},
+    )
+
+
+@require_GET
+def search_parent_season(request):
+    """Return the search results for parent seasons."""
+    query = request.GET.get("q", "").strip()
+
+    if len(query) <= 1:
+        return render(request, "app/components/search_parent_tv.html")
+
+    logger.debug(
+        "%s - Searching for seasons with query: %s",
+        request.user.username,
+        query,
+    )
+
+    parent_seasons = Season.objects.filter(
+        user=request.user,
+        item__source=Sources.MANUAL.value,
+        item__media_type=MediaTypes.SEASON.value,
+        item__title__icontains=query,
+    )[:5]
+
+    return render(
+        request,
+        "app/components/search_parent_season.html",
+        {"results": parent_seasons, "query": query},
+    )
+
+
+@require_GET
+def history_modal(
+    request,
+    source,
+    media_type,
+    media_id,
+    season_number=None,
+    episode_number=None,
+):
+    """Return the history page for a media item."""
+    user_medias = BasicMedia.objects.filter_media(
+        request.user,
+        media_id,
+        media_type,
+        source,
+        season_number=season_number,
+        episode_number=episode_number,
+    )
+
+    total_medias = user_medias.count()
+    timeline_entries = []
+    for index, media in enumerate(user_medias, start=1):
+        if history := media.history.all():
+            media_entry_number = total_medias - index + 1
+            timeline_entries.extend(
+                history_processor.process_history_entries(
+                    history,
+                    media_type,
+                    media_entry_number,
+                    request.user,
+                ),
+            )
+    return render(
+        request,
+        "app/components/fill_history.html",
+        {
+            "media_type": media_type,
+            "timeline": timeline_entries,
+            "total_medias": total_medias,
+            "return_url": request.GET["return_url"],
+        },
+    )
+
+
+@require_http_methods(["DELETE"])
+def delete_history_record(request, media_type, history_id):
+    """Delete a specific history record."""
+    try:
+        historical_model = apps.get_model(
+            app_label="app",
+            model_name=f"historical{media_type.lower()}",
+        )
+
+        historical_model.objects.get(
+            history_id=history_id,
+            history_user=request.user,
+        ).delete()
+
+        logger.info(
+            "Deleted history record %s",
+            str(history_id),
+        )
+
+        # Return empty 200 response - the element will be removed by HTMX
+        return HttpResponse()
+
+    except historical_model.DoesNotExist:
+        logger.exception(
+            "History record %s not found for user %s",
+            str(history_id),
+            str(request.user),
+        )
+        return HttpResponse("Record not found", status=404)
+
+
+@require_GET
+def statistics(request):
+    """Return the statistics page."""
+    # 时间范围三级（用户要「记住上次选的」，但老行为不许变）：
+    #   ① URL 明确带了 start-date / end-date → 以 URL 为准，并写回用户，下次还能用
+    #   ② URL 没带 → 读用户身上存着的上次选择
+    #   ③ 库里也没存过（从没选过）→ 全部时间，和以前裸访问一模一样
+    # 所以裸访问 /statistics + 从没选过的用户，仍然看到全部时间（这条是硬要求）。
+    date_range_from_memory = False
+    if request.GET.get("start-date") or request.GET.get("end-date"):
+        start_date, end_date = stats.parse_activity_date_range(request)
+        stats.save_date_range(request.user, start_date, end_date)
+    else:
+        remembered = stats.load_date_range(request.user)
+        if remembered is not None:
+            start_date, end_date = remembered
+            date_range_from_memory = True
+        else:
+            start_date, end_date = None, None
+
+    # 给日期选择器用的字符串形式（另一个代理接线用）：
+    # 有范围给 "YYYY-MM-DD"，不限给 "all"。
+    date_range_start = start_date.strftime("%Y-%m-%d") if start_date else "all"
+    date_range_end = end_date.strftime("%Y-%m-%d") if end_date else "all"
+
+    # Get all user media data in a single operation
+    user_media, media_count = stats.get_user_media(
+        request.user,
+        start_date,
+        end_date,
+    )
+
+    # Calculate all statistics from the retrieved data
+    media_type_distribution = stats.get_media_type_distribution(
+        media_count,
+    )
+    score_distribution, top_rated = stats.get_score_distribution(user_media)
+    status_distribution = stats.get_status_distribution(user_media)
+    status_pie_chart_data = stats.get_status_pie_chart_data(
+        status_distribution,
+    )
+    consumption_stats = stats.get_consumption_stats(user_media, media_count)
+
+    total = media_count["total"]
+    in_progress_count = stats.get_status_total(
+        status_distribution,
+        Status.IN_PROGRESS.value,
+    )
+    rated_percent = (
+        round(score_distribution["total_scored"] / total * 100) if total else None
+    )
+    # 4 张新图（年度完成趋势 / 时长 Top10 / 成就分布 / 发行年份）
+    extra_charts = stats.get_extra_charts(
+        request.user,
+        user_media,
+        start_date,
+        end_date,
+    )
+    # 第 9 张图：月度游玩趋势。数据只能向前积累，本月通常是基线
+    # （has_data=False），模板据此显示说明卡片而不是画一排 0。
+    monthly_playtime = stats_playtime.get_monthly_playtime(request.user)
+    # 说明卡片要写「从哪个月开始记录、哪个月起才有柱子」。
+    # 月份文字在视图里算好，模板不碰日期运算（返回结构不动）。
+    _this_month = stats_playtime.month_start()
+    monthly_this_label = _this_month.strftime("%Y-%m")
+    monthly_next_label = stats_playtime.shift_month(_this_month, 1).strftime("%Y-%m")
+    completed_percent = (
+        round(status_distribution["total_completed"] / total * 100) if total else None
+    )
+
+    context = {
+        "start_date": start_date,
+        "end_date": end_date,
+        # 日期选择器要显示的初值：有范围给 "YYYY-MM-DD"，不限给 "all"
+        "date_range_start": date_range_start,
+        "date_range_end": date_range_end,
+        # True = 这次范围是从用户记忆里读回来的（不是 URL 带进来的）
+        "date_range_from_memory": date_range_from_memory,
+        "media_count": media_count,
+        "media_type_distribution": media_type_distribution,
+        "score_distribution": score_distribution,
+        "top_rated": top_rated,
+        "status_distribution": status_distribution,
+        "status_pie_chart_data": status_pie_chart_data,
+        "consumption_stats": consumption_stats,
+        "in_progress_count": in_progress_count,
+        "rated_percent": rated_percent,
+        "date_format_values": DateFormatChoices.values,
+        "extra_charts": extra_charts,
+        # 月度游玩趋势（app/playtime.py）。has_data=False 时模板走说明卡片。
+        "monthly_playtime": monthly_playtime,
+        "monthly_this_label": monthly_this_label,
+        "monthly_next_label": monthly_next_label,
+        "completed_percent": completed_percent,
+    }
+
+    return render(request, "app/statistics.html", context)
+
+
+@require_GET
+def journal(request):
+    """Return the journal page: a global feed of the user's tracking activity."""
+    start_date, end_date = stats.parse_activity_date_range(request)
+
+    items_per_page = 20
+    # Keyset pagination: the cursor points just past the previous page's last
+    # row, so each request reads at most one page per media type regardless of
+    # scroll depth (never re-scanning everything above the current page).
+    cursor = history_processor.parse_journal_cursor(request)
+    page_rows, has_next = history_processor.get_journal_page(
+        request.user,
+        start_date,
+        end_date,
+        limit=items_per_page,
+        cursor=cursor,
+    )
+    entries = history_processor.build_journal_entries(page_rows, request.user)
+    journal_days = history_processor.build_journal_days(entries, request.user)
+
+    # Preserve the active date range when the feed paginates via HTMX.
+    date_params = {
+        key: request.GET[key]
+        for key in ("start-date", "end-date")
+        if key in request.GET
+    }
+
+    # Cursor for the next page: the last row rendered on this one.
+    next_params = dict(date_params)
+    if page_rows:
+        last_date, last_type, last_id = page_rows[-1]
+        next_params["cursor_date"] = last_date.isoformat()
+        next_params["cursor_type"] = last_type
+        next_params["cursor_id"] = last_id
+
+    prev_day = request.GET.get("last_day", "")
+
+    context = {
+        "entries": entries,
+        "journal_days": journal_days,
+        # The previous page's last day, so a day split across pages isn't
+        # relabelled; the last day on this page, forwarded to the next page.
+        # Falls back to prev_day when this page rendered no days, so a day that
+        # spans an all-filtered page isn't shown twice.
+        "prev_day": prev_day,
+        "last_day": journal_days[-1]["day_iso"] if journal_days else prev_day,
+        "has_next": has_next,
+        "next_query": urlencode(next_params),
+        "filter_query": urlencode(date_params),
+        "start_date": start_date,
+        "end_date": end_date,
+    }
+
+    # The activity dashboard only appears on the full page, so skip its queries
+    # on the HTMX partial requests that load additional feed pages. Soft
+    # navigations (body swaps) still need the full page.
+    if request.headers.get("HX-Request") and not request.headers.get(
+        "X-Soft-Navigation"
+    ):
+        return render(request, "app/components/journal_items.html", context)
+
+    context.update(
+        {
+            "activity_data": stats.get_activity_data(
+                request.user,
+                start_date,
+                end_date,
+            ),
+            "activity_total": history_processor.get_journal_count(
+                request.user,
+                start_date,
+                end_date,
+            ),
+            "date_format_values": DateFormatChoices.values,
+        },
+    )
+    return render(request, "app/journal.html", context)
+
+
+@require_GET
+def service_worker():
+    """Serve the service worker file."""
+    sw_path = Path(settings.STATICFILES_DIRS[0]) / "js" / "serviceworker.js"
+    with sw_path.open() as f:
+        response = HttpResponse(f.read(), content_type="application/javascript")
+        response["Service-Worker-Allowed"] = "/"
+        return response
+
+
+@require_GET
+@login_not_required
+def relay_external_image(request):
+    """Serve cover images that their CDN only hands out with a referer."""
+    return image_relay.relay(request)
+
+
+@require_GET
+def year_in_review(request):
+    """年度游玩报告页：默认今年，``?year=`` 可切年份。
+
+    统计全部交给 ``app.year_in_review``，视图只负责解析参数、取缓存结果和渲染。
+    整页一次性渲染（不走 HX-Request 片段分支），所以 hx-boost 软导航和直接
+    访问拿到的是同一份完整 HTML，不存在「正文空白」那类问题。
+    """
+    year = year_review.resolve_year(request.GET.get("year"))
+    payload = year_review.get_year_in_review(request.user.id, year)
+    return render(
+        request,
+        "app/year_in_review.html",
+        {
+            "report": payload,
+            "year": year,
+            "year_options": payload["years"],
+        },
+    )
+
+
+@require_GET
+def near_complete(request):
+    """临门一脚：差几个成就就全成就的游戏清单。
+
+    聚合、排序和缓存全在 ``app.near_complete`` 里，视图只取出结果渲染。
+    整页一次性渲染（不走 HX-Request 片段分支），所以软导航和直接访问拿到
+    的是同一份完整 HTML。
+    """
+    games = near_complete_agg.get_near_complete(request.user.id)
+    return render(
+        request,
+        "app/near_complete.html",
+        {
+            "games": games,
+            "count": len(games),
+        },
+    )

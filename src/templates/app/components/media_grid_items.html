@@ -1,0 +1,10 @@
+{% load app_tags %}
+
+{% comment %}
+  只输出卡片本身，不再挂「滚到底自动加载下一页」的 hx-trigger：
+  列表页现在是「固定一屏 + 左右箭头翻页」，隐藏掉的卡片还会触发 revealed 加载，
+  会和固定高度打架（见 media_list.html 的 .lib-grid）。
+{% endcomment %}
+{% for media in media_list %}
+  {% include "app/components/media_card.html" with media=media item=media.item title=media.item.title from_grid=True info_card=True %}
+{% endfor %}

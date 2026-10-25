@@ -1,0 +1,414 @@
+/* ==========================================================================
+   topnav.css —— 顶部导航（左侧栏 aside#sidebar 已删除，导航全搬到顶上一行）
+
+   作用域：所有规则都挂在 .lj-topnav 下，变量统一 --lj-tn-*，
+           没有任何裸元素选择器（body / img / button / h1 / :focus-visible 一个都没有）。
+   主题：复用站点现有的 html[data-theme]，亮色取值跟 input.css 里那套米黄纸色对齐。
+   折叠：状态仍是 html[data-sidebar="collapsed"]（沿用旧键名，localStorage 也是旧的
+         yamtrack-sidebar），折叠后只收图标行，品牌区永远留着。
+   禁用：面板关闭态一律 display:none（hidden 属性 + 下面这条 !important），
+         绝不用 opacity —— base.html 的 dialogVisible() 靠 getClientRects() 判断弹窗，
+         透明度 0 的盒子仍会被判成「弹窗开着」，整页 body 会被锁死滚不动。
+
+   唯一两处跨组件例外（都写在文件末尾，并注明原因）：
+     · 巨屏 hero 的左边距补偿（hero.css 里写死了 256px 给侧栏让位）
+   ========================================================================== */
+
+/* ---- 0. 变量 -------------------------------------------------------------- */
+.lj-topnav {
+  --lj-tn-h: 64px;
+  --lj-tn-bg: #1a1d20;
+  --lj-tn-panel: #23272b;
+  --lj-tn-line: #2c3136;
+  --lj-tn-ink: #e8e6e1;
+  --lj-tn-ink2: #a2a7ad;
+  --lj-tn-ink3: #767c84;
+  --lj-tn-gold: #e8c982;
+  --lj-tn-hover: #23272b;
+  --lj-tn-on: rgba(232, 201, 130, .14);
+  --lj-tn-shadow: 0 20px 48px -20px rgba(0, 0, 0, .58);
+  --lj-tn-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif;
+  --lj-tn-ease: cubic-bezier(.22, .8, .24, 1);
+}
+html[data-theme="light"] .lj-topnav {
+  --lj-tn-bg: #efe9dc;
+  --lj-tn-panel: #fffdf8;
+  --lj-tn-line: #ddd2bd;
+  --lj-tn-ink: #26221c;
+  --lj-tn-ink2: #4f483e;
+  --lj-tn-ink3: #6d6355;
+  --lj-tn-gold: #9a6b1f;
+  --lj-tn-hover: #e4dbc9;
+  --lj-tn-on: rgba(154, 107, 31, .16);
+  --lj-tn-shadow: 0 20px 48px -20px rgba(72, 55, 30, .30);
+}
+
+/* ---- 1. 整条顶栏 ---------------------------------------------------------- */
+.lj-topnav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  background: var(--lj-tn-bg);
+  border-bottom: 1px solid var(--lj-tn-line);
+  color: var(--lj-tn-ink);
+  font-variant-numeric: tabular-nums;
+}
+.lj-topnav .lj-tn-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 10px;
+  height: var(--lj-tn-h);
+  min-width: 0;
+  padding: 0 16px;
+}
+
+/* ---- 2. 品牌区（折叠也不隐藏） -------------------------------------------- */
+.lj-topnav .lj-tn-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 0 0 auto;
+  padding: 0 2px 0 0;
+  color: inherit;
+  text-decoration: none;
+}
+.lj-topnav .lj-tn-mark {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--lj-tn-line);
+  border-radius: 50%;
+  background: var(--lj-tn-panel);
+  color: var(--lj-tn-gold);
+  font-size: 10px;
+  line-height: 1;
+}
+.lj-topnav .lj-tn-name {
+  font-family: var(--lj-tn-serif);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .22em;
+  white-space: nowrap;
+}
+.lj-topnav .lj-tn-lib {
+  padding-left: 10px;
+  border-left: 1px solid var(--lj-tn-line);
+  font-family: var(--lj-tn-serif);
+  font-size: 11px;
+  letter-spacing: .16em;
+  color: var(--lj-tn-ink2);
+  white-space: nowrap;
+}
+.lj-topnav .lj-tn-lib:empty { display: none; }
+
+/* ---- 3. 折叠箭头（品牌区右边紧挨着） -------------------------------------- */
+.lj-topnav .lj-tn-fold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--lj-tn-ink3);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color .2s var(--lj-tn-ease), background .2s var(--lj-tn-ease), border-color .2s var(--lj-tn-ease);
+}
+.lj-topnav .lj-tn-fold:hover {
+  color: var(--lj-tn-ink);
+  background: var(--lj-tn-hover);
+  border-color: var(--lj-tn-line);
+}
+.lj-topnav .lj-tn-chev {
+  display: block;
+  transform: translateY(-1px);
+  transition: transform .28s var(--lj-tn-ease);
+}
+html[data-sidebar="collapsed"] .lj-topnav .lj-tn-chev { transform: translateY(-1px) rotate(180deg); }
+
+/* ---- 4. 图标行 ------------------------------------------------------------ */
+.lj-topnav .lj-tn-nav {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  gap: 5px;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+.lj-topnav .lj-tn-item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 64px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--lj-tn-ink2);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color .24s var(--lj-tn-ease), background .24s var(--lj-tn-ease);
+}
+.lj-topnav .lj-tn-item > svg {
+  width: 19px;
+  height: 19px;
+  flex: 0 0 auto;
+}
+.lj-topnav .lj-tn-item:hover {
+  color: var(--lj-tn-ink);
+  background: var(--lj-tn-hover);
+}
+.lj-topnav .lj-tn-item.is-on {
+  color: var(--lj-tn-gold);
+  background: var(--lj-tn-on);
+}
+.lj-topnav .lj-tn-item.is-on::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  width: 14px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--lj-tn-gold);
+  transform: translateX(-50%);
+}
+/* 分组竖线：媒体 / 工具 / 系统 三组之间 */
+.lj-topnav .lj-tn-item.lj-tn-sep::before {
+  content: '';
+  position: absolute;
+  left: -9px;
+  top: 50%;
+  width: 1px;
+  height: 16px;
+  background: var(--lj-tn-line);
+  transform: translateY(-50%);
+}
+.lj-topnav .lj-tn-sep { margin-left: 12px; }
+/* 收起：由 JS 实测宽度决定，谁收谁带 data-folded */
+.lj-topnav .lj-tn-item[data-folded],
+.lj-topnav .lj-tn-form[data-folded] { display: none; }
+
+/* 登出表单（POST，hx-boost="false"） */
+.lj-topnav .lj-tn-form {
+  display: flex;
+  flex: 0 0 auto;
+  margin: 0;
+}
+.lj-topnav .lj-tn-lout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--lj-tn-ink2);
+  cursor: pointer;
+  transition: color .24s var(--lj-tn-ease), background .24s var(--lj-tn-ease);
+}
+.lj-topnav .lj-tn-lout > svg { width: 19px; height: 19px; }
+.lj-topnav .lj-tn-lout:hover { color: var(--lj-tn-ink); background: var(--lj-tn-hover); }
+
+/* ⋯：只在真的收起了东西时出现 */
+.lj-topnav .lj-tn-more {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 40px;
+  margin-left: 6px;
+  padding: 0;
+  border: 1px solid var(--lj-tn-line);
+  border-radius: 10px;
+  background: var(--lj-tn-panel);
+  color: var(--lj-tn-ink2);
+  cursor: pointer;
+}
+.lj-topnav .lj-tn-nav.has-fold .lj-tn-more { display: inline-flex; }
+.lj-topnav .lj-tn-more > svg { width: 16px; height: 16px; }
+.lj-topnav .lj-tn-more:hover { color: var(--lj-tn-ink); background: var(--lj-tn-hover); }
+.lj-topnav .lj-tn-more[aria-expanded="true"] { color: var(--lj-tn-gold); border-color: var(--lj-tn-gold); }
+
+/* ---- 5. 右侧动作区 -------------------------------------------------------- */
+.lj-topnav .lj-tn-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+/* 匿名用户那块登录块原本是侧栏底部的一整块，塞进这一行时把内边距和分隔线抹掉 */
+.lj-topnav .lj-tn-actions > div {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.lj-topnav .lj-tn-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--lj-tn-line);
+  border-radius: 999px;
+  background: var(--lj-tn-panel);
+  color: var(--lj-tn-ink2);
+  font-size: 11.5px;
+  letter-spacing: .06em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .22s var(--lj-tn-ease), background .22s var(--lj-tn-ease);
+}
+.lj-topnav .lj-tn-pill:hover { color: var(--lj-tn-ink); background: var(--lj-tn-hover); }
+.lj-topnav .lj-tn-pill[aria-expanded="true"] { color: var(--lj-tn-gold); border-color: var(--lj-tn-gold); }
+.lj-topnav .lj-tn-pill > svg { width: 13px; height: 13px; flex: 0 0 auto; }
+/* 日/夜：文案跟着主题走，纯 CSS，不用 JS 记状态 */
+.lj-topnav .lj-tn-when-light { display: none; }
+html[data-theme="light"] .lj-topnav .lj-tn-when-light { display: inline; }
+html[data-theme="light"] .lj-topnav .lj-tn-when-dark { display: none; }
+
+/* ---- 6. 两个浮层：⋯ 全部导航 / 筛选（搜索） ------------------------------- */
+.lj-topnav .lj-tn-menu,
+.lj-topnav .lj-tn-query {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 14px;
+  z-index: 60;
+  padding: 12px;
+  border: 1px solid var(--lj-tn-line);
+  border-radius: 14px;
+  background: var(--lj-tn-panel);
+  box-shadow: var(--lj-tn-shadow);
+  color: var(--lj-tn-ink);
+}
+/* 关闭态必须真的不占盒子：display:none，不能用 opacity */
+.lj-topnav .lj-tn-menu[hidden],
+.lj-topnav .lj-tn-query[hidden] { display: none !important; }
+
+.lj-topnav .lj-tn-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 352px;
+  max-height: min(72vh, 560px);
+  overflow-y: auto;
+}
+.lj-topnav .lj-tn-menu-head {
+  display: block;
+  margin-bottom: 6px;
+  padding: 0 4px 6px;
+  border-bottom: 1px solid var(--lj-tn-line);
+  color: var(--lj-tn-ink3);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .2em;
+}
+.lj-topnav .lj-tn-menu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 8px;
+}
+.lj-topnav .lj-tn-pitem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 9px;
+  border-radius: 8px;
+  color: var(--lj-tn-ink2);
+  font-size: 12.5px;
+  letter-spacing: .02em;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.lj-topnav .lj-tn-pitem > svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.lj-topnav .lj-tn-pitem:hover { color: var(--lj-tn-ink); background: var(--lj-tn-hover); }
+.lj-topnav .lj-tn-pitem.is-on { color: var(--lj-tn-gold); background: var(--lj-tn-on); }
+/* 面板里的登出：把整张表单摊平成一行 */
+.lj-topnav .lj-tn-pitem-form { display: block; height: auto; padding: 0; }
+.lj-topnav .lj-tn-pitem-form > .lj-tn-lout {
+  width: 100%;
+  height: 34px;
+  gap: 9px;
+  padding: 0 9px;
+  justify-content: flex-start;
+  border-radius: 8px;
+  color: inherit;
+  font-size: 12.5px;
+}
+.lj-topnav .lj-tn-pitem-form > .lj-tn-lout > svg { width: 15px; height: 15px; }
+
+.lj-topnav .lj-tn-query {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(620px, calc(100vw - 28px));
+}
+.lj-topnav .lj-tn-query form { margin: 0; }
+.lj-topnav .lj-tn-query #lj-tn-locate { align-self: flex-start; }
+
+/* ---- 7. 折叠态：只收图标行，品牌区留着 ------------------------------------ */
+html[data-sidebar="collapsed"] .lj-topnav .lj-tn-nav,
+html[data-sidebar="collapsed"] .lj-topnav .lj-tn-menu,
+html[data-sidebar="collapsed"] .lj-topnav .lj-tn-query { display: none !important; }
+
+/* ---- 8. 筛选按钮的「滚过去 + 闪一下」 ------------------------------------- */
+/* 行本身在 media_list.html 里，我只给它一个瞬时的外圈，1.4 秒后由 JS 摘掉 */
+.lj-topnav ~ div .lj-tn-hit {
+  border-radius: 10px;
+  outline: 2px solid var(--lj-tn-gold);
+  outline-offset: 6px;
+  transition: outline-color .3s var(--lj-tn-ease);
+}
+
+/* ==========================================================================
+   唯一一处跨组件补偿：hero.css 第 14 行写死 --lj-hero-pad-l: calc(256px + …)
+   给侧栏让位（折叠态还有一条 72px）。侧栏已经删了，那 256px 会变成左边一大块空白，
+   巨屏会看起来整体右偏。hero.css 本轮不许改，所以在这里覆盖同一个变量。
+   ========================================================================== */
+html[data-sidebar] .lj-showcase.lj-hero,
+html[data-sidebar="collapsed"] .lj-showcase.lj-hero {
+  --lj-hero-pad-l: clamp(16px, 2.2vw, 34px);
+}
+
+/* ---- 9. 当前页图标的颜色：金色，不能是 Tailwind 的 indigo ------------------
+   app_tags.py 的 icon 标签在 is_active 为真时会塞一个 text-indigo-400 类
+   （工具类直接写死颜色，会压过父级 .lj-tn-item 的 color），所以「游戏库」
+   那颗图标会莫名其妙变成蓝色，和顶栏的描金风格打架。
+   base.html 不能改，就在这儿用更高优先级把颜色按顶栏变量重置回来：
+   普通项 = --lj-tn-ink2，当前页 = --lj-tn-gold（和文字态一致）。 */
+.lj-topnav .lj-tn-item > svg.text-indigo-400,
+.lj-topnav .lj-tn-item.is-on > svg.text-indigo-400 {
+  color: var(--lj-tn-gold);
+}
+.lj-topnav .lj-tn-item > svg.text-indigo-400 {
+  color: var(--lj-tn-ink2);
+}
+.lj-topnav .lj-tn-item:hover > svg.text-indigo-400 {
+  color: var(--lj-tn-ink);
+}
+.lj-topnav .lj-tn-item.is-on:hover > svg.text-indigo-400 {
+  color: var(--lj-tn-gold);
+}
+/* ⋯ 面板里克隆出来的图标同理 */
+.lj-topnav .lj-tn-pitem > svg.text-indigo-400 { color: var(--lj-tn-gold); }
+.lj-topnav .lj-tn-pitem:hover > svg.text-indigo-400 { color: var(--lj-tn-ink); }

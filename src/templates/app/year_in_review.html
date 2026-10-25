@@ -1,0 +1,480 @@
+{% extends "base.html" %}
+{% load static %}
+{% load app_tags %}
+
+{% block title %}
+  年度游玩报告 · {{ year }} - LIFE JOY
+{% endblock title %}
+
+{% block content %}
+  {% comment %}
+    年度报告页：整页一次性渲染，不走 hx-boost 软导航（顶栏那个入口标了
+    hx-boost="false"），否则 block js 里的 Chart.js 不会重跑、图会空白，
+    跟统计页是同一个坑。
+
+    配色只用两套：暗色沿用 bg-[#2a2f35] / bg-[#39404b] / text-gray-400，
+    亮色由 main.css 里已有的 html[data-theme="light"] 覆盖块自动接管，
+    所以这里不用手写亮色类名。下面 <style> 只管字号、条形填充和图表容器，
+    全部限定在 .lj-yir 作用域内，不会污染别的页面。
+  {% endcomment %}
+  <style>
+    .lj-yir {
+      --lj-yir-accent: #818cf8;
+      --lj-yir-accent-2: #34d399;
+      --lj-yir-track: rgba(255, 255, 255, .08);
+    }
+    html[data-theme="light"] .lj-yir {
+      --lj-yir-accent: #4f46e5;
+      --lj-yir-accent-2: #047857;
+      --lj-yir-track: rgba(38, 34, 28, .10);
+    }
+    /* 开场大字：等价 text-6xl 以上，用 clamp 让它随屏宽自己缩放 */
+    .lj-yir-hero-num {
+      font-size: clamp(3.25rem, 9vw, 7rem);
+      line-height: .95;
+      font-weight: 800;
+      letter-spacing: -.03em;
+      font-variant-numeric: tabular-nums;
+    }
+    .lj-yir-hero-unit { font-size: clamp(1.25rem, 3vw, 2rem); font-weight: 600; }
+    .lj-yir-track { background: var(--lj-yir-track); }
+    .lj-yir-fill { background: var(--lj-yir-accent); }
+    .lj-yir-fill-2 { background: var(--lj-yir-accent-2); }
+    .lj-yir-chart { position: relative; height: 220px; }
+    .lj-yir-chart-tall { position: relative; height: 260px; }
+    .lj-yir-dot { width: .6rem; height: .6rem; border-radius: 9999px; }
+    .lj-yir-num { font-variant-numeric: tabular-nums; }
+    .lj-yir-cover { background-color: #3e454d; }
+    html[data-theme="light"] .lj-yir-cover { background-color: #e8dfcd; }
+    @media (max-width: 640px) {
+      .lj-yir-chart, .lj-yir-chart-tall { height: 200px; }
+    }
+  </style>
+
+  <div class="lj-yir max-w-6xl mx-auto">
+
+    {# ---------- 顶部：年份切换 ---------- #}
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-8">
+      <div>
+        <h1 class="text-3xl font-bold mb-2">年度游玩报告</h1>
+        <p class="text-gray-400 text-sm">把你这个游戏库的累计时长，摊开看一眼</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        {% for option_year in year_options %}
+          <a href="?year={{ option_year }}"
+             class="px-3 py-1 text-sm rounded-lg transition-colors {% if option_year == year %}bg-indigo-600 text-white{% else %}bg-[#2a2f35] text-gray-300 hover:bg-[#39404b]{% endif %}">
+            {{ option_year }}
+          </a>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if not report.has_data %}
+      {# ---------- 空态：这一年没有任何可统计的游戏 ---------- #}
+      <div class="bg-[#2a2f35] rounded-xl p-8 text-center ring-1 ring-white/5">
+        <div class="text-3xl font-bold mb-3">{{ year }} 年，一片空白</div>
+        <p class="text-gray-400 mb-6 max-w-md mx-auto">
+          这一年没有游戏的通关日期或成就同步记录，所以还算不出报告。
+          <br>
+          换一年看看，或者先去玩点什么。
+        </p>
+        <div class="flex flex-wrap justify-center gap-2">
+          <a href="{% url 'medialist' request.user.username 'game' %}"
+             class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 transition-colors">回游戏库</a>
+          {% if year_options %}<a href="?year={{ year_options.0 }}"
+             class="px-4 py-2 bg-[#39404b] text-gray-200 rounded-lg text-sm hover:bg-[#454d59] transition-colors">看 {{ year_options.0 }} 年</a>{% endif %}
+        </div>
+      </div>
+    {% else %}
+
+      {# ---------- 1. 开场大字：累计口径 ---------- #}
+      <section class="bg-[#2a2f35] rounded-xl p-8 mb-8 ring-1 ring-white/5">
+        <div class="text-gray-400 text-lg mb-3">
+          这批游戏（{{ year }} 年通关或有成就同步的）的<b class="text-gray-300">游戏库累计时长</b>
+        </div>
+        <div class="flex flex-wrap items-baseline gap-3">
+          <span class="lj-yir-hero-num text-white">{{ report.total_hours_text }}</span>
+          <span class="lj-yir-hero-unit text-gray-300">小时</span>
+          <span class="lj-yir-hero-unit text-gray-500">累计</span>
+        </div>
+        <p class="text-gray-300 mt-4 text-base">
+          这是 {{ report.game_count }} 款游戏<b class="text-white">从入库到现在的累计时长</b>，
+          <b class="text-white">不是 {{ year }} 这一年玩的</b>。
+        </p>
+        <p class="text-gray-400 mt-2 text-sm">
+          库里没按年保存游玩时长，所以这里只能给累计值；
+          整库 {{ report.library.games }} 款游戏合计 {{ report.library.hours_text }} 小时，
+          上面这批占其中的 {{ report.library.share }}%。
+        </p>
+        <div class="flex flex-wrap gap-6 mt-6 pt-4 border-t border-gray-700">
+          <div>
+            <div class="text-2xl font-bold text-white lj-yir-num">{{ report.game_count }}</div>
+            <div class="text-gray-400 text-sm">款游戏在这一年通关或有成就同步</div>
+          </div>
+          <div>
+            <div class="text-2xl font-bold text-white lj-yir-num">{{ report.played_count }}</div>
+            <div class="text-gray-400 text-sm">款真的花过时间（累计）</div>
+          </div>
+          <div>
+            <div class="text-2xl font-bold text-white lj-yir-num">{{ report.completed.count }}</div>
+            <div class="text-gray-400 text-sm">款在这一年打到通关</div>
+          </div>
+        </div>
+        <p class="text-gray-500 text-xs mt-4">
+          口径说明：本库没有逐日游玩记录（历史表 5669 条全是导入时的批量快照，
+          全挤在同一个月，变更原因全为空，时间戳不可信），
+          所以「某年玩过」= 通关日期或成就同步时间落在该年的游戏 —— 这是真实的年内事件；
+          但时长取的是这些游戏的累计游玩分钟数，<b>不代表它们在当年玩了多少</b>。
+        </p>
+        {% if year == 2026 %}
+          <p class="text-amber-500/80 text-xs mt-2">
+            额外提醒：成就同步时间也被导入覆盖过 —— 上面 {{ report.game_count }} 款里有
+            {{ report.achievements.synced_games }} 款是「同步时间落在这一年」进来的，
+            它们其实是同一次批量导入，不是今年真碰过这么多款。
+          </p>
+        {% endif %}
+      </section>
+
+      {# ---------- 2. 累计最常玩的 Top 5 ---------- #}
+      <section class="mb-8">
+        <h2 class="text-2xl font-bold mb-2">累计玩得最多的 {{ report.top_games|length }} 款</h2>
+        <p class="text-gray-400 text-sm mb-4">
+          按这些游戏在游戏库里的累计时长排，不是这一年玩的时长
+        </p>
+        {% if report.top_games %}
+          <div class="space-y-4">
+            {% for game in report.top_games %}
+              <div class="bg-[#2a2f35] rounded-xl p-4 ring-1 ring-white/5 flex items-center gap-4">
+                <div class="shrink-0 w-20 rounded-lg overflow-hidden lj-yir-cover">
+                  <img class="lazyload w-full aspect-2/3 object-cover"
+                       alt="{{ game.title }}"
+                       data-src="{{ game.image|relay_image }}">
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-baseline justify-between gap-3">
+                    <a href="{% url 'media_details' source=game.source media_type='game' media_id=game.media_id title=game.title|slug %}"
+                       class="font-semibold truncate hover:text-indigo-400 transition-colors">{{ game.title }}</a>
+                    <span class="text-gray-300 text-sm shrink-0 lj-yir-num">累计 {{ game.hours }} 小时</span>
+                  </div>
+                  <div class="lj-yir-track rounded-full h-2 mt-3 overflow-hidden">
+                    <div class="lj-yir-fill h-2 rounded-full"
+                         style="width: {{ game.percent }}%"></div>
+                  </div>
+                  <div class="text-gray-400 text-xs mt-2">
+                    占这批游戏累计时长的 <span class="text-gray-300 lj-yir-num">{{ game.percent }}%</span>
+                  </div>
+                </div>
+                <div class="shrink-0 text-3xl font-bold text-gray-500 lj-yir-num">{{ forloop.counter }}</div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="text-gray-400">这批游戏没有记录到游玩时长。</p>
+        {% endif %}
+      </section>
+
+      {# ---------- 3. 这一年通关的游戏 ---------- #}
+      <section class="mb-8">
+        <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+          <h2 class="text-2xl font-bold">{{ year }} 年通关了 {{ report.completed.count }} 款</h2>
+          <span class="text-gray-400 text-sm">
+            这些游戏累计 {{ report.completed.hours }} 小时
+          </span>
+        </div>
+        <p class="text-gray-400 text-sm mb-4">
+          通关数量是这一年真实发生的事；后面标的时长是这些游戏在库里的累计时长
+        </p>
+        {% if report.completed.covers %}
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {% for cover in report.completed.covers %}
+              <a href="{% url 'media_details' source=cover.source media_type='game' media_id=cover.media_id title=cover.title|slug %}"
+                 class="group block">
+                <div class="rounded-lg overflow-hidden lj-yir-cover">
+                  <img class="lazyload w-full aspect-2/3 object-cover group-hover:opacity-90 transition-opacity"
+                       alt="{{ cover.title }}"
+                       data-src="{{ cover.image|relay_image }}">
+                </div>
+                <div class="text-sm font-medium truncate mt-2 group-hover:text-indigo-400 transition-colors">{{ cover.title }}</div>
+                <div class="text-gray-400 text-xs">
+                  {{ cover.end_date }} 通关 · 累计 {{ cover.hours }} 小时
+                </div>
+              </a>
+            {% endfor %}
+          </div>
+          {% if report.completed.hidden %}
+            <p class="text-gray-400 text-sm mt-4">还有 {{ report.completed.hidden }} 个没铺出来，去游戏库慢慢看。</p>
+          {% endif %}
+        {% else %}
+          <p class="text-gray-400">这一年没有标记通关的游戏。</p>
+        {% endif %}
+      </section>
+
+      {# ---------- 4. 类型画像（累计口径） ---------- #}
+      <section class="bg-[#2a2f35] rounded-xl p-6 mb-8 ring-1 ring-white/5">
+        <h2 class="text-2xl font-bold mb-2">口味画像</h2>
+        <p class="text-gray-400 text-sm mb-2">按累计游玩时长算，你最常泡在哪几口</p>
+        <p class="text-gray-500 text-xs mb-6">
+          分母是这批游戏的累计总时长；一款游戏带多个类型会重复计入各类型，所以各项加起来会超过 100%，这是正常的。
+        </p>
+        {% if report.genres %}
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 items-center">
+            <div class="lj-yir-chart-tall">
+              <canvas id="yir-genre-chart"></canvas>
+            </div>
+            <div class="space-y-4">
+              {% for genre in report.genres %}
+                <div>
+                  <div class="flex items-baseline justify-between gap-2 text-sm">
+                    <span class="flex items-center gap-2 min-w-0">
+                      <span class="lj-yir-dot shrink-0"
+                            style="background: {{ genre.color }}"></span>
+                      <span class="truncate">{{ genre.name }}</span>
+                    </span>
+                    <span class="text-gray-300 shrink-0 lj-yir-num">{{ genre.percent }}%</span>
+                  </div>
+                  <div class="text-gray-400 text-xs mt-1">累计 {{ genre.hours }} 小时 · {{ genre.games }} 款</div>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% else %}
+          <p class="text-gray-400">这批游戏还没抓到类型标签。</p>
+        {% endif %}
+      </section>
+
+      {# ---------- 5. 成就战绩 ---------- #}
+      <section class="bg-[#2a2f35] rounded-xl p-6 mb-8 ring-1 ring-white/5">
+        <h2 class="text-2xl font-bold mb-6">成就战绩</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-6">
+          <div>
+            <div class="text-2xl font-bold text-white lj-yir-num">{{ report.achievements.unlocked }}</div>
+            <div class="text-gray-400 text-sm">这一年这些游戏累计解锁的成就</div>
+          </div>
+          <div>
+            <div class="text-2xl font-bold text-white lj-yir-num">{{ report.achievements.perfect }}</div>
+            <div class="text-gray-400 text-sm">款目前是全成就</div>
+          </div>
+          <div>
+            <div class="text-2xl font-bold text-white lj-yir-num">{{ report.achievements.percent }}%</div>
+            <div class="text-gray-400 text-sm">
+              这批游戏当前的成就完成度（{{ report.achievements.unlocked }}/{{ report.achievements.available }}）
+            </div>
+          </div>
+        </div>
+        <div class="lj-yir-track rounded-full h-2 mt-6 overflow-hidden">
+          <div class="lj-yir-fill-2 h-2 rounded-full"
+               style="width: {{ report.achievements.percent }}%"></div>
+        </div>
+        <p class="text-gray-500 text-xs mt-4">
+          成就这块用的是「当前快照」：解锁数、全成就数、完成度都是这些游戏此刻的状态，
+          同步时间被导入统一覆盖过，所以看不出具体是哪天解锁的。
+          另外只有 {{ report.achievements.games_with_data }} 款游戏的成就数据抓得到（Steam 有些游戏不开放接口），
+          所以这里是「能看到的」那一部分。
+        </p>
+      </section>
+
+      {# ---------- 6. 游戏年龄 ---------- #}
+      <section class="bg-[#2a2f35] rounded-xl p-6 mb-8 ring-1 ring-white/5">
+        <h2 class="text-2xl font-bold mb-2">你玩的都是「多大岁数」的游戏</h2>
+        <p class="text-gray-400 text-sm mb-2">拿游戏发售年份跟 {{ year }} 比，看这些游戏是赶新还是怀旧</p>
+        <p class="text-gray-500 text-xs mb-6">每档后面的时长同样是这些游戏的累计时长，不是这一年玩的</p>
+        <div class="lj-yir-chart mb-6">
+          <canvas id="yir-age-chart"></canvas>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {% for bucket in report.age.buckets %}
+            <div class="bg-[#39404b] rounded-lg p-4">
+              <div class="flex items-baseline justify-between gap-2">
+                <span class="font-medium">{{ bucket.label }}</span>
+                <span class="text-gray-300 text-sm lj-yir-num">累计 {{ bucket.hours }} 小时</span>
+              </div>
+              <div class="text-gray-400 text-xs mt-1">
+                {{ bucket.games }} 款 · 占累计时长 {{ bucket.percent }}%
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+        {% if report.age.missing_games %}
+          <p class="text-gray-500 text-xs mt-4">
+            另有 {{ report.age.missing_games }} 款游戏没有发售日期，没算进上面四档。
+          </p>
+        {% endif %}
+      </section>
+
+      {# ---------- 7. 收官一句 ---------- #}
+      {% if report.favorite %}
+        <section class="bg-[#39404b] rounded-xl p-8 ring-1 ring-white/5 text-center">
+          <p class="text-2xl leading-tight">
+            你累计投入最多的类型是
+            <span class="font-bold text-indigo-400">{{ report.favorite.name }}</span>
+            ，占这批游戏累计时长的
+            <span class="font-bold text-white lj-yir-num">{{ report.favorite.percent }}%</span>
+          </p>
+          <p class="text-gray-400 text-sm mt-3">
+            时长口径是累计，{{ year }} 年到底玩了多少小时，库里没有这个记录。
+          </p>
+        </section>
+      {% endif %}
+
+      {# ---------- 8. 底部免责（口径说明，必须留） ---------- #}
+      <section class="bg-[#2a2f35] rounded-xl p-6 mt-8 ring-1 ring-white/5">
+        <h2 class="text-lg font-bold mb-2">这条报告的时长是怎么来的</h2>
+        <p class="text-gray-300 text-sm leading-relaxed">
+          数据库中只保存累计游玩时长，没有按年切分的历史记录，因此本页的时长是累计值，不代表这一年的游玩量。
+        </p>
+        <p class="text-gray-400 text-xs mt-3 leading-relaxed">
+          具体来说：游戏的游玩分钟数是「从入库到今天」的总和；
+          历史表 5669 条全是导入时的批量快照，全挤在同一个月、
+          变更原因全为空，所以时间线不可信；
+          通关日期（{{ report.completed.count }} 款）和成就同步时间是真实的年内事件，只有这两项代表「这一年」。
+        </p>
+      </section>
+
+    {% endif %}
+  </div>
+{% endblock content %}
+
+{% block js %}
+  {% if report.has_data %}
+    <script src="{% static 'js/libraries/chartjs-4.4.9.min.js' %}"></script>
+    {{ report.genres|json_script:"yir-genre-data" }}
+    {{ report.age.buckets|json_script:"yir-age-data" }}
+    <script>
+      (function () {
+        var genreEl = document.getElementById('yir-genre-data');
+        var ageEl = document.getElementById('yir-age-data');
+        if (!genreEl || !ageEl || typeof Chart === 'undefined') return;
+
+        var genres = JSON.parse(genreEl.textContent);
+        var ages = JSON.parse(ageEl.textContent);
+
+        // 固定调色板：暗色饱和度高，亮色压暗一档，跟各自主题的背景对比够。
+        function palette() {
+          var light = document.documentElement.getAttribute('data-theme') === 'light';
+          return {
+            light: light,
+            ink: light ? '#26221c' : '#D1D5DB',
+            inkDim: light ? '#615a4d' : '#9ca3af',
+            grid: light ? 'rgba(38,34,28,.12)' : 'rgba(255,255,255,.10)',
+            slices: light
+              ? ['#4f46e5', '#047857', '#b45309', '#b91c1c', '#0369a1', '#7e22ce']
+              : ['#818cf8', '#34d399', '#fbbf24', '#fb7185', '#38bdf8', '#c084fc']
+          };
+        }
+
+        // 给每个类型配一个稳定的颜色，服务端只负责名字，颜色在前端补。
+        var p0 = palette();
+        genres.forEach(function (g, i) {
+          g.color = p0.slices[i % p0.slices.length];
+        });
+        var legendDots = document.querySelectorAll('.lj-yir-dot');
+        legendDots.forEach(function (dot, i) {
+          if (i < genres.length) dot.style.background = genres[i].color;
+        });
+
+        var genreChart = null;
+        var ageChart = null;
+
+        function drawGenres() {
+          var p = palette();
+          var ctx = document.getElementById('yir-genre-chart');
+          if (!ctx) return;
+          if (genreChart) genreChart.destroy();
+          genreChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+              labels: genres.map(function (g) { return g.name; }),
+              datasets: [{
+                data: genres.map(function (g) { return g.minutes; }),
+                backgroundColor: p.slices.slice(0, genres.length),
+                borderColor: p.light ? '#fffdf8' : '#2a2f35',
+                borderWidth: 2,
+                hoverOffset: 6
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              cutout: '62%',
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  callbacks: {
+                    label: function (item) {
+                      var g = genres[item.dataIndex];
+                      return g.name + ' 累计 ' + g.hours + ' 小时（占累计时长 ' + g.percent + '%）';
+                    }
+                  }
+                }
+              }
+            }
+          });
+        }
+
+        function drawAges() {
+          var p = palette();
+          var ctx = document.getElementById('yir-age-chart');
+          if (!ctx) return;
+          if (ageChart) ageChart.destroy();
+          ageChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels: ages.map(function (a) { return a.label; }),
+              datasets: [{
+                data: ages.map(function (a) { return a.hours; }),
+                backgroundColor: p.slices.slice(0, ages.length),
+                borderRadius: 6,
+                maxBarThickness: 34
+              }]
+            },
+            options: {
+              indexAxis: 'y',
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  callbacks: {
+                    label: function (item) {
+                      var a = ages[item.dataIndex];
+                      return a.hours + ' 小时 · ' + a.games + ' 款（占累计时长 ' + a.percent + '%）';
+                    }
+                  }
+                }
+              },
+              scales: {
+                x: {
+                  beginAtZero: true,
+                  grid: { color: p.grid, drawTicks: false },
+                  ticks: { color: p.inkDim, font: { size: 11 } },
+                  border: { display: false }
+                },
+                y: {
+                  grid: { display: false },
+                  ticks: { color: p.ink, font: { size: 12 } },
+                  border: { display: false }
+                }
+              }
+            }
+          });
+        }
+
+        drawGenres();
+        drawAges();
+
+        // 主题切换只改 html[data-theme]，不重载页面，所以图要跟着重画一次。
+        var lastTheme = document.documentElement.getAttribute('data-theme');
+        new MutationObserver(function () {
+          var now = document.documentElement.getAttribute('data-theme');
+          if (now === lastTheme) return;
+          lastTheme = now;
+          drawGenres();
+          drawAges();
+        }).observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ['data-theme']
+        });
+      })();
+    </script>
+  {% endif %}
+{% endblock js %}

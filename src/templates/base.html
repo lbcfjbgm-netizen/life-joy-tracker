@@ -1,0 +1,1163 @@
+{% load static %}
+{% load app_tags %}
+{% load i18n %}
+
+<!DOCTYPE html>
+{% get_current_language as CURRENT_LANG %}
+<html lang="{{ CURRENT_LANG }}" class="scheme-dark bg-[#212529]" data-theme="dark">
+  <head>
+    {# Required meta tags #}
+    <meta charset="UTF-8">
+    {# 亮色主题引导：必须赶在样式表之前执行，否则会先闪一下暗色再变亮。只读写 localStorage，不碰数据库 #}
+    {# ?theme= 是调试用的临时覆盖：只作用本次加载，绝不写进 localStorage，免得带参数的老链接把用户的选择永久改掉 #}
+    <script>
+      (function () {
+        var KEY = 'yamtrack-theme';
+        var theme = 'dark';
+        try {
+          var q = new URLSearchParams(window.location.search).get('theme');
+          if (q === 'light' || q === 'dark') {
+            theme = q;
+          } else if (localStorage.getItem(KEY) === 'light') {
+            theme = 'light';
+          }
+        } catch (e) { theme = 'dark'; }
+        var root = document.documentElement;
+        root.setAttribute('data-theme', theme);
+        root.classList.toggle('scheme-dark', theme === 'dark');
+        window.__setThemeMeta = function (t) {
+          var m = document.querySelector('meta[name="theme-color"]');
+          if (m) { m.setAttribute('content', t === 'light' ? '#f5f1e8' : '#181a1b'); }
+        };
+        // theme-color 的 meta 在文档后面，这里先记下主题，等 head 解析完再补上
+        window.__theme = theme;
+        // 侧栏折叠状态同样只走 localStorage；先定下来，避免展开态闪一下再收
+        var sb = 'expanded';
+        try {
+          if (localStorage.getItem('yamtrack-sidebar') === 'collapsed') sb = 'collapsed';
+        } catch (e) { sb = 'expanded'; }
+        root.setAttribute('data-sidebar', sb);
+        document.addEventListener('DOMContentLoaded', function () {
+          window.__setThemeMeta(window.__theme);
+        });
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="keywords" content="Yamtrack, Media Tracker">
+    <meta name="description" content="Search and track media on Yamtrack.">
+
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-title" content="Yamtrack">
+
+    <title>
+      {% block title %}
+        {% trans "Yamtrack" %}
+      {% endblock title %}
+    </title>
+
+    {% block extra_head %}
+    {% endblock extra_head %}
+
+    <link rel="stylesheet"
+          type="text/css"
+          href="{% static 'css/main.css' %}{% get_static_file_mtime 'css/main.css' %}">
+
+    {% comment %}
+      列表卡片皮肤：所有规则都 scope 在 .lj-showcase 下，其它页面不受影响。
+      放在 main.css 之后加载，保证能盖住 Tailwind utility（不加 !important）。
+    {% endcomment %}
+    <link rel="stylesheet"
+          type="text/css"
+          href="{% static 'css/showcase.css' %}{% get_static_file_mtime 'css/showcase.css' %}">
+
+    {% comment %}
+      字体分两层：显示层（页面/作品/区块标题、简介正文、金句、手札、大数字）走思源宋体，
+      操作层（侧栏 / 顶栏 / 按钮 / 表单 / 表格 / 分页 / 小标签）保持原样。
+      所有规则都 scope 在 .lj-serif 下，根类只挂在 <main id="main-content"> 上；
+      侧栏 aside 和顶栏都在 main 外面，所以天然碰不到操作层。放最后加载。
+    {% endcomment %}
+    <link rel="stylesheet"
+          type="text/css"
+          href="{% static 'css/typography.css' %}{% get_static_file_mtime 'css/typography.css' %}">
+    <link rel="stylesheet" type="text/css" href="{% static 'css/ambient.css' %}{% get_static_file_mtime 'css/ambient.css' %}">
+
+    {% comment %}
+      顶部导航：左侧栏 aside#sidebar 已整段删除，导航搬到页面顶部一行。
+      全部规则都 scope 在 .lj-topnav 下，另外只补一条巨屏左边距（原因写在文件末尾）。
+      放在最后加载，保证能盖住 main.css / hero.css 里写死的侧栏补偿值。
+    {% endcomment %}
+    <link rel="stylesheet"
+          type="text/css"
+          href="{% static 'css/topnav.css' %}{% get_static_file_mtime 'css/topnav.css' %}">
+
+    <style>
+      /* skip-link：平时完全藏起来，键盘聚焦时才浮到左上角 */
+      .skip-link {
+        position: absolute;
+        left: -9999px;
+        top: 0;
+        z-index: 100;
+        min-height: 44px;
+        align-items: center;
+      }
+      .skip-link:focus {
+        position: fixed;
+        left: 0.75rem;
+        top: 0.75rem;
+        padding: 0.5rem 1rem;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        border-radius: 0.375rem;
+        background: #4f46e5;
+        color: #fff;
+        font-size: 0.875rem;
+        font-weight: 600;
+        text-decoration: none;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4);
+      }
+    </style>
+
+    <script src="{% static 'js/libraries/htmx-2.0.4.min.js' %}"></script>
+    <script>
+      // htmx 局部替换（hx-boost）后重新初始化 Alpine，否则新插入的 x-data 组件（弹窗/下拉/tab）全都不工作。
+      // htmx 是同步脚本、Alpine 是 defer，所以这里能直接拿到 htmx 全局对象。
+      // 首屏那一次 onLoad 传进来的是 document.body，交给 Alpine 自己初始化，避免重复初始化。
+      // 用 setTimeout 0 推到本轮脚本执行完之后：被换进来的片段如果自带 <script>（比如
+      // date-range.js），Alpine 得等它先定义好 dateRangePicker() 再 initTree，否则报未定义。
+      htmx.onLoad((elt) => {
+        if (!window.Alpine) return;
+        if (elt === document.body || elt === document.documentElement) return;
+        setTimeout(() => {
+          if (!window.Alpine || !elt.isConnected) return;
+          window.Alpine.initTree(elt);
+        }, 0);
+      });
+      // 用 View Transitions 的淡入盖住局部替换后 [x-cloak] 组件的短暂裸奔。
+      htmx.config.globalViewTransitions = true;
+      // 日志页的「删掉最后一条就收起当天分组」：原来写在 journal.html 的 block js 里，
+      // 软导航后不会重跑，所以提到这里常驻。别的页面没有 data-journal-day，等于空转。
+      function pruneEmptyJournalDays() {
+        document.querySelectorAll('[data-journal-day]').forEach((header) => {
+          const day = header.getAttribute('data-journal-day');
+          if (!document.querySelector('[data-journal-entry-day="' + day + '"]')) {
+            header.remove();
+          }
+        });
+      }
+      document.addEventListener('htmx:afterSwap', pruneEmptyJournalDays);
+      // 顶栏不在局部替换范围内，htmx 不会替它改高亮 —— 换完按新地址重新点亮，
+      // 判断规则跟模板里那套 Django 条件一致（媒体类型页 / 详情页 / 设置子页）。
+      document.addEventListener('htmx:afterSettle', () => {
+        const parts = window.location.pathname.split('/').filter(Boolean);
+        const currentType = parts[0] === 'details' ? parts[2] : parts.length === 2 && parts[0] !== 'settings' ? parts[1] : null;
+        const isSettings = parts[0] === 'settings';
+        document.querySelectorAll('#lj-tn-nav .lj-tn-item[href]').forEach((link) => {
+          const target = link.pathname.replace(/\/+$/, '');
+          let active;
+          if (target === '') {
+            active = window.location.pathname === '/';
+          } else if (target.startsWith('/settings/')) {
+            active = isSettings;
+          } else if (parts[0] === 'details' && target.split('/').pop() === currentType) {
+            active = true;
+          } else {
+            active = target === window.location.pathname.replace(/\/+$/, '');
+          }
+          link.classList.toggle('is-on', active);
+          if (active) link.setAttribute('aria-current', 'page');
+          else link.removeAttribute('aria-current');
+        });
+        // 品牌区那个库名也跟着当前页面换
+        const lib = document.getElementById('lj-tn-lib');
+        if (lib) lib.textContent = window.__ljLibLabel(parts, currentType);
+        // 换页后宽度可能变了（比如从有筛选行的列表页换到设置页），重新量一次溢出
+        window.__ljRelayout && window.__ljRelayout();
+      });
+      // 库名映射：列表页按媒体类型，别的页面按路径给个人话名，认不出就留空
+      window.__ljLibLabel = function (parts, mediaType) {
+        const byType = { game: '游戏库', book: '图书库', movie: '电影库', tv: '剧集库', season: '剧集库', episode: '剧集库' };
+        if (mediaType && byType[mediaType]) return byType[mediaType];
+        if (parts.length === 0) return '首页';
+        const head = parts[0];
+        const fixed = { statistics: '统计', 'year-in-review': '年度报告', journal: '日志', lists: '列表', list: '列表', calendar: '日历', search: '搜索', settings: '设置', details: '详情' };
+        return fixed[head] || '';
+      };
+    </script>
+    <script defer src="{% static 'js/libraries/alpinejs-3.14.9.min.js' %}"></script>
+    <script src="{% static 'js/libraries/lazysizes-5.3.2.min.js' %}" async></script>
+
+    <link rel="apple-touch-icon"
+          sizes="180x180"
+          href="{% static "favicon/apple-touch-icon.png" %}">
+    <link rel="icon"
+          type="image/png"
+          sizes="32x32"
+          href="{% static "favicon/favicon-32x32.png" %}">
+    <link rel="icon"
+          type="image/png"
+          sizes="16x16"
+          href="{% static "favicon/favicon-16x16.png" %}">
+    <link rel="manifest" href="{% static "favicon/site.webmanifest" %}">
+    <link rel="mask-icon"
+          href="{% static "favicon/safari-pinned-tab.svg" color="#181a1b" %}">
+    <link rel="shortcut icon" href="{% static "favicon/favicon.ico" %}">
+    <meta name="msapplication-TileColor" content="#181a1b">
+    <meta name="msapplication-config"
+          content="{% static "favicon/browserconfig.xml" %}">
+    <meta name="theme-color" content="#181a1b">
+
+  </head>
+
+  <body>
+    {# 跳转链接：键盘用户按第一个 Tab 就能跳过侧栏一长串导航，直进正文 #}
+    {% comment %}
+      用自定义 CSS 而不是 Tailwind 的 sr-only / focus:not-sr-only，
+      因为 main.css 是编译产物，没重编译的类等于不存在，链接会一直露在页面顶上。
+    {% endcomment %}
+    <a href="#main-content" class="skip-link">跳到主内容</a>
+    {% block body %}
+      {# 搜索默认给哪个媒体类型：跟随当前页，没有就按本站习惯给「游戏」 #}
+      {% if media_type == MediaTypes.SEASON.value %}
+        {% firstof MediaTypes.TV.value as search_type %}
+      {% elif media_type %}
+        {% firstof media_type as search_type %}
+      {% else %}
+        {% firstof MediaTypes.GAME.value as search_type %}
+      {% endif %}
+
+      {# 侧栏 id 保留成空占位：旧的折叠 CSS / 外部脚本可能还按 #sidebar 找它，真身已经不在了 #}
+      <div id="sidebar" hidden aria-hidden="true" data-lj-retired="1"></div>
+
+      {# Main container for the layout #}
+      <div class="flex flex-col min-h-screen bg-[#212529] text-gray-100">
+
+        {% comment %}
+          🔴 hx-boost 五个属性从原 <aside> 原样搬到这里，一个字符都不许改：
+          少了 hx-headers 的 X-Soft-Navigation，视图只回片段，正文会整块空白。
+          顶栏在 #main-content 外面，所以软导航换正文不会把它冲掉。
+        {% endcomment %}
+        <header id="lj-topnav"
+                class="lj-topnav"
+                hx-boost="true"
+                hx-target="#main-content"
+                hx-select="#main-content"
+                hx-swap="outerHTML show:window:top"
+                hx-headers='{"X-Soft-Navigation": "true"}'>
+          <div class="lj-tn-row">
+            {# 品牌区：折叠后也永远留着 #}
+            <a class="lj-tn-brand" href="{% url 'home' %}" title="{% trans 'Home' %}">
+              <span class="lj-tn-mark" aria-hidden="true">◆</span>
+              <span class="lj-tn-name">LIFE JOY</span>
+              {# 库名跟着当前页面变：/admin/game → 游戏库 …（不是列表页时显示页面名或留空） #}
+              <span class="lj-tn-lib" id="lj-tn-lib">
+                {% if media_type == "game" %}游戏库
+                {% elif media_type == "book" %}图书库
+                {% elif media_type == "movie" %}电影库
+                {% elif media_type == "tv" or media_type == "season" or media_type == "episode" %}剧集库
+                {% elif request.path == "/" %}首页
+                {% elif "/statistics" in request.path %}统计
+                {% elif "/year-in-review" in request.path %}年度报告
+                {% elif "/journal" in request.path %}日志
+                {% elif "/lists" in request.path %}列表
+                {% elif "/calendar" in request.path %}日历
+                {% elif "/search" in request.path %}搜索
+                {% elif "/settings" in request.path %}设置
+                {% endif %}
+              </span>
+            </a>
+            {# 折叠箭头：品牌区右边紧挨着，只改本地存储，不发请求 #}
+            <button type="button"
+                    id="lj-tn-fold"
+                    class="lj-tn-fold"
+                    onclick="window.__toggleSidebar()"
+                    title="收起导航"
+                    aria-label="收起导航"
+                    aria-expanded="true">
+              <span class="lj-tn-chev" aria-hidden="true">‹</span>
+            </button>
+
+            {# 图标行：媒体 / 工具 / 系统 三组，放不下由 JS 实测宽度收进 ⋯ #}
+            <nav class="lj-tn-nav" id="lj-tn-nav" aria-label="主导航">
+              {% block sidebar_own_media %}
+                <a href="{% url 'home' %}"
+                   data-lj-prio="10"
+                   data-lj-group="媒体"
+                   class="lj-tn-item{% if request.path == '/' %} is-on{% endif %}"
+                   title="{% trans 'Home' %}"
+                   aria-label="{% trans 'Home' %}"
+                   {% if request.path == '/' %}aria-current="page"{% endif %}>
+                  {% include "app/icons/house.svg" with classes="w-5 h-5" %}
+                </a>
+
+                {% get_sidebar_media_types user as sidebar_media_types %}
+                {% for item in sidebar_media_types %}
+                  {% if target_user is None or target_user == request.user %}
+                    <a href="{% url 'medialist' username=user.username media_type=item.media_type %}"
+                       data-lj-prio="{% if item.media_type == 'game' %}9{% elif item.media_type == 'movie' %}8{% elif item.media_type == 'tv' %}7{% elif item.media_type == 'book' %}6{% else %}5.5{% endif %}"
+                       data-lj-group="媒体"
+                       class="lj-tn-item{% if media_type == item.media_type %} is-on{% endif %}"
+                       title="{{ item.display_name }}"
+                       aria-label="{{ item.display_name }}"
+                       {% if media_type == item.media_type %}aria-current="page"{% endif %}>
+                      {% icon item.media_type is_active=media_type|str_equals:item.media_type %}
+                    </a>
+                  {% else %}
+                    <a href="{% url 'medialist' username=user.username media_type=item.media_type %}"
+                       data-lj-prio="5.5"
+                       data-lj-group="媒体"
+                       class="lj-tn-item"
+                       title="{{ item.display_name }}"
+                       aria-label="{{ item.display_name }}">
+                      {% icon item.media_type is_active=False %}
+                    </a>
+                  {% endif %}
+                {% endfor %}
+              {% endblock sidebar_own_media %}
+
+            {% block sidebar_external_media_view %}
+            {% endblock sidebar_external_media_view %}
+
+            {% block sidebar_utilities %}
+              {% url 'create_entry' as create_entry_url %}
+              {% if sidebar_items.create_enabled %}
+                <a href="{{ create_entry_url }}"
+                   data-lj-prio="5"
+                   data-lj-group="工具"
+                   class="lj-tn-item lj-tn-sep{% if request.path == create_entry_url %} is-on{% endif %}"
+                   title="{% trans 'Create Custom' %}"
+                   aria-label="{% trans 'Create Custom' %}">
+                  {% include "app/icons/circle-plus.svg" with classes="w-5 h-5" %}
+                </a>
+              {% endif %}
+
+              {% url 'statistics' as statistics_url %}
+              {% if sidebar_items.statistics_enabled %}
+                {# 统计页的 Chart.js 仍在 block js 里，boost 换 #main-content 时不执行 → 暂留整页跳转 #}
+                <a href="{{ statistics_url }}"
+                   hx-boost="false"
+                   data-lj-prio="4"
+                   data-lj-group="工具"
+                   class="lj-tn-item{% if not sidebar_items.create_enabled %} lj-tn-sep{% endif %}{% if request.path == statistics_url %} is-on{% endif %}"
+                   title="{% trans 'Statistics' %}"
+                   aria-label="{% trans 'Statistics' %}">
+                  {% include "app/icons/bars-pyramid.svg" with classes="w-5 h-5" %}
+                </a>
+              {% endif %}
+
+              {% url 'year_in_review' as year_in_review_url %}
+              {# 年度报告页的 Chart.js 也在 block js 里，软导航换 #main-content 时不会执行 → 整页跳转 #}
+              <a href="{{ year_in_review_url }}"
+                 hx-boost="false"
+                 data-lj-prio="3.5"
+                 data-lj-group="工具"
+                 class="lj-tn-item{% if request.path == year_in_review_url %} is-on{% endif %}"
+                 title="年度报告"
+                 aria-label="年度报告">
+                {% include "app/icons/trophy.svg" with classes="w-5 h-5" %}
+              </a>
+
+              {% url 'near_complete' as near_complete_url %}
+              {# 临门一脚：整页一次性渲染，跟年度报告一样走整页跳转，不做软导航 #}
+              <a href="{{ near_complete_url }}"
+                 hx-boost="false"
+                 data-lj-prio="3.4"
+                 data-lj-group="工具"
+                 class="lj-tn-item{% if request.path == near_complete_url %} is-on{% endif %}"
+                 title="临门一脚"
+                 aria-label="临门一脚">
+                {% include "app/icons/award.svg" with classes="w-5 h-5" %}
+              </a>
+
+              {% url 'journal' as journal_url %}
+              {% if sidebar_items.journal_enabled %}
+                {# date-range.js 已移到 base.html 全局加载，日志页可以回到 boost 软导航 #}
+                <a href="{{ journal_url }}"
+                   data-lj-prio="3"
+                   data-lj-group="工具"
+                   class="lj-tn-item{% if request.path == journal_url %} is-on{% endif %}"
+                   title="{% trans 'Journal' %}"
+                   aria-label="{% trans 'Journal' %}">
+                  {% include "app/icons/history.svg" with classes="w-5 h-5" %}
+                </a>
+              {% endif %}
+
+              {% url 'lists' as lists_url %}
+              {% if sidebar_items.lists_enabled %}
+                {# 列表页视图已放行 X-Soft-Navigation，回到 boost，跟其它页一样走软导航 #}
+                <a href="{{ lists_url }}"
+                   data-lj-prio="2"
+                   data-lj-group="工具"
+                   class="lj-tn-item{% if request.path == lists_url %} is-on{% endif %}"
+                   title="{% trans 'Lists' %}"
+                   aria-label="{% trans 'Lists' %}">
+                  {% include "app/icons/folder-plus.svg" with classes="w-5 h-5" %}
+                </a>
+              {% endif %}
+
+              {% url 'calendar' as calendar_url %}
+              {% if sidebar_items.calendar_enabled %}
+                <a href="{{ calendar_url }}"
+                   data-lj-prio="1"
+                   data-lj-group="工具"
+                   class="lj-tn-item{% if request.path == calendar_url %} is-on{% endif %}"
+                   title="{% trans 'Calendar' %}"
+                   aria-label="{% trans 'Calendar' %}">
+                  {% include "app/icons/calendar.svg" with classes="w-5 h-5" %}
+                </a>
+              {% endif %}
+            {% endblock sidebar_utilities %}
+
+            {% block sidebar_logout %}
+              {% url 'account' as account_url %}
+              {% url 'notifications' as notifications_url %}
+              {% url 'integrations' as integrations_url %}
+              {% url 'import_data' as import_url %}
+              {% url 'export_data' as export_url %}
+              <a href="{{ account_url }}"
+                 data-lj-prio="5.55"
+                 data-lj-group="系统"
+                 class="lj-tn-item lj-tn-sep{% if request.path == account_url or request.path == notifications_url or request.path == integrations_url or request.path == import_url or request.path == export_url %} is-on{% endif %}"
+                 title="{% trans 'Settings' %}"
+                 aria-label="{% trans 'Settings' %}">
+                {% include "app/icons/settings.svg" with classes="w-5 h-5" %}
+              </a>
+
+              {# 登出是整页跳转的 POST 表单，排除出 boost，否则会被 htmx 抓成局部请求 #}
+              <form method="post"
+                    action="{% url 'account_logout' %}"
+                    hx-boost="false"
+                    data-lj-prio="5.4"
+                    data-lj-group="系统"
+                    class="lj-tn-form">
+                {% csrf_token %}
+                <button type="submit"
+                        class="lj-tn-lout"
+                        title="{% trans 'Logout' %}"
+                        aria-label="{% trans 'Logout' %}">
+                  {% include "app/icons/logout.svg" with classes="w-5 h-5" %}
+                </button>
+              </form>
+            {% endblock sidebar_logout %}
+
+            {# ⋯：真的收起东西时才出现，点开是完整列表（图标 + 文字，分三组） #}
+            <button type="button"
+                    id="lj-tn-more"
+                    class="lj-tn-more"
+                    aria-label="更多导航"
+                    aria-haspopup="true"
+                    aria-expanded="false"
+                    aria-controls="lj-tn-menu">
+              {% include "app/icons/ellipsis.svg" with classes="w-4 h-4" %}
+            </button>
+          </nav>
+
+            <div class="lj-tn-actions">
+              {# 搜索：原来顶栏那个全局搜索框收进浮层，保证 / 快捷键和 #global-search 都还在 #}
+              <button type="button"
+                      id="lj-tn-query-btn"
+                      class="lj-tn-pill"
+                      aria-label="搜索"
+                      aria-expanded="false"
+                      aria-controls="lj-tn-query">
+                {% include "app/icons/magnifying-glass.svg" with classes="w-4 h-4" %}
+                <span>搜索</span>
+              </button>
+
+              {# 筛选：只有列表页（真有筛选行）才出现，点它滚到筛选行并高亮 #}
+              <button type="button"
+                      id="lj-tn-filter"
+                      class="lj-tn-pill"
+                      hidden
+                      aria-label="跳到筛选行">
+                {% include "app/icons/funnel.svg" with classes="w-4 h-4" %}
+                <span>筛选</span>
+              </button>
+
+              {# 日/夜：沿用原来的 __toggleTheme，只把按钮从右下角搬到顶栏 #}
+              <button type="button"
+                      id="theme-toggle"
+                      onclick="window.__toggleTheme()"
+                      title="{% trans 'Switch theme' %}"
+                      aria-label="{% trans 'Switch theme' %}"
+                      class="lj-tn-pill">
+                {% include "app/icons/flame.svg" with classes="w-4 h-4 theme-icon-dark" %}
+                {% include "app/icons/eye.svg" with classes="w-4 h-4 theme-icon-light" %}
+                <span class="lj-tn-when-dark">日间</span>
+                <span class="lj-tn-when-light">夜间</span>
+              </button>
+
+              {% block anonymous_login %}
+              {% endblock anonymous_login %}
+            </div>
+          </div>
+
+          {# ⋯ 面板：默认 hidden（display:none），绝对不用 opacity —— 见 topnav.css 顶部说明 #}
+          <div id="lj-tn-menu"
+               class="lj-tn-menu"
+               hidden
+               aria-label="全部导航"></div>
+
+          {# 搜索浮层：原来顶栏那个全局搜索框搬到这里，保证 #global-search 和 / 快捷键都还在 #}
+          <div id="lj-tn-query" class="lj-tn-query" hidden>
+            <div class="relative w-full">
+              <form method="get"
+                    action="{% url 'search' %}"
+                    x-data=" { isOpen: false, selectedType: { display: '{{ search_type|media_type_readable_plural }}', value: '{{ search_type }}' }, mediaTypes: {% get_search_media_types user as search_types %}{{ search_types }}, getPlaceholder() { return `Search ${this.selectedType.display.toLowerCase()}...` } }">
+                <div class="flex">
+                  <div class="relative grow">
+                    {# Search input #}
+                    <input type="search"
+                           id="global-search"
+                           name="q"
+                           value="{{ request.GET.q }}"
+                           :placeholder="getPlaceholder()"
+                           aria-label="搜索"
+                           class="w-full py-2 min-h-11 pl-12 pr-4 text-sm text-gray-300 bg-[#272c31] rounded-l-lg focus:outline-none focus:ring-2 focus:ring-[#4a9eff] focus:ring-inset placeholder-gray-500">
+                    <button type="submit"
+                            aria-label="提交搜索"
+                            class="absolute left-0 top-1/2 -translate-y-1/2 min-h-11 min-w-11 inline-flex items-center justify-center text-gray-400 hover:text-white transition-colors duration-200 focus:outline-none cursor-pointer">
+                      {% include "app/icons/magnifying-glass.svg" with classes="w-5 h-5" %}
+
+                    </button>
+                  </div>
+
+                  <input type="hidden" name="media_type" :value="selectedType.value">
+
+                  {# Media type dropdown #}
+                  <button type="button"
+                          @click="isOpen = !isOpen"
+                          @click.away="isOpen = false"
+                          aria-label="选择搜索的媒体类型"
+                          class="flex items-center justify-between max-w-27.5 sm:max-w-none sm:w-32 px-2 sm:px-4 py-2 min-h-11 text-sm text-gray-300 bg-[#272c31] rounded-r-lg focus:outline-none focus:ring-2 focus:ring-[#4a9eff] focus:ring-inset hover:bg-[#2a2e33] transition-colors duration-200 cursor-pointer">
+                    <span class="truncate sm:whitespace-normal" x-text="selectedType.display"></span>
+                    {% include "app/icons/chevron-down.svg" with classes="w-4 h-4 ml-2" %}
+
+                  </button>
+                  <ul x-cloak
+                      x-show="isOpen"
+                      @keydown.escape.window="isOpen = false"
+                      x-transition:enter="transition ease-out duration-100"
+                      x-transition:enter-start="transform opacity-0 scale-95"
+                      x-transition:enter-end="transform opacity-100 scale-100"
+                      x-transition:leave="transition ease-in duration-75"
+                      x-transition:leave-start="transform opacity-100 scale-100"
+                      x-transition:leave-end="transform opacity-0 scale-95"
+                      class="absolute z-20 py-1 mt-12 overflow-auto text-sm text-gray-300 bg-[#2a2e33] rounded-lg shadow-lg right-0 w-32">
+                    <template x-for="type in mediaTypes" :key="type.value">
+                      <li @click="selectedType = type; isOpen = false"
+                          class="px-4 py-2 cursor-pointer hover:bg-[#343a40] transition duration-150 ease-in-out"
+                          x-text="type.display"></li>
+                    </template>
+                  </ul>
+                </div>
+              </form>
+            </div>
+            <button type="button"
+                    id="lj-tn-locate"
+                    class="lj-tn-pill"
+                    hidden
+                    aria-label="跳到列表的筛选行">
+              {% include "app/icons/vertical-sliders.svg" with classes="w-4 h-4" %}
+              <span>跳到筛选行</span>
+            </button>
+          </div>
+        </header>
+
+        {# Main content #}
+        <div class="flex-1 min-w-0 flex flex-col">
+          {% comment %}
+            搜索框已经搬进顶栏「搜索」浮层（全站只有一份 #global-search）。
+            这里保留一个空的 search_bar 块：子模板（media_list.html）还在 override 它，
+            block 名不保留的话那边的 {{ block.super }} 没有落点，语义会变。
+          {% endcomment %}
+          {% block search_bar %}{% endblock search_bar %}
+          {# lj-serif：字体分两层的根类，只作用于正文区；顶栏在 main 外面，不受影响 #}
+          <main id="main-content"
+                tabindex="-1"
+                class="lj-serif flex-1 relative bg-[#212529]">
+            <div class="container mx-auto px-8 py-12">
+              {% block content %}
+              {% endblock content %}
+            </div>
+          </main>
+        </div>
+      </div>
+    {% endblock body %}
+
+    {# 没有侧栏了，默认不再给左侧留 64 宽度；block 名保留，子模板仍可 override #}
+    <div id="messages-anchor" class="fixed top-24 right-0 left-0 {% block messages_sidebar_offset %}{% endblock messages_sidebar_offset %} z-50 flex justify-center pointer-events-none">
+      <div id="messages-list"
+           class="w-full max-w-xl px-4 space-y-2 pointer-events-auto">
+        {% include "app/components/messages/messages_stack.html" %}
+      </div>
+    </div>
+
+    <div id="persistent-messages-actions">{% include "app/components/messages/persistent_messages_actions.html" %}</div>
+
+
+    <script>
+      window.__toggleTheme = function () {
+        var root = document.documentElement;
+        var next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+        root.setAttribute('data-theme', next);
+        root.classList.toggle('scheme-dark', next === 'dark');
+        try { localStorage.setItem('yamtrack-theme', next); } catch (e) {}
+        if (window.__setThemeMeta) window.__setThemeMeta(next);
+      };
+      // 导航折叠：只读写 localStorage，不碰数据库、不发请求。
+      // 按钮在顶栏 header 里、header 带 hx-boost，所以按钮必须 type=button + onclick 自己处理。
+      // 状态键名沿用旧的 yamtrack-sidebar，折叠态属性还是 html[data-sidebar="collapsed"]，
+      // 只是折叠的内容从「侧栏变窄」换成了「图标行收起、品牌区留着」。
+      window.__applySidebar = function (mode) {
+        var root = document.documentElement;
+        var collapsed = mode === 'collapsed';
+        root.setAttribute('data-sidebar', collapsed ? 'collapsed' : 'expanded');
+        var btn = document.getElementById('lj-tn-fold');
+        if (btn) {
+          btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+          btn.setAttribute('title', collapsed ? '展开导航' : '收起导航');
+          btn.setAttribute('aria-label', collapsed ? '展开导航' : '收起导航');
+        }
+        // 收起态下把两层面板一起关掉，免得留个悬空浮层
+        if (collapsed) {
+          var menu = document.getElementById('lj-tn-menu');
+          var query = document.getElementById('lj-tn-query');
+          if (menu) menu.hidden = true;
+          if (query) query.hidden = true;
+          var more = document.getElementById('lj-tn-more');
+          if (more) more.setAttribute('aria-expanded', 'false');
+        }
+      };
+      window.__toggleSidebar = function () {
+        var next = document.documentElement.getAttribute('data-sidebar') === 'collapsed' ? 'expanded' : 'collapsed';
+        window.__applySidebar(next);
+        try { localStorage.setItem('yamtrack-sidebar', next); } catch (e) {}
+      };
+      // 首屏也要套一次：刷新后折叠已生效，但按钮的 title / aria-expanded 还停在模板默认值。
+      window.__applySidebar(document.documentElement.getAttribute('data-sidebar'));
+      // 局部替换不会重跑上面的 head 脚本，换完按存储值再套一次（幂等）。
+      document.addEventListener('htmx:afterSettle', function () {
+        window.__applySidebar(document.documentElement.getAttribute('data-sidebar'));
+      });
+
+      // ── 弹窗无障碍 ──────────────────────────────────────────────
+      // 弹窗要能：焦点进来、Tab 只在弹窗里循环、关掉后焦点回原位、背景不跟着滚。
+      // 模板那边只标 role="dialog" aria-modal="true"，开关状态由这里统一盯（x-show 会改 inline display）。
+      var DIALOG_FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+      var dialogSeq = 0;
+
+      function dialogVisible(el) {
+        // 注意：position:fixed 的元素 offsetParent 恒为 null，不能用它判可见。
+        return !!(el && el.isConnected && el.getClientRects().length);
+      }
+
+      function openDialogs() {
+        return Array.prototype.filter.call(
+          document.querySelectorAll('[role="dialog"]'),
+          dialogVisible
+        );
+      }
+
+      // 读屏需要 aria-labelledby 指向真实存在的标题：开弹窗时把首个标题补上 id 再指过去。
+      function labelDialog(dialog) {
+        if (!dialog) return;
+        var target = null;
+        var ref = dialog.getAttribute('aria-labelledby');
+        if (ref && document.getElementById(ref) && dialog.contains(document.getElementById(ref))) {
+          target = document.getElementById(ref);
+        }
+        if (!target) {
+          target = dialog.querySelector('h1, h2, h3');
+        }
+        if (!target) return;
+        if (!target.id) {
+          dialogSeq += 1;
+          target.id = 'dialog-title-' + dialogSeq;
+        }
+        dialog.setAttribute('aria-labelledby', target.id);
+      }
+
+      window.__focusDialog = function (dialog) {
+        if (!dialog) return;
+        labelDialog(dialog);
+        if (dialog.contains(document.activeElement)) return;
+        var items = Array.prototype.filter.call(
+          dialog.querySelectorAll(DIALOG_FOCUSABLE),
+          function (el) { return el.getClientRects().length > 0; }
+        );
+        if (items.length) {
+          items[0].focus();
+        } else {
+          if (!dialog.hasAttribute('tabindex')) dialog.setAttribute('tabindex', '-1');
+          dialog.focus();
+        }
+      };
+
+      // 开关状态跟着可见性走：打开锁 body、把焦点放进去；关掉解锁并把焦点还回去。
+      var lastDialog = null;
+      function lockBody(lock) {
+        var want = lock ? 'hidden' : '';
+        if (document.body.style.overflow !== want) document.body.style.overflow = want;
+      }
+      function syncDialogs() {
+        var dialogs = openDialogs();
+        if (!dialogs.length) {
+          if (lastDialog) {
+            lockBody(false);
+            lastDialog.removeAttribute('data-dialog-armed');
+            var back = lastDialog.__restoreFocus;
+            lastDialog = null;
+            if (back && back.isConnected && back.focus) back.focus();
+          }
+          return;
+        }
+        var top = dialogs[dialogs.length - 1];
+        if (top === lastDialog) return;
+        lockBody(true);
+        if (!top.hasAttribute('data-dialog-armed')) {
+          top.setAttribute('data-dialog-armed', '1');
+          top.__restoreFocus = document.activeElement;
+        }
+        lastDialog = top;
+        setTimeout(function () { window.__focusDialog(top); }, 0);
+      }
+
+      new MutationObserver(function () {
+        window.requestAnimationFrame(syncDialogs);
+      }).observe(document.body, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['style', 'class'],
+      });
+      document.addEventListener('htmx:afterSettle', function () {
+        window.requestAnimationFrame(syncDialogs);
+      });
+
+      // Tab / Shift+Tab 在最上层弹窗里循环，不跑到背景去。
+      document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Tab') return;
+        var dialogs = openDialogs();
+        if (!dialogs.length) return;
+        labelDialog(dialogs[dialogs.length - 1]);
+        var dialog = dialogs[dialogs.length - 1];
+        var items = Array.prototype.filter.call(
+          dialog.querySelectorAll(DIALOG_FOCUSABLE),
+          function (el) { return el.getClientRects().length > 0; }
+        );
+        if (!items.length) {
+          e.preventDefault();
+          dialog.focus();
+          return;
+        }
+        var first = items[0];
+        var last = items[items.length - 1];
+        if (!dialog.contains(document.activeElement)) {
+          e.preventDefault();
+          first.focus();
+        } else if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }, true);
+
+      // 点遮罩不直接关弹窗：以前这一下会把已经填了一半的表单整块丢掉。
+      // 点遮罩时把焦点送回弹窗里，让用户自己决定按 Esc 还是点 X 关。
+      document.addEventListener('click', function (e) {
+        var dialogs = openDialogs();
+        if (!dialogs.length) return;
+        var top = dialogs[dialogs.length - 1];
+        if (e.target === top) {
+          e.stopPropagation();
+          window.__focusDialog(top);
+        }
+      }, true);
+    </script>
+
+    <script>
+      // ── 聚焦浮层（列表页点卡片弹出，不跳详情页）──────────────────────────
+      // 为什么写在 base 而不是 media_list.html：
+      //   侧栏用 hx-boost 只换 #main-content，换进来的 <script> 不会执行。
+      //   这里的脚本每次整页加载都跑一次，htmx 软导航时定义不会丢；
+      //   浮层本身在 #main-content 里，换页后由 base 的 htmx.onLoad → Alpine.initTree 重新初始化。
+      // 显隐一律用 x-show（display），不用 opacity：base 的 dialogVisible() 靠
+      //   getClientRects() 判断弹窗开没开，关闭态若只是透明度 0，盒子还在就会被判成「开着」，
+      //   整页 body 被 lockBody 锁死滚不动。
+      window.focusModal = function () {
+        return {
+          open: false,
+          flipped: false,
+          idx: 0,
+          items: [],
+          nextPage: 0,
+          loading: false,
+          root: null,
+
+          get total() { return this.items.length; },
+          get cur() { return this.items[this.idx] || {}; },
+          get indexLabel() {
+            var n = this.idx + 1;
+            var t = this.total || 1;
+            return (n < 10 ? '0' + n : '' + n) + ' / ' + (t < 10 ? '0' + t : '' + t);
+          },
+          get numLine() {
+            var y = this.cur.year;
+            return y ? this.indexLabel + ' · ' + y : this.indexLabel;
+          },
+          get hasRadar() {
+            var c = this.cur;
+            return c.story !== undefined && c.story !== '' &&
+                   c.mechanic !== undefined && c.mechanic !== '' &&
+                   c.visual !== undefined && c.visual !== '';
+          },
+          get radarPoints() {
+            var c = this.cur;
+            var vals = [
+              this._norm(c.story, true),
+              this._norm(c.mechanic, true),
+              this._norm(c.visual, false)
+            ];
+            var angs = [-Math.PI / 2, Math.PI / 6, Math.PI * 5 / 6];
+            var R = 78, cx = 100, cy = 100;
+            return vals.map(function (v, i) {
+              var a = angs[i];
+              var r = R * v;
+              return (cx + r * Math.cos(a)).toFixed(1) + ',' + (cy + r * Math.sin(a)).toFixed(1);
+            }).join(' ');
+          },
+
+          _norm(v, signed) {
+            var n = parseFloat(v);
+            if (isNaN(n)) return 0;
+            var x = signed ? (n + 10) / 20 : n / 10;
+            return Math.max(0, Math.min(1, x));
+          },
+
+          collect() {
+            this.items = Array.prototype.map.call(
+              document.querySelectorAll('.lib-grid .libcard[data-title]'),
+              function (el) { return Object.assign({}, el.dataset); }
+            );
+            this.nextPage = parseInt(this.$root && this.$root.dataset.nextPage || '0', 10) || 0;
+          },
+
+          show(i) {
+            if (!this.items.length) this.collect();
+            if (!this.items.length) return;
+            if (!(i >= 0 && i < this.items.length)) i = 0;
+            this.idx = i;
+            this.flipped = false;
+            this.open = true;
+          },
+
+          close() {
+            this.open = false;
+            this.flipped = false;
+          },
+
+          toggle() {
+            if (!this.open) return;
+            this.flipped = !this.flipped;
+          },
+
+          prev() {
+            if (!this.open || !this.total) return;
+            this.idx = (this.idx - 1 + this.total) % this.total;
+            this.flipped = false;
+          },
+
+          next() {
+            if (!this.open || !this.total) return;
+            if (this.idx + 1 >= this.total) { this.loadNextPage(); return; }
+            this.idx = this.idx + 1;
+            this.flipped = false;
+          },
+
+          // 翻到最后一张再按 → ：拉下一页补齐，失败就回到第一张，不卡住。
+          loadNextPage() {
+            var self = this;
+            if (this.loading) return;
+            if (!this.nextPage) { this.idx = 0; this.flipped = false; return; }
+            this.loading = true;
+            var u = new URL(window.location.href);
+            u.searchParams.set('page', String(this.nextPage));
+            u.searchParams.set('layout', 'grid');
+            fetch(u.toString(), { credentials: 'same-origin' })
+              .then(function (r) { return r.ok ? r.text() : null; })
+              .then(function (html) {
+                self.loading = false;
+                if (!html) { self.nextPage = 0; self.idx = 0; self.flipped = false; return; }
+                var doc = new DOMParser().parseFromString(html, 'text/html');
+                var nodes = doc.querySelectorAll('.lib-grid .libcard[data-title]');
+                var seen = {};
+                self.items.forEach(function (it) { seen[it.href] = 1; });
+                var before = self.total;
+                Array.prototype.forEach.call(nodes, function (el) {
+                  var key = el.dataset.href;
+                  if (seen[key]) return;
+                  seen[key] = 1;
+                  self.items.push(Object.assign({}, el.dataset));
+                });
+                if (self.total === before) {
+                  // 到底了：没有新内容就回第一张
+                  self.nextPage = 0;
+                  self.idx = 0;
+                } else {
+                  self.nextPage = self.nextPage + 1;
+                  self.idx = before;
+                }
+                self.flipped = false;
+              })
+              .catch(function () {
+                self.loading = false;
+                self.nextPage = 0;
+                self.idx = 0;
+                self.flipped = false;
+              });
+          },
+
+          // 键盘守卫：光标在输入框里时不抢 F / ← / →
+          _typing(e) {
+            var t = e && e.target;
+            if (!t || !t.closest) return false;
+            return !!t.closest('input, textarea, select, [contenteditable]');
+          },
+          onEsc(e) { if (this._typing(e)) return; if (this.open) this.close(); },
+          onFlip(e) { if (this._typing(e)) return; this.toggle(); },
+          onPrev(e) { if (this._typing(e)) return; this.prev(); },
+          onNext(e) { if (this._typing(e)) return; this.next(); },
+
+          init() {
+            this.root = this.$el;
+            window.__focusModalInstance = this;
+            this.collect();
+          },
+
+          destroy() {
+            if (window.__focusModalInstance === this) window.__focusModalInstance = null;
+          }
+        };
+      };
+
+      // 点卡片 → 打开浮层（不跳详情页）。
+      // 卡片里的追踪 / 列表 / 历史三个按钮必须放行；海报和标题这两个 <a> 要拦下来。
+      if (!window.__focusModalClickBound) {
+        window.__focusModalClickBound = true;
+        document.addEventListener('click', function (e) {
+          var card = e.target.closest && e.target.closest('.libcard[data-title]');
+          if (!card) return;
+          if (e.target.closest('button, input, textarea, select')) return;
+          var modal = window.__focusModalInstance;
+          if (!modal || !modal.root || !modal.root.isConnected) return;
+          var cards = Array.prototype.slice.call(
+            document.querySelectorAll('.lib-grid .libcard[data-title]')
+          );
+          e.preventDefault();
+          modal.collect();
+          modal.show(cards.indexOf(card));
+        });
+        // 键盘：卡片是 role="button"，Enter / 空格 也能打开
+        document.addEventListener('keydown', function (e) {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          var card = e.target;
+          if (!card || !card.matches || !card.matches('.libcard[data-title]')) return;
+          var modal = window.__focusModalInstance;
+          if (!modal || !modal.root || !modal.root.isConnected) return;
+          var cards = Array.prototype.slice.call(
+            document.querySelectorAll('.lib-grid .libcard[data-title]')
+          );
+          e.preventDefault();
+          modal.collect();
+          modal.show(cards.indexOf(card));
+        });
+      }
+    </script>
+
+    {% block js %}
+    {% endblock js %}
+
+    <script>
+      // /lists 回到 hx-boost 软导航后，它 block js 里的 jQuery + select2 不会重跑。
+      // 这里按需补：软导航换进来的内容如果有 .django-select2 且 jQuery 还没加载，
+      // 就按顺序把这一套拉起来再初始化，别为所有页面都背这份开销。
+      (function () {
+        var SELECT2_JS = [
+          '{% static "js/libraries/jquery-3.7.1.min.js" %}',
+          '{% static "js/libraries/select2-4.1.0.min.js" %}',
+          '{% static "django_select2/django_select2.js" %}',
+        ];
+        var SELECT2_CSS = [
+          '{% static "css/libraries/select2-4.1.0.min.css" %}',
+          '{% static "django_select2/django_select2.css" %}',
+        ];
+        var loading = false;
+
+        function pendingScripts() {
+          var list = [];
+          if (!window.jQuery) list.push(SELECT2_JS[0]);
+          if (!(window.jQuery && window.jQuery.fn.select2)) list.push(SELECT2_JS[1]);
+          if (!(window.jQuery && window.jQuery.fn.djangoSelect2)) list.push(SELECT2_JS[2]);
+          return list;
+        }
+
+        function loadSeq(queue, i) {
+          if (i >= queue.length) {
+            loading = false;
+            if (window.jQuery && window.jQuery.fn.djangoSelect2) {
+              window.jQuery('.django-select2').not('[name*=__prefix__]').djangoSelect2();
+            }
+            return;
+          }
+          var s = document.createElement('script');
+          s.src = queue[i];
+          s.onload = function () { loadSeq(queue, i + 1); };
+          s.onerror = function () { loading = false; };
+          document.body.appendChild(s);
+        }
+
+        function ensureSelect2(scope) {
+          if (!scope || !scope.querySelector) return;
+          if (!scope.querySelector('.django-select2')) return;
+          if (window.jQuery && window.jQuery.fn.djangoSelect2) {
+            window.jQuery(scope).find('.django-select2').not('[name*=__prefix__]').djangoSelect2();
+            return;
+          }
+          if (loading) return;
+          loading = true;
+          // select2 的样式表只有列表页需要，跟着一起补
+          SELECT2_CSS.forEach(function (href) {
+            if (document.querySelector('link[href="' + href + '"]')) return;
+            var l = document.createElement('link');
+            l.rel = 'stylesheet';
+            l.href = href;
+            document.head.appendChild(l);
+          });
+          loadSeq(pendingScripts(), 0);
+        }
+
+        document.body.addEventListener('htmx:afterSwap', function (e) {
+          var elt = e.detail && e.detail.elt;
+          ensureSelect2(elt || document.getElementById('main-content'));
+        });
+      })();
+    </script>
+
+    {% comment %}
+      日期范围控件（日志页 / 统计页共用的 date-range.js）：放在 base 里全局只加载一次。
+      这两页现在走 hx-boost 软导航，页面自己的 block js 不会重跑；脚本在这里常驻，
+      软导航后靠上面 htmx.onLoad 里的 Alpine.initTree 把新的 #main-content 初始化起来。
+    {% endcomment %}
+    <script src="{% static 'js/date-range.js' %}{% get_static_file_mtime 'js/date-range.js' %}"
+            data-date-format="{{ request.user.date_format }}"></script>
+
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/static/js/serviceworker.js')
+            .then((registration) => {
+              console.log('SW registered: ', registration);
+            })
+            .catch((registrationError) => {
+              console.log('SW registration failed: ', registrationError);
+            });
+        });
+      }
+    </script>
+
+    {% comment %}
+    {% comment %}
+      顶部导航交互：溢出收 ⋯ / 面板开合 / 筛选定位 / 搜索浮层（脚本正文 ≤80 行）。
+      面板显隐只用 hidden（= display:none），绝不用 opacity：base 的 dialogVisible()
+      靠 getClientRects() 判弹窗，透明度 0 会把整页滚动锁死。
+    {% endcomment %}
+    <script>
+      (function () {
+        var $ = function (id) { return document.getElementById(id); };
+        var navEl = $('lj-tn-nav'), menu = $('lj-tn-menu'), query = $('lj-tn-query'), moreBtn = $('lj-tn-more'), queryBtn = $('lj-tn-query-btn');
+        if (!navEl) return;
+        // ① 实测宽度决定收谁（prio 小的先收）；⋯ 自己也占宽，加完复量一轮。不写死断点。
+        window.__ljRelayout = function () {
+          var items = [].slice.call(navEl.querySelectorAll('[data-lj-prio]')), folded = [];
+          items.forEach(function (el) { el.removeAttribute('data-folded'); });
+          navEl.classList.remove('has-fold'); if (moreBtn) moreBtn.hidden = true;
+          if (!navEl.getClientRects().length) return;   // 折叠态 nav 是 display:none，量不出宽
+          var full = function () { return navEl.scrollWidth > navEl.clientWidth + 1; };
+          var foldOne = function () {
+            var left = items.filter(function (el) { return !el.hasAttribute('data-folded'); });
+            if (left.length <= 1) return;
+            left.sort(function (a, b) { return a.dataset.ljPrio - b.dataset.ljPrio; });
+            left[0].setAttribute('data-folded', '1'); folded.push(left[0]);
+          };
+          for (var g = 0; g < 30 && full(); g++) foldOne();
+          if (folded.length) { navEl.classList.add('has-fold'); if (moreBtn) moreBtn.hidden = false;
+            for (var h = 0; h < 30 && full(); h++) foldOne(); }
+          if (moreBtn) moreBtn.hidden = !folded.length; buildPanel(items);
+        };
+        function buildPanel(items) {   // ② 媒体 / 工具 / 系统 三组，图标 + 文字，克隆主行节点
+          if (!menu) return; menu.innerHTML = '';
+          ['媒体', '工具', '系统'].forEach(function (group) {
+            var ms = items.filter(function (el) { return el.dataset.ljGroup === group; });
+            if (!ms.length) return;
+            var head = document.createElement('b'), grid = document.createElement('div');
+            head.className = 'lj-tn-menu-head'; head.textContent = group; grid.className = 'lj-tn-menu-grid';
+            ms.forEach(function (el) {
+              var p = el.cloneNode(true), isForm = el.tagName === 'FORM';
+              p.querySelectorAll('[data-lj-prio]').forEach(function (n) { n.removeAttribute('data-lj-prio'); });
+              p.className = 'lj-tn-pitem' + (isForm ? ' lj-tn-pitem-form' : '') + (el.classList.contains('is-on') ? ' is-on' : '');
+              if (isForm) p.querySelector('button').appendChild(document.createTextNode('登出'));
+              else p.appendChild(document.createTextNode(el.getAttribute('title') || ''));
+              grid.appendChild(p);
+            });
+            menu.appendChild(head); menu.appendChild(grid);
+          });
+        }
+        function closePanels() {   // ③ hidden 一关就是 display:none，绝不用 opacity
+          if (menu) menu.hidden = true; if (query) query.hidden = true;
+          [moreBtn, queryBtn].forEach(function (b) { if (b) b.setAttribute('aria-expanded', 'false'); });
+        }
+        function toggle(btn, panel) {
+          if (!btn || !panel) return;
+          var open = panel.hidden; closePanels(); panel.hidden = !open;
+          btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+          if (open && panel === query) { var i = $('global-search'); if (i) { i.focus(); i.select(); } }
+        }
+        if (moreBtn) moreBtn.addEventListener('click', function () { toggle(moreBtn, menu); });
+        if (queryBtn) queryBtn.addEventListener('click', function () { toggle(queryBtn, query); });
+        // Esc 收面板；按 / 时面板关着就先开（否则输入框 display:none，searchShortcut.js 的 focus() 落空）
+        document.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape') return closePanels();
+          var t = e.target;
+          if (e.key !== '/' || !query || !query.hidden) return;
+          if (t && t.closest && t.closest('input, textarea, select, [contenteditable]')) return;
+          query.hidden = false; if (queryBtn) queryBtn.setAttribute('aria-expanded', 'true');
+        });
+        document.addEventListener('click', function (e) { if (!e.target.closest || !e.target.closest('.lj-topnav')) closePanels(); });
+        if (menu) menu.addEventListener('click', function (e) {   // 面板里克隆出来的登出自己提交
+          var b = e.target.closest && e.target.closest('.lj-tn-lout');
+          if (b && b.form) { closePanels(); b.form.submit(); }
+        });
+        // ④ 筛选：列表页才有真筛选行，点按钮滚过去 + 闪一下（不改 media_list.html）
+        var gotoFilter = function () {
+          closePanels(); var row = document.querySelector('#filter-form ~ .flex'); if (!row) return;
+          row.scrollIntoView({ behavior: 'smooth', block: 'center' }); row.classList.add('lj-tn-hit');
+          setTimeout(function () { row.classList.remove('lj-tn-hit'); }, 1800);
+          var i = row.querySelector('input[type="text"]'); if (i) i.focus({ preventScroll: true });
+        };
+        ['lj-tn-filter', 'lj-tn-locate'].forEach(function (id) {
+          var b = $(id); if (!b) return;
+          b.addEventListener('click', gotoFilter); if (document.querySelector('#filter-form')) b.hidden = false;
+        });
+        window.__ljRelayout(); addEventListener('resize', function () { clearTimeout(window.__ljTimer); window.__ljTimer = setTimeout(window.__ljRelayout, 120); });
+      })();
+    </script>
+
+    <script src="{% static 'js/mediaStatusDateHandler.js' %}{% get_static_file_mtime 'js/mediaStatusDateHandler.js' %}"></script>
+    <script src="{% static 'js/searchShortcut.js' %}{% get_static_file_mtime 'js/searchShortcut.js' %}"></script>
+    <script src="{% static 'js/ambient.js' %}{% get_static_file_mtime 'js/ambient.js' %}"></script>
+  </body>
+</html>

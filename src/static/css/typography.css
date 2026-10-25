@@ -1,0 +1,136 @@
+/* ==========================================================================
+   typography.css —— 「字体分两层」：显示层思源宋体，操作层保持无衬线
+
+   为什么单独一个文件：
+     main.css 是 Tailwind 编译产物（4000+ 行，重编译会被冲掉），
+     input.css 里一行 font-family 都没有。所以字体这一层单独成文，
+     跟 showcase.css 一样独立挂载（放在 main.css 之后）。
+
+   作用域：
+     所有规则都以 .lj-serif 开头，根类只加在 <main id="main-content"> 上。
+     侧栏 <aside> 和顶栏都在 main 外面，所以操作层天然不受影响。
+     全文没有任何裸选择器（body{} / h1{} / button{} 一律没有）。
+
+   两层怎么分：
+     显示层（改宋体）—— 页面主标题、作品标题、区块标题、简介正文、金句、手札、大数字
+     操作层（一点没动）—— 侧栏 / 顶栏 / 按钮 / 表单 / 表格 / 分页 / 小标签 / 状态角标
+
+   操作层为什么不会被动到：
+     1) 没给 .lj-serif 根容器设 font-family —— 一旦设在容器上，按钮、输入框、表格
+        会跟着继承（Tailwind 的 preflight 让 button/input 都是 font: inherit）。
+        这里只在挑选出来的标题 / 段落 / 数字上逐个设字体。
+     2) 挑元素时排除了 table / form / 弹窗里的内容（这些都属于操作层）。
+     3) 字号 ≤12px 的小字（text-xs）不碰 —— 它们基本都是小标签、辅助说明。
+
+   字重：
+     思源宋体有 7 档真字重，所以不用 700 硬撑（700 在宋体里会糊成一团）。
+     标题 600，正文 400；深色模式只做小幅上浮，见文末。
+   ========================================================================== */
+
+/* ---- 0. 变量（只声明，不设 font-family） ---------------------------------- */
+.lj-serif {
+  /* 顺序很重要：Noto Serif SC 是本机已装的真思源宋体（NotoSerifSC-VF.ttf），必须排第一；
+     后面几个只是没装思源的机器上的退路（华文宋体 / 宋体 / 系统 serif）。 */
+  --lj-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif;
+  --lj-serif-weight-body: 400;
+  --lj-serif-weight-title: 600;
+}
+
+/* ---- 1. 页面主标题 / 作品标题（h1） -------------------------------------
+   列表页的「游戏」「书籍」、详情页的作品名、统计页 / 日志页的页标题。
+   排除：表格里、表单里、弹窗里（都属于操作层），以及 text-xs / text-sm 的小字标题
+   —— 12~14px 的宋体细横线最容易糊，那些基本都是分隔小标签（比如日志页的日期分隔条）。 */
+.lj-serif h1:not(.text-xs):not(.text-sm):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *) {
+  font-family: var(--lj-serif);
+  font-weight: var(--lj-serif-weight-title);
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+}
+
+/* ---- 2. 区块标题（h2） ---------------------------------------------------
+   详情页的「你的记录」「划线与想法」「来源」，日志页 / 统计页的区块标题。
+   标题下面的按钮、表单不继承字体，仍然是无衬线。小字标题同上排除。 */
+.lj-serif h2:not(.text-xs):not(.text-sm):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *) {
+  font-family: var(--lj-serif);
+  font-weight: var(--lj-serif-weight-title);
+  letter-spacing: 0.015em;
+  line-height: 1.4;
+}
+
+/* ---- 3. 正文段落 ---------------------------------------------------------
+   只挑这三类正文语义的段落，不按「所有 p」一刀切，
+   否则设置页的帮助文字、标签说明会一起变宋体：
+     .text-pretty     —— 作品简介（synopsis）
+     .leading-relaxed —— 书摘金句 / 剧集简介等多行正文
+     .italic          —— 手札（你自己的备注，站点用斜体区分）
+   另外排除 text-xs：12px 的宋体在深底上细横线容易糊，那些基本都是小标签。 */
+.lj-serif p.text-pretty:not(.text-xs):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *),
+.lj-serif p.leading-relaxed:not(.text-xs):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *),
+.lj-serif p.italic:not(.text-xs):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *) {
+  font-family: var(--lj-serif);
+  font-weight: var(--lj-serif-weight-body);
+  letter-spacing: 0.01em;
+  /* 宋体横细竖粗，行距给足一点才不显得挤 */
+  line-height: 1.8;
+}
+
+/* ---- 4. 大号数字 ---------------------------------------------------------
+   统计页 / 日志页的数字卡片（p.text-2xl），
+   详情页「游玩时长 / 成就」那三个 2.5rem 的内联大数字。
+   数字用等宽数字（tabular-nums），换行时位数对得齐。 */
+.lj-serif p.text-2xl:not(table *, form *, [role="dialog"] *, [role="alertdialog"] *),
+.lj-serif [style*="2.5rem"]:not(table *, form *, [role="dialog"] *, [role="alertdialog"] *) {
+  font-family: var(--lj-serif);
+  font-weight: var(--lj-serif-weight-title);
+  font-variant-numeric: lining-nums tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+/* ==========================================================================
+   5. 深色模式补偿
+   思源宋体横细竖粗：深色底上亮字会「晕开」（halation），
+   最细的那些横线看着发虚、糊在一起。
+
+   这里用了两个手段，都没动颜色值：
+     a) 正文整档加粗：400 → 500。
+        实测本机 NotoSerifSC-VF 在 Chrome 里会把字重吸附到 100 的整数档
+        （canvas measureText 量同一串字：400/430 同宽、470/500 同宽、
+         600/620 同宽、650/700 同宽），所以这里只用整数档 ——
+        写 470 实际也是按 500 渲染的，直接写 500 更干净。
+        标题不跟着加：600 已经够，再上一档就是 700，宋体 700 会糊成墨块。
+     b) 正文行距再放宽一点点（1.8 → 1.85），让细横线之间留出呼吸的间隙。
+
+   为什么不直接改颜色：站点的灰阶层级（gray-300/400/500）承载着信息权重，
+   统一提亮会把「正文比说明重」这层关系抹平，所以选择只动字重和行距。
+   ========================================================================== */
+html[data-theme="dark"] .lj-serif,
+html.scheme-dark .lj-serif {
+  --lj-serif-weight-body: 500;
+}
+
+html[data-theme="dark"] .lj-serif p.text-pretty:not(.text-xs):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *),
+html[data-theme="dark"] .lj-serif p.leading-relaxed:not(.text-xs):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *),
+html[data-theme="dark"] .lj-serif p.italic:not(.text-xs):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *),
+html.scheme-dark .lj-serif p.text-pretty:not(.text-xs):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *),
+html.scheme-dark .lj-serif p.leading-relaxed:not(.text-xs):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *),
+html.scheme-dark .lj-serif p.italic:not(.text-xs):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *) {
+  line-height: 1.85;
+}
+
+/* 深色下把字缘的灰边收干净，配合上面的字重上浮，细横线才不会发虚。
+   （Windows 上这条影响有限，macOS / 高分屏上明显；留着无害。）
+   注意作用范围跟上面完全一致：仍然是 .lj-serif 作用域里的标题和正文段落，
+   不含表格、表单、弹窗。 */
+html[data-theme="dark"] .lj-serif h1:not(.text-xs):not(.text-sm):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *),
+html[data-theme="dark"] .lj-serif h2:not(.text-xs):not(.text-sm):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *),
+html[data-theme="dark"] .lj-serif p.text-pretty:not(.text-xs):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *),
+html[data-theme="dark"] .lj-serif p.leading-relaxed:not(.text-xs):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *),
+html[data-theme="dark"] .lj-serif p.italic:not(.text-xs):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *),
+html.scheme-dark .lj-serif h1:not(.text-xs):not(.text-sm):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *),
+html.scheme-dark .lj-serif h2:not(.text-xs):not(.text-sm):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *),
+html.scheme-dark .lj-serif p.text-pretty:not(.text-xs):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *),
+html.scheme-dark .lj-serif p.leading-relaxed:not(.text-xs):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *),
+html.scheme-dark .lj-serif p.italic:not(.text-xs):not(table *, form *, [role="dialog"] *, [role="alertdialog"] *) {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

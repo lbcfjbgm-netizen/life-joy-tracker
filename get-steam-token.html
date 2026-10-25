@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>获取 Steam 家庭共享令牌</title>
+<style>
+  body {
+    font-family: "Microsoft YaHei", sans-serif;
+    max-width: 760px; margin: 40px auto; padding: 0 20px;
+    background: #1b2838; color: #c7d5e0; line-height: 1.8;
+  }
+  h1 { color: #66c0f4; font-size: 22px; }
+  ol { padding-left: 22px; }
+  code {
+    background: #2a475e; padding: 2px 6px; border-radius: 3px;
+    color: #66c0f4; font-size: 13px; word-break: break-all;
+  }
+  button {
+    background: #66c0f4; color: #1b2838; border: 0; padding: 12px 26px;
+    font-size: 15px; font-weight: bold; border-radius: 4px; cursor: pointer;
+    margin: 8px 8px 8px 0;
+  }
+  button:hover { background: #8ed4ff; }
+  #result {
+    margin-top: 18px; padding: 14px; border-radius: 4px;
+    background: #2a475e; white-space: pre-wrap; word-break: break-all;
+    font-size: 13px; min-height: 20px;
+  }
+  .ok { color: #a4d007; }
+  .err { color: #ff7b7b; }
+  .hint { color: #8f98a0; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<h1>获取 Steam 家庭共享令牌（access_token）</h1>
+
+<p class="hint">
+这个令牌是 Steam 网页版登录后才有的，<strong>跟 API Key 不是一回事</strong>。
+它用来读取你的「家庭共享」游戏库，会过期（通常几个月），过期后重跑一次这个页面即可。
+</p>
+
+<h2 style="font-size:17px;color:#66c0f4;">步骤</h2>
+<ol>
+  <li>确保浏览器里<strong>已登录 Steam</strong>（打开 <a href="https://store.steampowered.com/" target="_blank" style="color:#66c0f4">Steam 商店</a> 能看到你的头像）</li>
+  <li>点下面的按钮</li>
+  <li>如果提示需要跨域，点「打开原始页面」手动复制</li>
+</ol>
+
+<button onclick="fetchToken()">读取令牌</button>
+<button onclick="window.open('https://store.steampowered.com/pointssummary/ajaxgetasyncconfig','_blank')">打开原始页面</button>
+
+<div id="result">点上面的按钮开始…</div>
+
+<script>
+async function fetchToken() {
+  const box = document.getElementById('result');
+  box.className = '';
+  box.textContent = '正在读取…';
+
+  try {
+    const resp = await fetch(
+      'https://store.steampowered.com/pointssummary/ajaxgetasyncconfig',
+      { credentials: 'include' }
+    );
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    const token = data && data.data && data.data.webapi_token;
+
+    if (token) {
+      box.className = 'ok';
+      box.textContent =
+        '读取成功！把这个值复制到 .env 文件里：\n\n' +
+        'STEAM_ACCESS_TOKEN=' + token + '\n\n' +
+        '然后重启一下站点（双击 stop-win.vbs 再双击 start-win.vbs）。';
+    } else {
+      box.className = 'err';
+      box.textContent =
+        '没读到令牌。可能是没有登录 Steam。\n\n' +
+        '请先登录 https://store.steampowered.com/ ，再回来点一次。';
+    }
+  } catch (e) {
+    box.className = 'err';
+    box.textContent =
+      '读取失败：' + e.message + '\n\n' +
+      '这是浏览器的跨域限制。请点上面的「打开原始页面」，\n' +
+      '登录 Steam 后，在打开的页面里找 "webapi_token" 这一项，复制它的值。';
+  }
+}
+</script>
+
+</body>
+</html>

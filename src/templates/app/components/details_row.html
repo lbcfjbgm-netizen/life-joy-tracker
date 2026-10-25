@@ -1,0 +1,18 @@
+{% load app_tags %}
+{% load i18n %}
+
+{% comment %}
+  「Details」卡片里的一行键值。抽成组件是为了让调用方只写一次条件：
+  电影 / 剧集要跳过已经在上方紧凑标签里显示过的字段，书籍 / 游戏照旧全显示。
+  样式和原来那版一模一样，没有动排版。
+{% endcomment %}
+<div class="flex justify-between gap-x-4 px-4 py-2.5">
+  <h3 class="text-xs font-semibold text-gray-400 uppercase shrink-0 mt-0.5">{{ key|no_underscore }}</h3>
+  <div class="text-sm text-gray-200 text-right">
+    {% if value|is_list %}
+      {% for item in value %}<p>{{ item|iso_date_format:request.user }}</p>{% endfor %}
+    {% else %}
+      <p>{{ value|default_if_none:"Unknown"|iso_date_format:request.user }}</p>
+    {% endif %}
+  </div>
+</div>

@@ -1,0 +1,537 @@
+{% extends "base.html" %}
+{% load static %}
+{% load app_tags %}
+{% load i18n %}
+
+{% block title %}
+  统计 · Life Joy
+{% endblock title %}
+
+{% block extra_head %}
+  {% comment %}
+    只作用于统计页：卡片表面、区块标题字距、大数字对齐。
+    不改 static/css（那会被别的页面共用），全部选择器挂在 .lj-stats 下。
+    亮色主题一律给「实心纸面 + 一道细线」，不用 backdrop-filter——
+    浅纸上做半透明模糊会泛灰发脏，这是之前踩过的坑。
+    Django 的 {# #} 不能跨行，多行注释必须用 comment 标签。
+  {% endcomment %}
+  <style>
+    .lj-stats {
+      --st-line: rgba(255, 255, 255, .07);
+      --st-line-strong: rgba(255, 255, 255, .12);
+      --st-card: #2a2f35;
+      --st-inset: rgba(255, 255, 255, .05);
+      --st-inner: #39404b;
+    }
+    html[data-theme="light"] .lj-stats {
+      --st-line: rgba(48, 34, 18, .12);
+      --st-line-strong: rgba(48, 34, 18, .18);
+      --st-card: #fffdf8;
+      --st-inset: rgba(255, 255, 255, .95);
+      --st-inner: #efe9dc;
+    }
+    .lj-stats .st-sections > * + * { margin-top: 2.5rem; }
+    .lj-stats .st-card {
+      background-color: var(--st-card);
+      border-radius: .75rem;
+      padding: 1.5rem;
+      box-shadow: inset 0 1px 0 var(--st-inset);
+      outline: 1px solid var(--st-line);
+      outline-offset: -1px;
+    }
+    .lj-stats .st-inner {
+      background-color: var(--st-inner);
+      border-radius: .5rem;
+      box-shadow: inset 0 1px 0 var(--st-inset);
+    }
+    .lj-stats .st-rule { height: 1px; background: var(--st-line); flex: 1 1 auto; }
+    .lj-stats .st-eyebrow {
+      font-size: 11px;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+    .lj-stats .st-num {
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -.02em;
+      font-size: 2.25rem;
+      line-height: 1.1;
+      font-weight: 700;
+    }
+    .lj-stats .st-num-sm {
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -.01em;
+      font-size: 1.5rem;
+      line-height: 1.15;
+      font-weight: 700;
+    }
+  </style>
+{% endblock extra_head %}
+
+{% block content %}
+  <div class="lj-stats max-w-6xl mx-auto">
+
+    <header class="mb-8">
+      <h1 class="text-3xl font-bold">统计</h1>
+      <p class="mt-2 text-sm text-gray-400">
+        把库里的记录摊开看：由什么构成、按什么趋势走，以及时间都花在了哪里。
+      </p>
+    </header>
+
+    {% if media_count.total and rated_percent == 0 %}
+      <div class="st-card mb-8 flex items-start gap-4">
+        <div class="bg-amber-600/20 p-2 rounded-full shrink-0">
+          {% include "app/icons/info.svg" with classes="w-6 h-6 text-amber-400" %}
+        </div>
+        <div>
+          <h3 class="font-semibold mb-1">图表数据还不全，不是坏了</h3>
+          <p class="text-gray-400 text-sm mb-3">{{ media_count.total }} 个条目里只有 {{ score_distribution.total_scored }} 条有评分，所以评分相关的图基本是空的。补上评分或游玩时长，图就会自己长出来。</p>
+          <div class="flex flex-wrap gap-2">
+            <a href="{% url 'medialist' request.user.username 'game' %}?sort=progress"
+               class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 transition-colors">去给游戏补时长</a>
+            <a href="{% url 'import_data' %}"
+               class="px-3 py-1.5 st-inner text-gray-200 rounded-lg text-sm transition-colors">去同步 Steam 数据</a>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    <div x-data="dateRangePicker('all')"
+         x-init="init()"
+         data-range-start="{{ date_range_start }}"
+         data-range-end="{{ date_range_end }}"
+         class="relative mb-8">
+      <!-- Trigger Button -->
+      <button @click="toggleDropdown()"
+              class="flex items-center gap-2 px-4 py-2.5 bg-[#2a2f35] hover:bg-[#343a40] rounded-lg transition-all duration-200 border border-gray-700 shadow-sm cursor-pointer">
+        {% include "app/icons/calendar.svg" with classes="w-5 h-5 text-indigo-400" %}
+        <span class="font-medium" x-text="selectedRange"></span>
+        <div class="w-4 h-4 ml-1 transition-transform duration-200"
+             :class="{'rotate-180': isOpen}">{% include "app/icons/chevron-down.svg" %}</div>
+      </button>
+      {% if date_range_from_memory %}
+        <p class="mt-1.5 text-xs text-gray-500">上次选的范围</p>
+      {% endif %}
+
+      <!-- Dropdown -->
+      <div x-cloak
+           x-show="isOpen"
+           x-transition
+           @click.outside="isOpen = false"
+           class="absolute z-20 mt-2 w-85 bg-[#2a2f35] rounded-lg shadow-lg border border-gray-700 overflow-hidden transition-all duration-200 animate-in fade-in-50 slide-in-from-top-5">
+
+        <!-- Tabs -->
+        <div class="flex border-b border-gray-700">
+          <button @click="activeTab = 'predefined'"
+                  :class="{'text-white border-b-2 border-indigo-500': activeTab === 'predefined', 'text-gray-400 hover:text-gray-200': activeTab !== 'predefined'}"
+                  class="flex-1 py-3 text-sm font-medium transition-colors cursor-pointer">{% trans "Predefined Ranges" %}</button>
+          <button @click="activeTab = 'custom'"
+                  :class="{'text-white border-b-2 border-indigo-500': activeTab === 'custom', 'text-gray-400 hover:text-gray-200': activeTab !== 'custom'}"
+                  class="flex-1 py-3 text-sm font-medium transition-colors cursor-pointer">{% trans "Custom Range" %}</button>
+        </div>
+
+        <!-- Predefined Ranges Tab -->
+        <div x-show="activeTab === 'predefined'"
+             class="p-2 max-h-80 overflow-y-auto">
+          <div class="grid grid-cols-2 gap-2">
+            <template x-for="range in predefinedRanges" :key="range.name">
+              <button @click="selectPredefinedRange(range.name)"
+                      :class="{'bg-indigo-600 text-white': selectedRange === range.name, 'hover:bg-[#39404b] text-gray-200': selectedRange !== range.name}"
+                      class="flex items-center justify-between p-3 rounded-lg text-left text-sm transition-all cursor-pointer">
+                <span x-text="range.name"></span>
+                <div x-show="selectedRange === range.name">{% include "app/icons/checkmark.svg" with classes="w-4 h-4" %}</div>
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <!-- Custom Range Tab -->
+        <div x-show="activeTab === 'custom'" class="p-4">
+          <div class="space-y-4">
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium mb-2 text-gray-300">{% trans "Start Date" %}</label>
+                <input x-model="startDate"
+                       @change="updateDateRange()"
+                       class="w-full p-2.5 bg-[#39404b] rounded-lg text-white border border-gray-600 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm scheme-dark"
+                       type="date">
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-2 text-gray-300">{% trans "End Date" %}</label>
+                <input x-model="endDate"
+                       @change="updateDateRange()"
+                       class="w-full p-2.5 bg-[#39404b] rounded-lg text-white border border-gray-600 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm scheme-dark"
+                       type="date">
+              </div>
+            </div>
+
+            <div class="flex justify-end gap-2 pt-2">
+              <button @click="isOpen = false"
+                      class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm rounded-lg transition-colors cursor-pointer">
+                {% trans "Cancel" %}
+              </button>
+              <button @click="applyCustomRange()"
+                      class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg transition-colors cursor-pointer flex items-center gap-2">
+                {% include "app/icons/checkmark.svg" with classes="w-4 h-4" %}
+                {% trans "Apply Range" %}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {% url 'import_data' as import_url %}
+
+    <div class="st-sections">
+
+      {# ---------------- 概览 ---------------- #}
+      <section>
+        <div class="flex items-center gap-3 mb-4">
+          <h2 class="st-eyebrow text-gray-500">概览</h2>
+          <div class="st-rule"></div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div class="st-card">
+            <div class="flex items-center justify-between mb-3">
+              <span class="st-eyebrow text-gray-500">总条目</span>
+              <span class="text-indigo-400">{% include "app/icons/four-square.svg" with classes="w-4 h-4" %}</span>
+            </div>
+            <div class="flex items-baseline gap-2">
+              <span class="st-num {% if not media_count.total %}text-gray-500{% endif %}">{{ media_count.total|default:0 }}</span>
+              <span class="text-xs text-gray-500">个</span>
+            </div>
+            <p class="mt-2 text-xs text-gray-500">{{ consumption_stats|length }} 类媒体在跟踪</p>
+          </div>
+
+          <div class="st-card">
+            <div class="flex items-center justify-between mb-3">
+              <span class="st-eyebrow text-gray-500">{% trans "In Progress" %}</span>
+              <span class="text-sky-400">{% include "app/icons/states/in-progress.svg" with classes="w-4 h-4" %}</span>
+            </div>
+            <div class="flex items-baseline gap-2">
+              {% if media_count.total %}
+                <span class="st-num">{{ in_progress_count }}</span>
+                <span class="text-xs text-gray-500">个</span>
+              {% else %}
+                <span class="st-num text-gray-500">--</span>
+              {% endif %}
+            </div>
+            <p class="mt-2 text-xs text-gray-500">正在推进的条目</p>
+          </div>
+
+          <div class="st-card">
+            <div class="flex items-center justify-between mb-3">
+              <span class="st-eyebrow text-gray-500">已通关</span>
+              <span class="text-indigo-400">{% include "app/icons/states/completed.svg" with classes="w-4 h-4" %}</span>
+            </div>
+            <div class="flex items-baseline gap-2">
+              {% if media_count.total %}
+                <span class="st-num">{{ status_distribution.total_completed }}</span>
+                <span class="text-xs text-gray-500">/ {{ media_count.total }}</span>
+              {% else %}
+                <span class="st-num text-gray-500">--</span>
+              {% endif %}
+            </div>
+            <p class="mt-2 text-xs text-gray-500">
+              {% if media_count.total and completed_percent is not None %}
+                占全部的 {{ completed_percent }}%
+              {% else %}
+                还没有条目
+              {% endif %}
+            </p>
+          </div>
+
+          <div class="st-card">
+            <div class="flex items-center justify-between mb-3">
+              <span class="st-eyebrow text-gray-500">{% trans "% Rated" %}</span>
+              <span class="text-emerald-400">{% include "app/icons/star.svg" with classes="w-4 h-4" %}</span>
+            </div>
+            <div class="flex items-baseline gap-2">
+              {% if rated_percent is not None %}
+                <span class="st-num">{{ rated_percent }}</span>
+                <span class="text-xs text-gray-500">%</span>
+              {% else %}
+                <span class="st-num text-gray-500">--</span>
+              {% endif %}
+            </div>
+            <p class="mt-2 text-xs text-gray-500">
+              {% if score_distribution.total_scored %}
+                平均 {{ score_distribution.average_score }} / 10 · 共 {{ score_distribution.total_scored }} 条评分
+              {% else %}
+                还没有任何评分
+              {% endif %}
+            </p>
+          </div>
+        </div>
+
+        {% if consumption_stats %}
+          <div class="mt-4 st-card">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-base font-semibold text-gray-200">{% trans "Consumption" %}</h3>
+              <span class="text-xs text-gray-500">每个类型的真实总量</span>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+              {% for stat in consumption_stats %}
+                <div class="st-inner p-4 flex items-center gap-3">
+                  <div class="shrink-0 {{ stat.media_type|media_color }}">{% icon stat.media_type False "w-6 h-6" %}</div>
+                  <div class="min-w-0">
+                    <p class="st-num-sm">{{ stat.value }}</p>
+                    <p class="text-xs text-gray-400 truncate" title="{{ stat.descriptor }}">{{ stat.descriptor }}</p>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+      </section>
+
+      {# ---------------- 构成 ---------------- #}
+      <section>
+        <div class="flex items-center gap-3 mb-4">
+          <h2 class="st-eyebrow text-gray-500">构成</h2>
+          <div class="st-rule"></div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div class="st-card">
+            <div class="flex items-baseline justify-between gap-3 mb-4">
+              <h3 class="text-base font-semibold text-gray-200">媒体类型分布</h3>
+              <span class="text-xs text-gray-500">按条目数</span>
+            </div>
+            {% if media_type_distribution.labels %}
+              <div class="h-80 flex justify-center items-center">
+                <canvas id="mediaTypeChart"></canvas>
+              </div>
+            {% else %}
+              {% include "app/components/empty_state.html" with empty_icon="app/icons/piechart.svg" empty_title="还没有可统计的条目" empty_description="先追踪一些条目，这里就会显示类型分布。" empty_url="/" empty_label="回首页看看" %}
+            {% endif %}
+          </div>
+
+          <div class="st-card">
+            <div class="flex items-baseline justify-between gap-3 mb-4">
+              <h3 class="text-base font-semibold text-gray-200">状态分布</h3>
+              <span class="text-xs text-gray-500">按状态档位</span>
+            </div>
+            {% if status_pie_chart_data.labels %}
+              <div class="h-80 flex justify-center items-center">
+                <canvas id="statusChart"></canvas>
+              </div>
+            {% else %}
+              {% include "app/components/empty_state.html" with empty_icon="app/icons/bars-increasing.svg" empty_title="还没有状态数据" empty_description="把条目标成已通关、进行中或已暂停，状态分布就会出现。" empty_url="/" empty_label="回首页看看" %}
+            {% endif %}
+          </div>
+        </div>
+      </section>
+
+      {# ---------------- 趋势 ---------------- #}
+      <section>
+        <div class="flex items-center gap-3 mb-4">
+          <h2 class="st-eyebrow text-gray-500">趋势</h2>
+          <div class="st-rule"></div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div class="st-card">
+            <div class="flex items-baseline justify-between gap-3 mb-4">
+              <h3 class="text-base font-semibold text-gray-200">年度完成趋势</h3>
+              <span class="text-xs text-gray-500">按完成年份</span>
+            </div>
+            {% if extra_charts.yearly_completed.labels %}
+              <div class="h-80 flex justify-center items-center">
+                <canvas id="yearlyCompletedChart"></canvas>
+              </div>
+            {% else %}
+              {% include "app/components/empty_state.html" with empty_icon="app/icons/bars-increasing.svg" empty_title="还没有完成记录" empty_description="把条目的状态改成「已通关」，这里就会按年份堆叠出每年通关了多少。" empty_url="/" empty_label="回首页看看" %}
+            {% endif %}
+          </div>
+
+          <div class="st-card">
+            <div class="flex items-baseline justify-between gap-3 mb-4">
+              <h3 class="text-base font-semibold text-gray-200">月度游玩趋势</h3>
+              <span class="text-xs text-gray-500">近 12 个月</span>
+            </div>
+            {% if monthly_playtime and monthly_playtime.has_data %}
+              <div class="h-80 flex justify-center items-center">
+                <canvas id="monthlyPlaytimeChart"></canvas>
+              </div>
+            {% else %}
+              {% comment %}
+                has_data=False：本月只是基线，本月以前没有任何可对比的快照。
+                这里绝不画一排 0 的假柱子，只说明数据从哪个月开始积累。
+              {% endcomment %}
+              <div class="st-inner p-5">
+                <div class="flex items-start gap-3">
+                  <div class="bg-indigo-600/20 p-2 rounded-full shrink-0">
+                    {% include "app/icons/clock.svg" with classes="w-5 h-5 text-indigo-400" %}
+                  </div>
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium text-gray-200">
+                      月度游玩统计从
+                      {% if monthly_this_label %}{{ monthly_this_label }}{% else %}本月{% endif %}
+                      开始记录
+                    </p>
+                    <p class="mt-2 text-xs text-gray-400">
+                      {{ monthly_playtime.message|default:"还没有可对比的快照，本月是基线，下个月起才有柱子" }}
+                    </p>
+                    <p class="mt-1 text-xs text-gray-500">
+                      {% if monthly_next_label %}{{ monthly_next_label }}{% else %}下个月{% endif %}
+                      起这里会出现第一根柱子；之后每个月自动累加。
+                    </p>
+                  </div>
+                </div>
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      </section>
+
+      {# ---------------- 深度 ---------------- #}
+      <section>
+        <div class="flex items-center gap-3 mb-4">
+          <h2 class="st-eyebrow text-gray-500">深度</h2>
+          <div class="st-rule"></div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div class="st-card">
+            <div class="flex items-baseline justify-between gap-3 mb-4">
+              <h3 class="text-base font-semibold text-gray-200">游玩时长 Top 10</h3>
+              <span class="text-xs text-gray-500">单位：小时</span>
+            </div>
+            {% if extra_charts.playtime_top.labels %}
+              <div class="h-80 flex justify-center items-center">
+                <canvas id="playtimeChart"></canvas>
+              </div>
+            {% else %}
+              {% include "app/components/empty_state.html" with empty_icon="app/icons/clock.svg" empty_title="还没有游玩时长" empty_description="同步一次 Steam 数据，玩得最久的那 10 款游戏就会排在这里。" empty_url=import_url empty_label="去同步 Steam 数据" %}
+            {% endif %}
+          </div>
+
+          <div class="st-card">
+            <div class="flex items-baseline justify-between gap-3 mb-4">
+              <h3 class="text-base font-semibold text-gray-200">成就完成度分布</h3>
+              <span class="text-xs text-gray-500">按游戏数</span>
+            </div>
+            {% if extra_charts.achievement_buckets.labels %}
+              <div class="h-80 flex justify-center items-center">
+                <canvas id="achievementChart"></canvas>
+              </div>
+            {% else %}
+              {% include "app/components/empty_state.html" with empty_icon="app/icons/trophy.svg" empty_title="还没有成就数据" empty_description="成就数据要单独同步一次；Steam 不开放成就的游戏会归到「无成就数据」。" empty_url=import_url empty_label="去同步 Steam 数据" %}
+            {% endif %}
+          </div>
+        </div>
+      </section>
+
+      {# ---------------- 时间与年代 ---------------- #}
+      <section>
+        <div class="flex items-center gap-3 mb-4">
+          <h2 class="st-eyebrow text-gray-500">时间与年代</h2>
+          <div class="st-rule"></div>
+        </div>
+
+        <div class="st-card">
+          <div class="flex items-baseline justify-between gap-3 mb-4">
+            <h3 class="text-base font-semibold text-gray-200">发行年份分布</h3>
+            <span class="text-xs text-gray-500">跨度大时自动按年代合并</span>
+          </div>
+          {% if extra_charts.release_years.labels %}
+            <div class="h-80 flex justify-center items-center">
+              <canvas id="releaseYearChart"></canvas>
+            </div>
+          {% else %}
+            {% include "app/components/empty_state.html" with empty_icon="app/icons/calendar.svg" empty_title="还没有发行日期" empty_description="条目补上发行年份后，这里就会显示你库里的年代分布。" empty_url="/" empty_label="回首页看看" %}
+          {% endif %}
+        </div>
+      </section>
+
+      {# ---------------- 按类型的细分 ---------------- #}
+      <section>
+        <div class="flex items-center gap-3 mb-4">
+          <h2 class="st-eyebrow text-gray-500">按类型的细分</h2>
+          <div class="st-rule"></div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div class="st-card">
+            <div class="flex items-baseline justify-between gap-3 mb-4">
+              <h3 class="text-base font-semibold text-gray-200">按类型的状态分布</h3>
+              <span class="text-xs text-gray-500">堆叠</span>
+            </div>
+            {% if media_type_distribution.labels %}
+              <div class="h-80 flex justify-center items-center">
+                <canvas id="statusStackedChart"></canvas>
+              </div>
+            {% else %}
+              {% include "app/components/empty_state.html" with empty_icon="app/icons/bars-pyramid.svg" empty_title="还没有按类型的状态数据" empty_description="同一类条目里出现不同状态后，这张对比图才有内容。" empty_url="/" empty_label="回首页看看" %}
+            {% endif %}
+          </div>
+
+          <div class="st-card">
+            <div class="flex items-baseline justify-between gap-3 mb-4">
+              <h3 class="text-base font-semibold text-gray-200">按类型的评分分布</h3>
+              <span class="text-xs text-gray-500">堆叠</span>
+            </div>
+            {% if score_distribution.total_scored %}
+              <div class="h-80 flex justify-center items-center">
+                <canvas id="scoreStackedChart"></canvas>
+              </div>
+            {% else %}
+              {% include "app/components/empty_state.html" with empty_icon="app/icons/ribbon.svg" empty_title="还没有任何评分" empty_description="给条目打个星，评分分布图就有数据了；这不是页面坏了。" empty_url="/" empty_label="去挑几款打分" %}
+            {% endif %}
+          </div>
+        </div>
+      </section>
+
+      {# ---------------- 高分条目 ---------------- #}
+      <section>
+        <div class="flex items-center gap-3 mb-4">
+          <h2 class="st-eyebrow text-gray-500">高分条目</h2>
+          <div class="st-rule"></div>
+        </div>
+
+        <div class="st-card">
+          <div class="flex items-baseline justify-between gap-3 mb-4">
+            <h3 class="text-base font-semibold text-gray-200">评分最高的条目</h3>
+            <span class="text-xs text-gray-500">{{ top_rated|length }} 个</span>
+          </div>
+          {% if top_rated %}
+            <div class="media-grid lib-grid lj-showcase">
+              {% for media in top_rated %}
+                {% include "app/components/media_card.html" with media=media item=media.item title=media.item from_grid=True secondary_color=True info_card=True %}
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="flex flex-col items-center justify-center py-16">
+              <div class="st-inner rounded-full p-4 w-16 h-16 mx-auto mb-4 flex items-center justify-center">
+                {% include "app/icons/ribbon.svg" with classes="w-8 h-8 text-gray-400" %}
+              </div>
+              <h3 class="text-lg font-medium mb-2">还没有评分</h3>
+              <p class="text-gray-400 text-center max-w-md">给条目打分后，评分最高的那些会排在这里。</p>
+            </div>
+          {% endif %}
+        </div>
+      </section>
+
+    </div>
+  </div>
+{% endblock content %}
+
+{% block js %}
+  {{ date_format_values|json_script:"date_format_values" }}
+  {# date-range.js 已在 base.html 里全局加载一次，这里不重复引入。 #}
+
+  <script src="{% static 'js/libraries/chartjs-4.4.9.min.js' %}"></script>
+  <script src="{% static 'js/libraries/chartjs-datalabels-2.0.0.min.js' %}"></script>
+
+  <!-- JSON data for charts -->
+  {{ media_type_distribution|json_script:"media_type_distribution" }}
+  {{ status_pie_chart_data|json_script:"status_pie_chart_data" }}
+  {{ status_distribution|json_script:"status_distribution" }}
+  {{ score_distribution|json_script:"score_distribution" }}
+  {{ extra_charts|default_if_none:""|json_script:"extra_charts" }}
+  {{ monthly_playtime|default_if_none:""|json_script:"monthly_playtime" }}
+
+  <script src="{% static 'js/statistics-charts.js' %}{% get_static_file_mtime 'js/statistics-charts.js' %}"></script>
+{% endblock js %}

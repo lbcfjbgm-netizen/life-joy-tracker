@@ -1,0 +1,166 @@
+{% load app_tags %}
+{% load i18n %}
+
+{% comment %}
+  详情页的快捷动作：复用首页那套 progress_edit 端点（operation=increase / complete），
+  只换一份局部模板回来，这样不用新造 API，两处行为也不会分叉。
+
+  文案按媒体类型分支，但**不改提交端点、不改字段名、不改请求方法**：
+  - game：保持原样（游玩时长 / +30 分钟 / 标记通关）。这是本站主功能，
+    2783 个游戏全靠它，这一段的 DOM 和文案一个字都不要动。
+  - book：已读页数，有总页数（item.total_pages）时显示「已读 / 总页数」，没有就只显示已读。
+  - movie：已看 / 未看，只有一个「标记已看」（就是原来的 complete 动作）。
+  - 其他类型（tv / season / episode / anime 等）：保持进度语义，不出现游戏词。
+{% endcomment %}
+<div class="flex flex-wrap items-center gap-3 px-4 py-3">
+  {% if media_type == "game" %}
+  <span class="flex items-center gap-2 text-sm text-gray-200">
+    <span class="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-600/15 text-indigo-400 shrink-0">
+      {% include "app/icons/clock.svg" with classes="w-4 h-4" %}
+    </span>
+    <span class="font-medium">{% trans "Playtime" %}</span>
+    <span class="text-indigo-400 font-medium">{{ media.formatted_progress }}</span>
+  </span>
+
+  <div class="flex items-center gap-2 ms-auto">
+    <button type="button"
+            class="inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-11 text-sm font-medium text-white bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#4a9eff]"
+            aria-label="加 30 分钟游玩时长"
+            title="加 30 分钟游玩时长"
+            hx-post="{% url 'progress_edit' media_type media.id %}"
+            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+            hx-vals='{"operation": "increase", "detail": "1"}'
+            hx-swap="innerHTML"
+            hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
+      {% include "app/icons/plus.svg" with classes="w-4 h-4" %}
+      <span>+30 分钟</span>
+    </button>
+
+    <button type="button"
+            class="inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-11 text-sm font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-[#4a9eff] {% if media.status == Status.COMPLETED.value %}bg-gray-700/40 text-gray-500 cursor-not-allowed{% else %}text-white bg-emerald-700 hover:bg-emerald-800 cursor-pointer{% endif %}"
+            {% if media.status == Status.COMPLETED.value %}disabled{% endif %}
+            aria-label="标记为已通关"
+            title="标记为已通关"
+            hx-post="{% url 'progress_edit' media_type media.id %}"
+            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+            hx-vals='{"operation": "complete", "detail": "1"}'
+            hx-swap="innerHTML"
+            hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
+      {% include "app/icons/states/completed.svg" with classes="w-4 h-4" %}
+      <span>{% if media.status == Status.COMPLETED.value %}已通关{% else %}标记通关{% endif %}</span>
+    </button>
+  </div>
+
+  {% elif media_type == "book" %}
+  {% comment %}
+    书的进度有两种口径：有总页数时是「已读第几页」，没有总页数时是「已读百分之几」。
+    微信读书只给百分比、不给总页数（接口里没有页数字段），所以没有总页数才是常态，
+    这时直接显示百分比，不硬凑成页数（凑不出来，只会显示 0 页）。
+  {% endcomment %}
+  <span class="flex items-center gap-2 text-sm text-gray-200">
+    <span class="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-600/15 text-indigo-400 shrink-0">
+      {% include "app/icons/book-open.svg" with classes="w-4 h-4" %}
+    </span>
+    {% if media.item.total_pages %}
+      <span class="font-medium">已读页数</span>
+      <span class="text-indigo-400 font-medium">
+        {{ media.formatted_progress }} / {{ media.item.total_pages }} 页
+      </span>
+    {% else %}
+      <span class="font-medium">阅读进度</span>
+      <span class="text-indigo-400 font-medium">已读 {{ media.formatted_progress }}%</span>
+    {% endif %}
+  </span>
+
+  <div class="flex items-center gap-2 ms-auto">
+    <button type="button"
+            class="inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-11 text-sm font-medium text-white bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#4a9eff]"
+            aria-label="{% if media.item.total_pages %}加 1 页{% else %}加 1%{% endif %}"
+            title="{% if media.item.total_pages %}加 1 页{% else %}加 1%{% endif %}"
+            hx-post="{% url 'progress_edit' media_type media.id %}"
+            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+            hx-vals='{"operation": "increase", "detail": "1"}'
+            hx-swap="innerHTML"
+            hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
+      {% include "app/icons/plus.svg" with classes="w-4 h-4" %}
+      <span>{% if media.item.total_pages %}+1 页{% else %}+1%{% endif %}</span>
+    </button>
+
+    <button type="button"
+            class="inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-11 text-sm font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-[#4a9eff] {% if media.status == Status.COMPLETED.value %}bg-gray-700/40 text-gray-500 cursor-not-allowed{% else %}text-white bg-emerald-700 hover:bg-emerald-800 cursor-pointer{% endif %}"
+            {% if media.status == Status.COMPLETED.value %}disabled{% endif %}
+            aria-label="标记为读完"
+            title="标记为读完"
+            hx-post="{% url 'progress_edit' media_type media.id %}"
+            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+            hx-vals='{"operation": "complete", "detail": "1"}'
+            hx-swap="innerHTML"
+            hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
+      {% include "app/icons/states/completed.svg" with classes="w-4 h-4" %}
+      <span>{% if media.status == Status.COMPLETED.value %}已读完{% else %}标记读完{% endif %}</span>
+    </button>
+  </div>
+
+  {% elif media_type == "movie" %}
+  <span class="flex items-center gap-2 text-sm text-gray-200">
+    <span class="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-600/15 text-indigo-400 shrink-0">
+      {% include "app/icons/eye.svg" with classes="w-4 h-4" %}
+    </span>
+    <span class="font-medium">{% if media.status == Status.COMPLETED.value %}已看{% else %}未看{% endif %}</span>
+  </span>
+
+  <div class="flex items-center gap-2 ms-auto">
+    <button type="button"
+            class="inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-11 text-sm font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-[#4a9eff] {% if media.status == Status.COMPLETED.value %}bg-gray-700/40 text-gray-500 cursor-not-allowed{% else %}text-white bg-emerald-700 hover:bg-emerald-800 cursor-pointer{% endif %}"
+            {% if media.status == Status.COMPLETED.value %}disabled{% endif %}
+            aria-label="标记已看"
+            title="标记已看"
+            hx-post="{% url 'progress_edit' media_type media.id %}"
+            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+            hx-vals='{"operation": "complete", "detail": "1"}'
+            hx-swap="innerHTML"
+            hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
+      {% include "app/icons/states/completed.svg" with classes="w-4 h-4" %}
+      <span>标记已看</span>
+    </button>
+  </div>
+
+  {% else %}
+  <span class="flex items-center gap-2 text-sm text-gray-200">
+    <span class="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-600/15 text-indigo-400 shrink-0">
+      {% include "app/icons/states/in-progress.svg" with classes="w-4 h-4" %}
+    </span>
+    <span class="font-medium">{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}已看集数{% else %}进度{% endif %}</span>
+    <span class="text-indigo-400 font-medium">{{ media.formatted_progress }}{% if media.max_progress %} / {{ media.max_progress }}{% endif %}</span>
+  </span>
+
+  <div class="flex items-center gap-2 ms-auto">
+    <button type="button"
+            class="inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-11 text-sm font-medium text-white bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#4a9eff]"
+            aria-label="{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}看下一集{% else %}加 1{% endif %}"
+            title="{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}看下一集{% else %}加 1{% endif %}"
+            hx-post="{% url 'progress_edit' media_type media.id %}"
+            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+            hx-vals='{"operation": "increase", "detail": "1"}'
+            hx-swap="innerHTML"
+            hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
+      {% include "app/icons/plus.svg" with classes="w-4 h-4" %}
+      <span>{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}+1 集{% else %}+1{% endif %}</span>
+    </button>
+
+    <button type="button"
+            class="inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-11 text-sm font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-[#4a9eff] {% if media.status == Status.COMPLETED.value %}bg-gray-700/40 text-gray-500 cursor-not-allowed{% else %}text-white bg-emerald-700 hover:bg-emerald-800 cursor-pointer{% endif %}"
+            {% if media.status == Status.COMPLETED.value %}disabled{% endif %}
+            aria-label="{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}标记为看完{% else %}标记为完成{% endif %}"
+            title="{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}标记为看完{% else %}标记为完成{% endif %}"
+            hx-post="{% url 'progress_edit' media_type media.id %}"
+            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+            hx-vals='{"operation": "complete", "detail": "1"}'
+            hx-swap="innerHTML"
+            hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
+      {% include "app/icons/states/completed.svg" with classes="w-4 h-4" %}
+      <span>{% if media.status == Status.COMPLETED.value %}{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}已看完{% else %}已完成{% endif %}{% else %}{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}标记看完{% else %}标记完成{% endif %}{% endif %}</span>
+    </button>
+  </div>
+  {% endif %}
+</div>
