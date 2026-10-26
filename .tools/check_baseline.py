@@ -29,6 +29,15 @@ from pathlib import Path
 
 # 数据库路径按「脚本所在位置」自动推算（.tools/ 的上一级就是项目根），
 # 这样别人 clone 到任何目录都能直接跑，不用改代码。
+# Windows 控制台默认 GBK，print 结论里的 ✅ / ❌ 会直接抛 UnicodeEncodeError，
+# 让「4 项基线全 OK」被一个 emoji 顶成非零退出码。改成 UTF-8 后输出稳定。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except (AttributeError, OSError):
+        # 被重定向到管道 / 老版本 Python：没有 reconfigure 就保持原样。
+        pass
+
 TOOLS_DIR = Path(__file__).resolve().parent
 DB_FILE = TOOLS_DIR.parent / "src" / "db" / "db.sqlite3"
 DB = DB_FILE.as_uri() + "?mode=ro"

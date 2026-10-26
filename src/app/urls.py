@@ -9,6 +9,13 @@ register_converter(converters.SourceChecker, "source")
 urlpatterns = [
     path("", views.home, name="home"),
     path("image_relay", views.relay_external_image, name="image_relay"),
+    # Steam screenshots are read straight off the local client cache, never
+    # imported, so the URL names a directory layout rather than a row id.
+    path(
+        "steam-shot/<str:appid>/<str:kind>/<str:filename>",
+        views.steam_screenshot,
+        name="steam_screenshot",
+    ),
     path("<str:username>/<media_type:media_type>", views.media_list, name="medialist"),
     path("search", views.media_search, name="search"),
     path(

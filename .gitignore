@@ -61,6 +61,8 @@ tmp/
 
 # 任何运行日志都不进版本库（含 .tools 之外的，如 .i18nwork/server.log）
 *.log
+*.err
+.i18nwork/server.err
 
 # 工具自建的缓存目录（各自带 .gitignore，这里再兜一层）
 .pytest_cache/

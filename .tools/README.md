@@ -12,7 +12,7 @@
 ### 1. 从哪个目录跑
 
 ```powershell
-cd "C:\Users\USERNAME\Downloads\life joy\yamtrack"
+cd "<项目根>"
 ```
 
 **绝大多数脚本自己写死了绝对路径，所以在 `yamtrack\` 下跑最稳。**
@@ -282,7 +282,7 @@ steam 游戏 4935 个，需要改 1774 条
 
 ### 坑 7：`AGENTS.md` 里那句 `scripts\refresh_status.py` **是对的**，别去「修」
 
-`life joy\AGENTS.md` 第 201-202 行的写法是：先 `cd "C:\Users\USERNAME\Downloads\life joy\yamtrack"`，再 `.venv\Scripts\python.exe scripts\refresh_status.py`。这个相对路径从 `yamtrack\` 出发正好指向 `yamtrack\scripts\refresh_status.py`，**文件确实存在**。
+`life joy\AGENTS.md` 第 201-202 行的写法是：先 `cd "<项目根>"`（指 `yamtrack\` 这一层），再 `.venv\Scripts\python.exe scripts\refresh_status.py`。这个相对路径从 `yamtrack\` 出发正好指向 `yamtrack\scripts\refresh_status.py`，**文件确实存在**。
 
 我在 `AGENTS.md` / `_交接简报.md` / `_项目卡.md` 里 grep 过 `..\scripts`，**一个都没搜到** —— 所以「原来写成 `..\scripts\` 是错的」这个说法在现有文件里查无实据，不用改。
 真正会踩的是：在 `yamtrack\` 根目录下把 `scripts\` 敲成 `.tools\scripts\`（那个目录不存在）。
@@ -297,7 +297,12 @@ steam 游戏 4935 个，需要改 1774 条
 
 我扫了全部 64 个 `.py` 的路径写法，分三类：
 
-### 1. 写死 `C:\Users\USERNAME\...` 绝对路径 —— **换机器必坏**，共 27 个
+### 1. 曾经写死 `<项目根>` 绝对路径 —— **换机器必坏**，当时共 27 个
+
+> 2026-10-26 更新：下面这 27 个里 16 个还在版本库里跟踪，已全部改成
+> `Path(__file__)` / `$PSScriptRoot` 往上推的可移植写法（可用 `YAMTRACK_ROOT`
+> 环境变量覆盖）。剩下 11 个是 `.tools/_*.py` 本机一次性残留，按 `.gitignore`
+> 的 `.tools/_*` 规则本来就不进版本库。下面这段保留原文，作为当时的体检记录。
 
 ```
 _accept940.py  _accept940d.py  _accept940e.py  _backup_before_snapshot.py

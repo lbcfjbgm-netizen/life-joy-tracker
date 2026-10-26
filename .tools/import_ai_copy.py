@@ -27,14 +27,25 @@ django.setup()
 
 from app.models import AICopy, Item  # noqa: E402
 
+# 素材目录在仓库根上一级的 <life joy>\..\ui-redesign\quotes
+REPO_ROOT = os.path.dirname(SRC_DIR)                       # ...\yamtrack
+PROJECT_ROOT = os.path.dirname(REPO_ROOT)                  # ...\life joy
+_DOWNLOADS = os.path.dirname(PROJECT_ROOT)                 # ...\Downloads
+_QUOTES = os.path.join(_DOWNLOADS, "ui-redesign", "quotes")
+
+
+def _q(name):
+    return os.path.join(_QUOTES, name)
+
+
 SOURCES = [
-    (r"C:\Users\USERNAME\Downloads\ui-redesign\quotes\pilot-batch.json", "pilot"),
-    (r"C:\Users\USERNAME\Downloads\ui-redesign\quotes\batch-002.json", "002"),
-    (r"C:\Users\USERNAME\Downloads\ui-redesign\quotes\batch-003.json", "003"),
-    (r"C:\Users\USERNAME\Downloads\ui-redesign\quotes\batch-004.json", "004"),
-    (r"C:\Users\USERNAME\Downloads\ui-redesign\quotes\batch-005.json", "005"),
-    (r"C:\Users\USERNAME\Downloads\ui-redesign\quotes\batch-006.json", "006"),
-    (r"C:\Users\USERNAME\Downloads\ui-redesign\quotes\batch-007.json", "007"),
+    (_q("pilot-batch.json"), "pilot"),
+    (_q("batch-002.json"), "002"),
+    (_q("batch-003.json"), "003"),
+    (_q("batch-004.json"), "004"),
+    (_q("batch-005.json"), "005"),
+    (_q("batch-006.json"), "006"),
+    (_q("batch-007.json"), "007"),
 ]
 
 MAX_LEN = 200

@@ -2,9 +2,13 @@
 
 import os
 import sqlite3
+from pathlib import Path
 
-SRC = r"C:\Users\USERNAME\Downloads\life joy\yamtrack\src\db\db.sqlite3"
-DST = r"C:\Users\USERNAME\Downloads\life joy\yamtrack\.tools\backups\db-before-memory-20261025-0230.sqlite3"
+# 仓库根：可用 YAMTRACK_ROOT 环境变量覆盖，否则按脚本位置往上推两级。
+ROOT = os.environ.get("YAMTRACK_ROOT") or str(Path(__file__).resolve().parent.parent)
+
+SRC = os.path.join(ROOT, "src", "db", "db.sqlite3")
+DST = os.path.join(ROOT, ".tools", "backups", "db-before-memory-20261025-0230.sqlite3")
 
 os.makedirs(os.path.dirname(DST), exist_ok=True)
 

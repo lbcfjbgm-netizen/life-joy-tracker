@@ -16,13 +16,13 @@
 #
 # 用法（在 PowerShell 里）：
 #   # 只看要同步哪些文件，不动手
-#   pwsh -File "C:\Users\USERNAME\Downloads\life joy\yamtrack\.tools\sync_public.ps1" -WhatIf
+#   pwsh -File "<工作副本>\.tools\sync_public.ps1" -WhatIf
 #
 #   # 同步 + 提交（不推送）
-#   pwsh -File "C:\Users\USERNAME\Downloads\life joy\yamtrack\.tools\sync_public.ps1"
+#   pwsh -File "<工作副本>\.tools\sync_public.ps1"
 #
 #   # 同步 + 提交 + 推送 GitHub
-#   pwsh -File "C:\Users\USERNAME\Downloads\life joy\yamtrack\.tools\sync_public.ps1" -Push
+#   pwsh -File "<工作副本>\.tools\sync_public.ps1" -Push
 
 [CmdletBinding()]
 param(
@@ -38,7 +38,12 @@ $ErrorActionPreference = 'Stop'
 # 默认路径：本脚本在 <工作副本>\.tools\ 下，所以工作副本 = $PSScriptRoot 的上一级，
 # 公开仓库又是工作副本的上一级里的 yamtrack-public。
 if ([string]::IsNullOrWhiteSpace($Src)) { $Src = Split-Path -Parent $PSScriptRoot }
-if ([string]::IsNullOrWhiteSpace($Src)) { $Src = 'C:\Users\USERNAME\Downloads\life joy\yamtrack' }
+if ([string]::IsNullOrWhiteSpace($Src)) {
+    # 极少数情况（例如把脚本内容当命令直接粘进终端）$PSScriptRoot 是空的，
+    # 这时退回当前目录，绝不写死任何本机绝对路径。
+    $Src = (Get-Location).Path
+    Write-Host "提示：定位不到脚本所在目录，已退回使用当前目录：$Src" -ForegroundColor Yellow
+}
 if ([string]::IsNullOrWhiteSpace($Dst)) { $Dst = Join-Path (Split-Path -Parent $Src) 'yamtrack-public' }
 
 # ---------------------------------------------------------------- 安全检查
@@ -200,12 +205,25 @@ if (-not $Push) {
     exit 0
 }
 
-& git -C $Dst push
+# 推送前先确保分支有 upstream，否则 git push 会直接报
+# "fatal: The current branch main has no upstream branch"（不是 token 问题，
+# 别被前面那句提示误导）。
+$branch = (& git -C $Dst rev-parse --abbrev-ref HEAD).Trim()
+& git -C $Dst rev-parse --abbrev-ref "$branch@{upstream}" *> $null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  分支 $branch 还没设上游，先设成 origin/$branch" -ForegroundColor Yellow
+    & git -C $Dst push --set-upstream origin $branch
+} else {
+    & git -C $Dst push
+}
+
 if ($LASTEXITCODE -ne 0) {
     Write-Host ''
     Write-Host '  ❌ 推送失败。' -ForegroundColor Red
-    Write-Host '  最常见原因：GitHub token 过期（当时生成的只有 7 天有效期）。' -ForegroundColor Yellow
-    Write-Host '  去 https://github.com/settings/tokens 重新生成，然后 git push 时会问一次凭据。' -ForegroundColor Yellow
+    Write-Host '  常见原因：' -ForegroundColor Yellow
+    Write-Host '    1. GitHub token 过期（当时生成的只有 7 天有效期）' -ForegroundColor Yellow
+    Write-Host '       去 https://github.com/settings/tokens 重新生成' -ForegroundColor Yellow
+    Write-Host '    2. 没设上游分支 → 本脚本会自动补 --set-upstream，若仍失败看上面报错原文' -ForegroundColor Yellow
     exit 1
 }
 Write-Host '  ✅ 已推送到 GitHub' -ForegroundColor Green

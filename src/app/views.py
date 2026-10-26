@@ -1,3 +1,4 @@
+import datetime
 import logging
 from pathlib import Path
 from urllib.parse import urlencode
@@ -10,25 +11,43 @@ from django.core.cache import cache
 from django.core.paginator import Paginator
 from django.db import IntegrityError, connection
 from django.db.models import Prefetch, Q, prefetch_related_objects
-from django.http import Http404, HttpResponse, HttpResponseBadRequest, JsonResponse
+from django.http import (
+    FileResponse,
+    Http404,
+    HttpResponse,
+    HttpResponseBadRequest,
+    HttpResponseNotFound,
+    JsonResponse,
+)
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from app import config, helpers, history_processor, i18n_zh, image_relay, status_filters
+from app import (
+    config,
+    duration_stats,
+    helpers,
+    history_processor,
+    i18n_zh,
+    image_relay,
+    status_filters,
+    steam_screenshots,
+)
 from app import home as home_helpers
-from app import statistics as stats
-from app import playtime as stats_playtime
 from app import near_complete as near_complete_agg
+from app import playtime as stats_playtime
+from app import statistics as stats
 from app import year_in_review as year_review
 from app.forms import EpisodeForm, ManualItemForm, get_form_class
 from app.models import (
     TV,
     BasicMedia,
     Episode,
+    Highlight,
     Item,
     MediaTypes,
+    Note,
     Season,
     Sources,
     Status,
@@ -933,10 +952,166 @@ def media_search(request):
     return render(request, "app/search.html", context)
 
 
+# How many rows the detail page shows for the reading lists (highlights and
+# notes). The whole library only holds a couple hundred, but the page never
+# needs the full history, so it is capped instead of growing with the data.
+DETAIL_LIST_LIMIT = 30
+
+
+def _book_reading_context(current_instance):
+    """Return ``(highlights, notes)`` for a tracked book.
+
+    Both come from WeRead imports, so anything that is not a tracked book gets
+    two empty lists and the template simply renders nothing.
+    """
+    if current_instance is None:
+        return [], []
+
+    try:
+        highlights = list(
+            Highlight.objects.filter(item=current_instance.item).order_by(
+                "-created_at",
+            )[:DETAIL_LIST_LIMIT],
+        )
+        notes = list(
+            Note.objects.filter(item=current_instance.item).order_by(
+                "-created_at",
+            )[:DETAIL_LIST_LIMIT],
+        )
+    except Exception:  # a bad read must never 500 the page
+        logger.warning(
+            "reading extras failed for %s",
+            getattr(current_instance, "pk", None),
+            exc_info=True,
+        )
+        return [], []
+
+    return highlights, notes
+
+
+def _tv_progress_context(current_instance):
+    """Return ``(seasons, episodes)`` for a tracked show.
+
+    The show itself has no direct link to episodes: they hang off each season,
+    so the seasons are walked once and their episodes read in a single query.
+    Untracked shows, and any error, get two empty lists.
+    """
+    if current_instance is None:
+        return [], []
+
+    try:
+        seasons = list(
+            Season.objects.filter(related_tv=current_instance)
+            .select_related("item")
+            .order_by("item__season_number"),
+        )
+        if not seasons:
+            return [], []
+
+        episodes = list(
+            Episode.objects.filter(related_season__in=seasons)
+            .select_related("item", "related_season__item")
+            .order_by("related_season__item__season_number", "item__episode_number"),
+        )
+    except Exception:  # a bad read must never 500 the page
+        logger.warning(
+            "tv progress failed for %s",
+            getattr(current_instance, "pk", None),
+            exc_info=True,
+        )
+        return [], []
+
+    watched_by_season = {}
+    episode_rows = []
+    for episode in episodes:
+        watched = episode.end_date is not None
+        season_id = episode.related_season_id
+        counts = watched_by_season.setdefault(season_id, [0, 0])
+        counts[0] += 1
+        if watched:
+            counts[1] += 1
+        episode_rows.append(
+            {
+                "number": episode.item.episode_number,
+                "title": episode.item.title,
+                "season_number": episode.related_season.item.season_number,
+                "end_date": episode.end_date,
+                "notes": episode.notes,
+                "watched": watched,
+            },
+        )
+
+    season_rows = []
+    for season in seasons:
+        total, watched_total = watched_by_season.get(season.id, [0, 0])
+        season_rows.append(
+            {
+                "number": season.item.season_number,
+                "episode_count": total,
+                "watched_count": watched_total,
+            },
+        )
+
+    return season_rows, episode_rows
+
+
+def _detail_extras(media_type, current_instance, media_metadata):
+    """Return the per-type extras the redesigned detail pages read.
+
+    Each key is only filled for the media type that can actually have it, so a
+    template can test the list itself instead of repeating the media_type
+    condition. Unknown types simply get empty values.
+    """
+    extras = {
+        "highlights": [],
+        "book_notes": [],
+        "seasons": [],
+        "episodes": [],
+        "runtime_minutes": None,
+    }
+
+    if media_type == MediaTypes.BOOK.value:
+        extras["highlights"], extras["book_notes"] = _book_reading_context(
+            current_instance,
+        )
+    elif media_type == MediaTypes.TV.value:
+        extras["seasons"], extras["episodes"] = _tv_progress_context(
+            current_instance,
+        )
+        # One episode in minutes, which is the only runtime a show knows.
+        extras["runtime_minutes"] = media_metadata.get("episode_runtime")
+    elif media_type == MediaTypes.MOVIE.value:
+        # The tracked movie row carries the minutes; the provider copy is the
+        # fallback for a film the user has not started yet.
+        if current_instance is not None:
+            extras["runtime_minutes"] = current_instance.runtime
+        if extras["runtime_minutes"] is None:
+            extras["runtime_minutes"] = media_metadata.get("runtime_minutes")
+
+    return extras
+
+
 @require_GET
 def media_details(request, source, media_type, media_id, title):  # noqa: ARG001 title for URL
     """Return the details page for a media item."""
-    media_metadata = services.get_media_metadata(media_type, media_id, source)
+    try:
+        media_metadata = services.get_media_metadata(media_type, media_id, source)
+    except Exception:
+        # A dead provider must not take the whole page down with it: the page
+        # is still worth rendering with just the id in the title.
+        logger.warning(
+            "detail metadata fallback for %s/%s/%s",
+            source,
+            media_type,
+            media_id,
+            exc_info=True,
+        )
+        media_metadata = {
+            "media_id": media_id,
+            "media_type": media_type,
+            "source": source,
+            "title": str(media_id),
+        }
     user_medias = BasicMedia.objects.filter_media_prefetch(
         request.user,
         media_id,
@@ -977,6 +1152,19 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
     else:
         watch_providers = None
 
+    # Steam captures live only in the client cache, so they are read per
+    # request instead of being imported. Anything but a Steam game gets an
+    # empty list, which the template treats as "no screenshot section".
+    screenshots = []
+    if current_instance is not None:
+        appid = steam_screenshots.appid_for_item(current_instance.item)
+        if appid:
+            screenshots = steam_screenshots.list_screenshots(appid)
+
+    # Extras the redesigned detail pages read: reading lists for a book, season
+    # and episode progress for a show, runtime in minutes for both.
+    extras = _detail_extras(media_type, current_instance, media_metadata)
+
     context = {
         "media": media_metadata,
         "media_type": media_type,
@@ -984,6 +1172,9 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
         "current_instance": current_instance,
         "watch_providers": watch_providers,
         "watch_provider_region": request.user.watch_provider_region,
+        "screenshots": screenshots,
+        "screenshot_count": len(screenshots),
+        **extras,
     }
     return render(request, "app/media_details.html", context)
 
@@ -1609,6 +1800,16 @@ def delete_history_record(request, media_type, history_id):
 @require_GET
 def statistics(request):
     """Return the statistics page."""
+    # 年度报告 / 临门一脚已并入统计页做成子页签（顶栏太长的老问题）。
+    # 这里只做分流：URL 是 /statistics?tab=year 就交给原来的视图函数整页渲染。
+    # 旧地址 /year-in-review、/near-complete 仍然各自独立可用（老书签不失效）。
+    tab = request.GET.get("tab") or "main"
+    if tab == "year":
+        return year_in_review(request)
+    if tab == "near":
+        return near_complete(request)
+    tab = "main"
+
     # 时间范围三级（用户要「记住上次选的」，但老行为不许变）：
     #   ① URL 明确带了 start-date / end-date → 以 URL 为准，并写回用户，下次还能用
     #   ② URL 没带 → 读用户身上存着的上次选择
@@ -1676,7 +1877,62 @@ def statistics(request):
         round(status_distribution["total_completed"] / total * 100) if total else None
     )
 
+    # 时长卡片（读书 / 观影）：走同一个时间范围，跟统计页的筛选保持一致。
+    # 传的是上面解析出来的 aware datetime，duration_stats 内部按 end_date 的日期口径过滤。
+    # 注意区间口径的固有行为：传了区间之后，读书的 unknown_date_hours 恒为 0
+    # （还在读的书没有 end_date，进不了区间），模板据此自动隐藏那行小字。
+    reading_stats = duration_stats.get_reading_stats(
+        request.user,
+        start_date,
+        end_date,
+    )
+    watch_stats = duration_stats.get_watch_stats(
+        request.user,
+        start_date,
+        end_date,
+    )
+    # 不筛时间时，读书的 total_hours 含「还在读」的书（unknown_date_hours）。
+    # 卡片要同时给出「已读完」的口径，否则 609.0 和 101.5 容易让人以为是两拨数。
+    # 已读完 = 只算有 end_date 的书，传一个足够早的下界就能拿到，一次 2 条查询。
+    # 筛了范围时 total 本身就是「区间内读完的」，不需要再算。
+    reading_stats["finished_hours"] = None
+    reading_stats["finished_books"] = None
+    if start_date is None and end_date is None:
+        _finished = duration_stats.get_reading_stats(
+            request.user,
+            datetime.date(1970, 1, 1),
+            None,
+        )
+        reading_stats["finished_hours"] = _finished["total_hours"]
+        reading_stats["finished_books"] = _finished["book_count"]
+    # 读书卡片的逐年小柱状条要按最大值缩放；by_year 是按年份降序排的，
+    # 最大小时数不一定在第一行，这里算一次画进数据里，模板只管用。
+    _reading_max = max(
+        (row["hours"] for row in reading_stats["by_year"]),
+        default=0,
+    )
+    for _row in reading_stats["by_year"]:
+        _row["bar_percent"] = (
+            round(_row["hours"] / _reading_max * 100) if _reading_max else 0
+        )
+    # 观影卡片的逐年条：整条宽度按 total_hours 占最大年的比例，
+    # 条内再按电影 / 剧集堆叠，两个百分比相加恒为 100（剧集用 100 减出来，避免凑不齐）。
+    _watch_max = max(
+        (row["total_hours"] for row in watch_stats["by_year"]),
+        default=0,
+    )
+    for _row in watch_stats["by_year"]:
+        _row["bar_percent"] = (
+            round(_row["total_hours"] / _watch_max * 100) if _watch_max else 0
+        )
+        _row_total = _row["total_hours"]
+        _row["movie_percent"] = (
+            round(_row["movie_hours"] / _row_total * 100) if _row_total else 0
+        )
+        _row["tv_percent"] = (100 - _row["movie_percent"]) if _row_total else 0
+
     context = {
+        "tab": "main",
         "start_date": start_date,
         "end_date": end_date,
         # 日期选择器要显示的初值：有范围给 "YYYY-MM-DD"，不限给 "all"
@@ -1700,6 +1956,10 @@ def statistics(request):
         "monthly_this_label": monthly_this_label,
         "monthly_next_label": monthly_next_label,
         "completed_percent": completed_percent,
+        # 时长卡片：reading = 微信读书阅读时长，watch = 电影实测 + 剧集估算。
+        # 两者 has_data=False 时模板不渲染对应卡片（匿名/无数据都走这条）。
+        "reading": reading_stats,
+        "watch": watch_stats,
     }
 
     return render(request, "app/statistics.html", context)
@@ -1802,6 +2062,56 @@ def relay_external_image(request):
 
 
 @require_GET
+@login_not_required
+def steam_screenshot(request, appid, kind, filename):
+    """Serve one Steam screenshot straight from the local client cache.
+
+    Same access rule as :func:`relay_external_image`: no ``@login_required``.
+    The page that embeds these images is already behind the login, and a
+    browser request for an ``<img>`` source carries the session cookie anyway,
+    so nothing is exposed that the page did not already show. Keeping the two
+    endpoints consistent also means a cached image URL never turns into a
+    redirect to the login page, which would render as a broken image.
+
+    Every failure is a plain 404: a bad appid, a bad filename, a path that
+    escapes the screenshot root, or a file that has since been deleted. The
+    body is never generated, so an unknown URL costs one directory lookup.
+    """
+    try:
+        path = steam_screenshots.resolve_screenshot_path(appid, kind, filename)
+    except (OSError, ValueError) as error:
+        # Deliberately broad: this view is embedded in a page, and a surprise
+        # here would turn one odd filename into a 500 on someone's item page.
+        logger.warning(
+            "Steam screenshot %s/%s/%s failed: %s",
+            appid,
+            kind,
+            filename,
+            error,
+        )
+        return HttpResponseNotFound()
+
+    if path is None:
+        return HttpResponseNotFound()
+
+    try:
+        # FileResponse streams from disk and closes the handle itself, so a
+        # 685 KB original never has to sit in memory whole.
+        response = FileResponse(
+            path.open("rb"),
+            content_type=steam_screenshots.content_type_for(filename),
+        )
+    except OSError as error:
+        logger.warning("Steam screenshot could not open %s: %s", path, error)
+        return HttpResponseNotFound()
+
+    # A capture never changes after Steam writes it, so a day of browser cache
+    # costs nothing and saves the whole file on every back navigation.
+    response["Cache-Control"] = "public, max-age=86400"
+    return response
+
+
+@require_GET
 def year_in_review(request):
     """年度游玩报告页：默认今年，``?year=`` 可切年份。
 
@@ -1815,6 +2125,7 @@ def year_in_review(request):
         request,
         "app/year_in_review.html",
         {
+            "tab": "year",
             "report": payload,
             "year": year,
             "year_options": payload["years"],
@@ -1835,6 +2146,7 @@ def near_complete(request):
         request,
         "app/near_complete.html",
         {
+            "tab": "near",
             "games": games,
             "count": len(games),
         },

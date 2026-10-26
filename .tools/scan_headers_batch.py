@@ -8,10 +8,15 @@
 """
 import csv, json, os, sqlite3, sys, time, urllib.request, urllib.parse, urllib.error
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
-DB = r"C:\Users\USERNAME\Downloads\life joy\yamtrack\src\db\db.sqlite3"
-PROG = r"C:\Users\USERNAME\Downloads\life joy\yamtrack\.tools\scan_headers_progress.json"
-OUTCSV = r"C:\Users\USERNAME\Downloads\life joy\ui-redesign\shots\impl\P1-header-scan.csv"
+# 仓库根：可用 YAMTRACK_ROOT 环境变量覆盖，否则按脚本位置往上推两级。
+ROOT = os.environ.get("YAMTRACK_ROOT") or str(Path(__file__).resolve().parent.parent)
+PROJECT = os.path.dirname(ROOT)  # 上一级：life joy
+
+DB = os.path.join(ROOT, "src", "db", "db.sqlite3")
+PROG = os.path.join(ROOT, ".tools", "scan_headers_progress.json")
+OUTCSV = os.path.join(PROJECT, "ui-redesign", "shots", "impl", "P1-header-scan.csv")
 UA = {"User-Agent": "Mozilla/5.0"}
 API = "https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json="
 BASE = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/%s/%s"

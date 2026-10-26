@@ -1,0 +1,35 @@
+{% load i18n %}
+{% comment %}
+  统计页的三个子页签：统计总览 / 年度报告 / 临门一脚。
+
+  为什么用普通 <a href> 整页跳转，不用 htmx 局部换：
+  这三页的 Chart.js 都写在各自的 {% block js %} 里，软导航（hx-boost 只换
+  #main-content）不会重新执行 block js，图会变成空白。这是项目里踩过的坑。
+  所以这里全部是整页链接，并且显式写 hx-boost="false" 防止以后被上层容器
+  的 boost 语义吃掉。
+
+  当前页用视图传进来的 `tab` 变量判断，取值只有三个：
+    main → 统计总览（/statistics）
+    year → 年度报告（/statistics?tab=year）
+    near → 临门一脚（/statistics?tab=near）
+  没传（老地址 /year-in-review、/near-complete 以外的情况）一律按 main 处理。
+{% endcomment %}
+{% url 'statistics' as stats_home_url %}
+<nav class="flex gap-x-6 overflow-x-auto border-b border-[#2c3136] mb-8"
+     aria-label="统计分页">
+  <a href="{{ stats_home_url }}"
+     hx-boost="false"
+     class="pb-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors duration-200 {% if tab == 'main' or not tab %}text-white border-indigo-500{% else %}text-gray-400 border-transparent hover:text-white{% endif %}">
+    统计总览
+  </a>
+  <a href="{{ stats_home_url }}?tab=year"
+     hx-boost="false"
+     class="pb-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors duration-200 {% if tab == 'year' %}text-white border-indigo-500{% else %}text-gray-400 border-transparent hover:text-white{% endif %}">
+    年度报告
+  </a>
+  <a href="{{ stats_home_url }}?tab=near"
+     hx-boost="false"
+     class="pb-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors duration-200 {% if tab == 'near' %}text-white border-indigo-500{% else %}text-gray-400 border-transparent hover:text-white{% endif %}">
+    临门一脚
+  </a>
+</nav>

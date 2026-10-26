@@ -15,8 +15,14 @@
    ========================================================================== */
 
 /* ---- 0. 变量 -------------------------------------------------------------- */
+/* 顶栏左右内边距单独提成变量：密度胶囊（在 showcase.css，固定定位、不在 .lj-topnav
+   范围内，继承不到这里的变量）要靠它算右偏移，所以挂在 :root 上。只声明变量，
+   不产生任何布局效果。 */
+:root {
+  --lj-tp-pad: clamp(20px, 3vw, 40px);
+}
 .lj-topnav {
-  --lj-tn-h: 64px;
+  --lj-tn-h: 54px;
   --lj-tn-bg: #1a1d20;
   --lj-tn-panel: #23272b;
   --lj-tn-line: #2c3136;
@@ -63,7 +69,7 @@ html[data-theme="light"] .lj-topnav {
   gap: 10px;
   height: var(--lj-tn-h);
   min-width: 0;
-  padding: 0 16px;
+  padding: 0 var(--lj-tp-pad);
 }
 
 /* ---- 2. 品牌区（折叠也不隐藏） -------------------------------------------- */
@@ -112,8 +118,8 @@ html[data-theme="light"] .lj-topnav {
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -141,7 +147,7 @@ html[data-sidebar="collapsed"] .lj-topnav .lj-tn-chev { transform: translateY(-1
   display: flex;
   align-items: center;
   flex: 1 1 auto;
-  gap: 5px;
+  gap: 2px;
   height: 100%;
   min-width: 0;
   overflow: hidden;
@@ -152,11 +158,11 @@ html[data-sidebar="collapsed"] .lj-topnav .lj-tn-chev { transform: translateY(-1
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 64px;
-  height: 40px;
+  width: 44px;
+  height: 34px;
   padding: 0;
   border: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   background: transparent;
   color: var(--lj-tn-ink2);
   text-decoration: none;
@@ -164,8 +170,8 @@ html[data-sidebar="collapsed"] .lj-topnav .lj-tn-chev { transform: translateY(-1
   transition: color .24s var(--lj-tn-ease), background .24s var(--lj-tn-ease);
 }
 .lj-topnav .lj-tn-item > svg {
-  width: 19px;
-  height: 19px;
+  width: 17px;
+  height: 17px;
   flex: 0 0 auto;
 }
 .lj-topnav .lj-tn-item:hover {
@@ -191,14 +197,14 @@ html[data-sidebar="collapsed"] .lj-topnav .lj-tn-chev { transform: translateY(-1
 .lj-topnav .lj-tn-item.lj-tn-sep::before {
   content: '';
   position: absolute;
-  left: -9px;
+  left: -7px;
   top: 50%;
   width: 1px;
-  height: 16px;
+  height: 14px;
   background: var(--lj-tn-line);
   transform: translateY(-50%);
 }
-.lj-topnav .lj-tn-sep { margin-left: 12px; }
+.lj-topnav .lj-tn-sep { margin-left: 14px; }
 /* 收起：由 JS 实测宽度决定，谁收谁带 data-folded */
 .lj-topnav .lj-tn-item[data-folded],
 .lj-topnav .lj-tn-form[data-folded] { display: none; }
@@ -213,17 +219,17 @@ html[data-sidebar="collapsed"] .lj-topnav .lj-tn-chev { transform: translateY(-1
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 64px;
-  height: 40px;
+  width: 44px;
+  height: 34px;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: 8px;
   background: transparent;
   color: var(--lj-tn-ink2);
   cursor: pointer;
   transition: color .24s var(--lj-tn-ease), background .24s var(--lj-tn-ease);
 }
-.lj-topnav .lj-tn-lout > svg { width: 19px; height: 19px; }
+.lj-topnav .lj-tn-lout > svg { width: 17px; height: 17px; }
 .lj-topnav .lj-tn-lout:hover { color: var(--lj-tn-ink); background: var(--lj-tn-hover); }
 
 /* ⋯：只在真的收起了东西时出现 */
@@ -232,12 +238,12 @@ html[data-sidebar="collapsed"] .lj-topnav .lj-tn-chev { transform: translateY(-1
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 42px;
-  height: 40px;
+  width: 38px;
+  height: 34px;
   margin-left: 6px;
   padding: 0;
   border: 1px solid var(--lj-tn-line);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--lj-tn-panel);
   color: var(--lj-tn-ink2);
   cursor: pointer;
@@ -248,6 +254,10 @@ html[data-sidebar="collapsed"] .lj-topnav .lj-tn-chev { transform: translateY(-1
 .lj-topnav .lj-tn-more[aria-expanded="true"] { color: var(--lj-tn-gold); border-color: var(--lj-tn-gold); }
 
 /* ---- 5. 右侧动作区 -------------------------------------------------------- */
+/* 「筛选」药丸已失去作用（筛选行本身就常驻在页面里，这个按钮点了没有反馈），
+   HTML 和 JS 都保持原样不动（base.html 里 __ljSyncFilterBtns 还引用这个 id，
+   有 null 判断，留着无害），这里只让它不参与布局与渲染。 */
+.lj-topnav #lj-tn-filter { display: none !important; }
 .lj-topnav .lj-tn-actions {
   display: flex;
   align-items: center;
@@ -265,8 +275,8 @@ html[data-sidebar="collapsed"] .lj-topnav .lj-tn-chev { transform: translateY(-1
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
-  padding: 0 12px;
+  height: 30px;
+  padding: 0 11px;
   border: 1px solid var(--lj-tn-line);
   border-radius: 999px;
   background: var(--lj-tn-panel);

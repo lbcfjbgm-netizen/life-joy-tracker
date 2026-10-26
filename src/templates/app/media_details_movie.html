@@ -1,0 +1,1662 @@
+{% load app_tags humanize i18n %}
+{% comment %}
+  电影详情页（只被 media_details.html 的 media_type == MOVIE 分支 include）。
+  视觉按 ui-redesign/detail-movie-1.html 重做，所有样式/类名统一挂在 .lj-md 作用域下，
+  不污染其它详情页；交互全部走 Alpine，不写 <script>（顶栏是 htmx 软导航，脚本不会重跑）。
+{% endcomment %}
+
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+  <symbol id="ljmd-star" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.2l2.94 6.28 6.86.86-5.03 4.72 1.31 6.78L12 17.55 5.92 20.84l1.31-6.78L2.2 9.34l6.86-.86L12 2.2z"/></symbol>
+  <symbol id="ljmd-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path d="M12 7.2V12l3.4 2.2"/></symbol>
+  <symbol id="ljmd-trophy" viewBox="0 0 24 24"><path d="M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4v2a3 3 0 0 0 3 3M17 6h3v2a3 3 0 0 1-3 3"/><path d="M12 14v4M8.5 18h7"/></symbol>
+  <symbol id="ljmd-bolt" viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H12L11 22l8.5-11.5H12L13 2Z"/></symbol>
+  <symbol id="ljmd-cal" viewBox="0 0 24 24"><rect x="3.2" y="5.2" width="17.6" height="15.4" rx="2.2"/><path d="M3.2 9.8h17.6M8 3.2v3.6M16 3.2v3.6"/></symbol>
+  <symbol id="ljmd-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8"/><path d="M12 3a14.5 14.5 0 0 0 0 18 14.5 14.5 0 0 0 0-18Z"/></symbol>
+  <symbol id="ljmd-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></symbol>
+  <symbol id="ljmd-chev" viewBox="0 0 24 24"><path d="M6.4 9.6 12 15.2l5.6-5.6"/></symbol>
+  <symbol id="ljmd-ext" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M10 14 20 4"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></symbol>
+  <symbol id="ljmd-check" viewBox="0 0 24 24"><path d="M4.8 12.6 9.6 17.4 19.2 6.8"/></symbol>
+  <symbol id="ljmd-plus" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path d="M12 8.4v7.2M8.4 12h7.2"/></symbol>
+  <symbol id="ljmd-sync" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 0-15.5-6.3L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15.5 6.3L21 16"/><path d="M21 21v-5h-5"/></symbol>
+  <symbol id="ljmd-edit" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5Z"/></symbol>
+  <symbol id="ljmd-list" viewBox="0 0 24 24"><path d="M8.4 6.6h11.2M8.4 12h11.2M8.4 17.4h11.2"/><circle cx="4.6" cy="6.6" r=".95"/><circle cx="4.6" cy="12" r=".95"/><circle cx="4.6" cy="17.4" r=".95"/></symbol>
+  <symbol id="ljmd-film" viewBox="0 0 24 24"><rect x="2.8" y="4.6" width="18.4" height="14.8" rx="2.2"/><path d="M7.4 4.6v14.8M16.6 4.6v14.8M2.8 9.4h4.6M2.8 14.6h4.6M16.6 9.4h4.6M16.6 14.6h4.6"/></symbol>
+</svg>
+
+<style>
+  /* ---------- 元素级重置必须进 @layer base：不包的话会压掉 Tailwind 的 bg-* ---------- */
+  @layer base {
+    .lj-md button,
+    .lj-md input,
+    .lj-md textarea,
+    .lj-md select {
+      font-family: inherit;
+      color: inherit;
+    }
+    .lj-md button {
+      background: none;
+      border: 0;
+      padding: 0;
+      margin: 0;
+      cursor: pointer;
+    }
+    .lj-md h1,
+    .lj-md h2,
+    .lj-md h3,
+    .lj-md p {
+      margin: 0;
+    }
+    .lj-md a {
+      color: inherit;
+      text-decoration: none;
+    }
+    .lj-md img {
+      display: block;
+      max-width: 100%;
+    }
+    .lj-md [hidden],
+    .lj-md [x-cloak] {
+      display: none !important;
+    }
+  }
+
+  .lj-md {
+    --radius: 14px;
+    --radius-sm: 10px;
+    --ease: cubic-bezier(.22, .8, .24, 1);
+    --pad: clamp(0px, 2vw, 16px);
+    --font-ui: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+    --font-serif: "Noto Serif SC", "Source Han Serif SC", "Source Han Serif CN", "Songti SC", "STSong", serif;
+    --font-mono: "JetBrains Mono", "Cascadia Mono", "Consolas", ui-monospace, monospace;
+
+    /* 暗色（站点默认在 html 上挂 data-theme="dark"） */
+    --bg: #212529;
+    --bg-elev: #1b1f25;
+    --panel: #1d2229;
+    --panel-2: #232932;
+    --card: rgba(29, 34, 41, .84);
+    --card-solid: #1e232a;
+    --card-hover: rgba(38, 45, 54, .94);
+    --ink: #f4f1ea;
+    --ink2: rgba(244, 241, 234, .76);
+    --ink3: rgba(244, 241, 234, .48);
+    --line: rgba(255, 255, 255, .09);
+    --line2: rgba(255, 255, 255, .055);
+    --warm-line: rgba(232, 201, 130, .38);
+    --gold: #e8c982;
+    --gold-soft: rgba(232, 201, 130, .14);
+    --gold-line: rgba(232, 201, 130, .30);
+    --violet: #9d8df7;
+    --violet-soft: rgba(139, 122, 245, .15);
+    --violet-line: rgba(157, 141, 247, .30);
+    --emerald: #34d399;
+    --emerald-bg: #10b981;
+    --emerald-soft: rgba(16, 185, 129, .16);
+    --verm: #e0675a;
+    --verm-soft: rgba(224, 103, 90, .14);
+    --verm-line: rgba(224, 103, 90, .32);
+    --accent: #e8c982;
+    --skylight: inset 0 1px 0 rgba(255, 255, 255, .07);
+    --shadow: 0 22px 54px -14px rgba(0, 0, 0, .62);
+    --shadow-s: 0 8px 24px -6px rgba(0, 0, 0, .42);
+    --hover: rgba(255, 255, 255, .06);
+    --scrim: 20, 23, 27;
+    --hero-alpha: .36;
+    --tag-bg: rgba(255, 255, 255, .055);
+    --tag-ink: rgba(244, 241, 234, .84);
+    --ticket-bg: linear-gradient(135deg, rgba(38, 33, 28, .92) 0%, rgba(28, 32, 39, .92) 100%);
+
+    position: relative;
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  html[data-theme="light"] .lj-md {
+    --bg: #f5f1e8;
+    --bg-elev: #ebe4d6;
+    --panel: #fffcf6;
+    --panel-2: #f9f3e8;
+    --card: rgba(255, 252, 246, .82);
+    --card-solid: #fffcf6;
+    --card-hover: #ffffff;
+    --ink: #221d17;
+    --ink2: rgba(34, 29, 23, .78);
+    --ink3: rgba(34, 29, 23, .52);
+    --line: rgba(48, 34, 18, .12);
+    --line2: rgba(48, 34, 18, .07);
+    --warm-line: rgba(154, 107, 31, .36);
+    --gold: #9a6b1f;
+    --gold-soft: rgba(154, 107, 31, .11);
+    --gold-line: rgba(154, 107, 31, .26);
+    --violet: #5f4bc4;
+    --violet-soft: rgba(95, 75, 196, .10);
+    --violet-line: rgba(95, 75, 196, .22);
+    --emerald: #0d9468;
+    --emerald-bg: #0f9f6e;
+    --emerald-soft: rgba(15, 159, 110, .12);
+    --verm: #b4362c;
+    --verm-soft: rgba(180, 54, 44, .10);
+    --verm-line: rgba(180, 54, 44, .26);
+    --accent: #b4362c;
+    --skylight: inset 0 1px 0 rgba(255, 255, 255, .94);
+    --shadow: 0 4px 12px rgba(48, 34, 18, .06), 0 24px 52px -16px rgba(48, 34, 18, .16);
+    --shadow-s: 0 2px 5px rgba(48, 34, 18, .05), 0 14px 32px -12px rgba(48, 34, 18, .11);
+    --hover: rgba(48, 34, 18, .05);
+    --scrim: 244, 239, 229;
+    --hero-alpha: .25;
+    --tag-bg: rgba(48, 34, 18, .055);
+    --tag-ink: rgba(34, 29, 23, .82);
+    --ticket-bg: linear-gradient(135deg, rgba(255, 249, 237, .96) 0%, rgba(250, 243, 229, .96) 100%);
+  }
+
+  .lj-md .ic {
+    width: 17px;
+    height: 17px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.75;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    display: block;
+    flex: 0 0 auto;
+  }
+  .lj-md .ic-fill { fill: currentColor; stroke: none; }
+
+  /* ---------- 环境背景层 ---------- */
+  .lj-md .ambient {
+    position: absolute;
+    top: -8px;
+    left: 0;
+    right: 0;
+    height: 520px;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .lj-md .ambient-art { position: absolute; inset: 0; opacity: var(--hero-alpha); }
+  .lj-md .ambient-art img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 28%;
+    filter: blur(28px) saturate(1.15) contrast(1.04);
+    transform: scale(1.14);
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 42%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0%, #000 42%, transparent 100%);
+  }
+  .lj-md .ambient-glow {
+    position: absolute;
+    inset: -60px -40px auto -40px;
+    height: 380px;
+    background:
+      radial-gradient(48% 60% at 22% 40%, rgba(var(--scrim), .55), transparent 70%),
+      radial-gradient(42% 55% at 78% 30%, rgba(210, 105, 86, .16), transparent 72%);
+    filter: blur(48px);
+  }
+  html[data-theme="light"] .lj-md .ambient-glow {
+    background:
+      radial-gradient(48% 60% at 22% 40%, rgba(255, 255, 255, .5), transparent 70%),
+      radial-gradient(42% 55% at 78% 30%, rgba(210, 105, 86, .10), transparent 72%);
+  }
+  .lj-md .ambient-fade {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, rgba(var(--scrim), .18) 0%, var(--bg) 88%);
+    opacity: .82;
+  }
+
+  .lj-md .page-shell {
+    position: relative;
+    z-index: 1;
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 6px var(--pad) 48px;
+  }
+
+  /* ---------- 面包屑 ---------- */
+  .lj-md .crumb-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    height: 28px;
+    margin-bottom: 12px;
+    font-size: 12px;
+    color: var(--ink3);
+  }
+  .lj-md .crumb-links { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+  .lj-md .crumb-links a { display: inline-flex; align-items: center; gap: 5px; color: var(--ink3); transition: color .16s var(--ease); }
+  .lj-md .crumb-links a:hover { color: var(--gold); }
+  .lj-md .crumb-links a .ic { width: 12px; height: 12px; transform: rotate(180deg); }
+  .lj-md .crumb-sep { color: var(--line); }
+  .lj-md .crumb-cur { color: var(--ink2); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ---------- 首屏 ---------- */
+  .lj-md .hero-compact {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 24px;
+    align-items: start;
+    margin-bottom: 18px;
+  }
+  .lj-md .poster-col { width: 200px; display: flex; flex-direction: column; gap: 8px; }
+  .lj-md .poster-frame {
+    position: relative;
+    width: 200px;
+    aspect-ratio: 2 / 3;
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    box-shadow: var(--skylight), var(--shadow);
+  }
+  .lj-md .poster-frame img {
+    width: 100%;
+    height: 100%;
+    aspect-ratio: 2 / 3;
+    object-fit: cover;
+    transition: transform .5s var(--ease);
+  }
+  .lj-md .poster-frame:hover img { transform: scale(1.03); }
+  .lj-md .poster-fallback {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    font-family: var(--font-serif);
+    font-size: 15px;
+    color: var(--gold);
+    text-align: center;
+    padding: 12px;
+  }
+
+  .lj-md .status-split {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 34px;
+    height: 34px;
+    border-radius: 9px;
+    overflow: visible;
+    background: var(--emerald-bg);
+    color: #fff;
+    box-shadow: var(--skylight), 0 6px 16px -8px rgba(16, 185, 129, .8);
+  }
+  .lj-md .status-split.status-in-progress { background: #6366f1; }
+  .lj-md .status-split.status-planning { background: #0284c7; }
+  .lj-md .status-split.status-paused { background: #ea580c; }
+  .lj-md .status-split.status-dropped { background: #dc2626; }
+  .lj-md .status-split.status-idle { background: #4b5563; }
+  /* 状态底色同时落在按钮本体上（不是只画在父层），
+     这样 getComputedStyle(btn).backgroundColor 永远是实色，不会出现「透明底 + 白字」。 */
+  .lj-md .status-main-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    height: 34px;
+    padding: 0 10px;
+    border-radius: 9px 0 0 9px;
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    color: #fff;
+    background: inherit;
+    transition: filter .16s var(--ease);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .lj-md .status-main-btn:hover { filter: brightness(1.08); }
+  .lj-md .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, .22);
+    flex: 0 0 auto;
+  }
+  .lj-md .status-trigger-btn {
+    display: grid;
+    place-items: center;
+    height: 34px;
+    border-radius: 0 9px 9px 0;
+    border-left: 1px solid rgba(255, 255, 255, .28);
+    background: inherit;
+    color: #fff;
+  }
+  .lj-md .status-trigger-btn .ic { width: 14px; height: 14px; transition: transform .2s var(--ease); }
+  .lj-md .status-trigger-btn.is-open .ic { transform: rotate(180deg); }
+  .lj-md .status-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 50;
+    padding: 5px;
+    border-radius: 11px;
+    background: var(--card-solid);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .lj-md .status-menu button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 9px;
+    border-radius: 7px;
+    font-size: 11.5px;
+    color: var(--ink2);
+    text-align: left;
+    transition: background .14s var(--ease), color .14s var(--ease);
+  }
+  .lj-md .status-menu button:hover { background: var(--hover); color: var(--ink); }
+  .lj-md .status-menu .menu-div { height: 1px; margin: 4px 2px; background: var(--line2); }
+
+  /* ---------- 右列标题区 ---------- */
+  .lj-md .hero-main { min-height: 342px; display: flex; flex-direction: column; gap: 11px; }
+  .lj-md .hero-head { display: flex; flex-direction: column; gap: 10px; }
+  .lj-md .title-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px 14px; }
+  .lj-md .film-title {
+    font-family: var(--font-serif);
+    font-size: clamp(24px, 2.2vw, 31px);
+    font-weight: 700;
+    letter-spacing: .02em;
+    color: var(--ink);
+    line-height: 1.22;
+  }
+  .lj-md .film-cn-sub {
+    font-size: 12.5px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--gold-soft);
+    border: 1px solid var(--gold-line);
+    color: var(--gold);
+    white-space: nowrap;
+  }
+  .lj-md .src-pill {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--ink2);
+    transition: border-color .16s var(--ease), color .16s var(--ease);
+  }
+  .lj-md .src-pill:hover { border-color: var(--warm-line); color: var(--gold); }
+
+  .lj-md .meta-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .lj-md .meta-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 24px;
+    padding: 0 9px;
+    border-radius: 6px;
+    background: var(--tag-bg);
+    color: var(--tag-ink);
+    border: 1px solid var(--line2);
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+  .lj-md .meta-chip .ic { width: 12px; height: 12px; opacity: .78; }
+  .lj-md .meta-chip--genre { background: var(--violet-soft); border-color: var(--violet-line); color: var(--violet); }
+  .lj-md .meta-chip--director { background: var(--gold-soft); border-color: var(--gold-line); color: var(--gold); font-weight: 600; }
+
+  .lj-md .synopsis-box {
+    display: flex;
+    gap: 10px;
+    padding: 9px 14px;
+    border-radius: 10px;
+    background: var(--card);
+    border: 1px solid var(--line2);
+    box-shadow: var(--skylight);
+    font-size: 12.5px;
+    line-height: 1.58;
+    color: var(--ink2);
+  }
+  .lj-md .synopsis-quote-bar {
+    flex: 0 0 3px;
+    width: 3px;
+    border-radius: 2px;
+    background: linear-gradient(to bottom, var(--gold), var(--verm));
+  }
+  .lj-md .synopsis-text {
+    flex: 1;
+    min-width: 0;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+  .lj-md .synopsis-box.is-open .synopsis-text { -webkit-line-clamp: unset; display: block; overflow: visible; }
+  .lj-md .synopsis-more {
+    align-self: flex-start;
+    flex: 0 0 auto;
+    padding: 1px 7px;
+    border-radius: 5px;
+    font-size: 11px;
+    color: var(--gold);
+    background: var(--gold-soft);
+    white-space: nowrap;
+  }
+
+  /* ---------- 四张指标卡 ---------- */
+  .lj-md .metrics-ribbon {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: auto;
+  }
+  .lj-md .m-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 6px;
+    min-height: 114px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    box-shadow: var(--skylight);
+    transition: transform .2s var(--ease), border-color .2s var(--ease), background .2s var(--ease);
+  }
+  .lj-md .m-card:hover { transform: translateY(-1px); border-color: var(--warm-line); background: var(--card-solid); }
+  .lj-md .m-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .lj-md .m-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--ink3);
+    letter-spacing: .02em;
+  }
+  .lj-md .m-label .ic { width: 14px; height: 14px; color: var(--gold); }
+  .lj-md .m-mini-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--gold);
+    background: var(--gold-soft);
+    white-space: nowrap;
+    transition: background .16s var(--ease), color .16s var(--ease);
+  }
+  .lj-md .m-mini-btn:hover { background: var(--gold); color: #14171b; }
+  .lj-md .m-value-row { display: flex; align-items: baseline; gap: 6px; margin: 4px 0 2px; }
+  .lj-md .m-val {
+    font-family: var(--font-serif);
+    font-size: 23px;
+    font-weight: 700;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+  .lj-md .m-unit { font-size: 12px; color: var(--ink3); }
+  .lj-md .m-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--ink3);
+  }
+  .lj-md .m-foot .m-foot-link { color: var(--gold); font-size: 11px; }
+  .lj-md .prog-track {
+    height: 5px;
+    border-radius: 999px;
+    background: var(--line);
+    overflow: hidden;
+    margin: 5px 0 4px;
+  }
+  .lj-md .prog-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--gold), var(--emerald));
+    transition: width .4s var(--ease);
+  }
+  .lj-md .star-strip { display: inline-flex; gap: 2px; color: var(--gold); }
+  .lj-md .star-strip button { padding: 1px; display: block; transition: transform .14s var(--ease); }
+  .lj-md .star-strip button:hover { transform: scale(1.2); }
+  .lj-md .star-strip .ic { width: 13px; height: 13px; }
+  .lj-md .star-strip .is-dim { opacity: .26; }
+  .lj-md .quick-actions-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 4px; }
+  .lj-md .qa-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 7px;
+    font-size: 11.5px;
+    color: var(--ink2);
+    background: var(--tag-bg);
+    border: 1px solid var(--line);
+    white-space: nowrap;
+    transition: color .16s var(--ease), border-color .16s var(--ease);
+  }
+  .lj-md .qa-btn:hover { color: var(--ink); border-color: var(--warm-line); }
+  .lj-md .qa-btn--primary { color: var(--gold); background: var(--gold-soft); border-color: var(--gold-line); font-weight: 600; }
+  .lj-md .qa-btn--primary:hover { background: var(--gold); color: #14171b; }
+  .lj-md .qa-btn .ic { width: 12.5px; height: 12.5px; }
+
+  /* ---------- 主内容两列 ---------- */
+  .lj-md .content-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 308px;
+    gap: 20px;
+    align-items: start;
+  }
+  .lj-md .left-stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .lj-md .section-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--skylight);
+    padding: 16px 18px 18px;
+  }
+  .lj-md .sec-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line2);
+  }
+  .lj-md .sec-title-wrap { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+  .lj-md .sec-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-serif);
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    color: var(--ink);
+  }
+  .lj-md .sec-title::before {
+    content: "";
+    width: 3px;
+    height: 15px;
+    border-radius: 2px;
+    background: var(--gold);
+    flex: 0 0 auto;
+  }
+  .lj-md .sec-count {
+    font-size: 11.5px;
+    color: var(--ink3);
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--tag-bg);
+    white-space: nowrap;
+  }
+  .lj-md .layout-seg {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 9px;
+    background: var(--panel);
+    border: 1px solid var(--line2);
+  }
+  .lj-md .layout-seg button {
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    color: var(--ink3);
+    white-space: nowrap;
+    transition: color .16s var(--ease), background .16s var(--ease);
+  }
+  .lj-md .layout-seg button:hover { color: var(--ink2); }
+  .lj-md .layout-seg button.on {
+    color: var(--gold);
+    background: var(--gold-soft);
+    border: 1px solid var(--gold-line);
+    font-weight: 600;
+  }
+
+  /* ---------- 主创名片墙 ---------- */
+  .lj-md .cast-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .lj-md .cast-grid[data-cmode="5col"] { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .lj-md .cast-grid[data-cmode="lead"] { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .lj-md .cast-card {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 10px 12px;
+    border-radius: 11px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    box-shadow: var(--skylight);
+    transition: transform .18s var(--ease), border-color .18s var(--ease), background .18s var(--ease);
+    min-width: 0;
+  }
+  .lj-md .cast-card:hover { transform: translateY(-2px); border-color: var(--warm-line); background: var(--card-hover); box-shadow: var(--shadow-s); }
+  .lj-md .cast-card.is-director {
+    background: linear-gradient(135deg, var(--gold-soft), var(--panel));
+    border-color: var(--gold-line);
+  }
+  .lj-md .cast-grid[data-cmode="lead"] .cast-card:nth-child(-n+3) {
+    background: linear-gradient(135deg, var(--gold-soft), var(--panel));
+    border-color: var(--gold-line);
+  }
+  .lj-md .cast-avatar {
+    position: relative;
+    width: 40px;
+    height: 40px;
+    flex: 0 0 40px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-family: var(--font-serif);
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--gold);
+    background: var(--gold-soft);
+    border: 1px solid var(--gold-line);
+    box-shadow: var(--skylight);
+  }
+  .lj-md .cast-card:not(.is-director) .cast-avatar {
+    color: var(--ink2);
+    background: var(--panel-2);
+    border-color: var(--line);
+  }
+  .lj-md .cast-grid[data-cmode="lead"] .cast-card:nth-child(-n+3) .cast-avatar {
+    color: var(--violet);
+    background: var(--violet-soft);
+    border-color: var(--violet-line);
+  }
+  .lj-md .cast-role-dot {
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    padding: 1px 4px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1.2;
+    color: #14171b;
+    background: var(--gold);
+    white-space: nowrap;
+  }
+  .lj-md .cast-card:not(.is-director) .cast-role-dot { color: var(--ink); background: var(--panel-2); border: 1px solid var(--line); }
+  .lj-md .cast-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .lj-md .cast-name-row { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; }
+  .lj-md .cast-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .lj-md .cast-sub { font-size: 11px; color: var(--ink3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lj-md .gallery-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line2);
+    font-size: 12px;
+    color: var(--ink3);
+  }
+  .lj-md .expand-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 14px;
+    border-radius: 999px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    font-size: 12px;
+    color: var(--ink2);
+    transition: border-color .16s var(--ease), color .16s var(--ease);
+  }
+  .lj-md .expand-btn:hover { border-color: var(--warm-line); color: var(--gold); }
+  .lj-md .expand-btn .ic { width: 12px; height: 12px; }
+
+  /* ---------- 齿孔票根 + 银幕手札 ---------- */
+  .lj-md .ticket-review-card {
+    display: grid;
+    grid-template-columns: 248px minmax(0, 1fr);
+    border-radius: var(--radius);
+    background: var(--ticket-bg);
+    border: 1px solid var(--gold-line);
+    box-shadow: var(--skylight);
+    overflow: hidden;
+  }
+  .lj-md .ticket-stub {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 16px 18px;
+    border-right: 1.5px dashed var(--gold-line);
+    background: var(--gold-soft);
+  }
+  .lj-md .ticket-stub::before,
+  .lj-md .ticket-stub::after {
+    content: "";
+    position: absolute;
+    right: -9px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 1px solid var(--gold-line);
+    z-index: 2;
+  }
+  .lj-md .ticket-stub::before { top: -9px; }
+  .lj-md .ticket-stub::after { bottom: -9px; }
+  .lj-md .stub-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: .12em;
+    color: var(--gold);
+  }
+  .lj-md .stub-title {
+    font-family: var(--font-serif);
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--ink);
+    margin-top: 2px;
+  }
+  .lj-md .stub-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 10px;
+    padding-top: 6px;
+    border-top: 1px solid var(--line);
+  }
+  .lj-md .stub-cell { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .lj-md .stub-k { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .06em; color: var(--ink3); }
+  .lj-md .stub-v {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--ink2);
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .lj-md .stub-stamp {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 9px;
+    border-radius: 6px;
+    border: 1px solid var(--emerald);
+    background: var(--emerald-soft);
+    color: var(--emerald);
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .lj-md .ticket-body { display: flex; flex-direction: column; justify-content: space-between; gap: 10px; padding: 16px 20px; }
+  .lj-md .ticket-body-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .lj-md .ticket-quote {
+    font-size: 13.5px;
+    line-height: 1.72;
+    color: var(--ink);
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: var(--panel);
+    border: 1px solid var(--line2);
+  }
+  .lj-md .ticket-quote.is-empty { color: var(--ink3); font-style: italic; }
+  .lj-md .ticket-tags { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  .lj-md .mood-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .lj-md .mood-tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--tag-bg);
+    border: 1px solid var(--line2);
+    color: var(--ink2);
+  }
+  .lj-md .ticket-meta { font-size: 11.5px; color: var(--ink3); }
+
+  /* ---------- 右栏 ---------- */
+  .lj-md .side-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .lj-md .side-col .sec-header { margin-bottom: 10px; padding-bottom: 8px; }
+  .lj-md .side-col .sec-title { font-size: 14.5px; }
+  .lj-md .kv-list { display: flex; flex-direction: column; gap: 0; }
+  .lj-md .kv-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 12px;
+    padding: 5px 0;
+    border-bottom: 1px dashed var(--line2);
+  }
+  .lj-md .kv-row:last-child { border-bottom: 0; }
+  .lj-md .kv-k { color: var(--ink3); flex: 0 0 auto; }
+  .lj-md .kv-v { color: var(--ink2); font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; min-width: 0; }
+  .lj-md .kv-v a { color: var(--gold); display: inline-flex; align-items: center; gap: 3px; }
+  .lj-md .kv-v a:hover { text-decoration: underline; }
+  .lj-md .kv-v .ic { width: 11px; height: 11px; }
+  .lj-md .kv-mono { font-family: var(--font-mono); font-size: 11.5px; }
+  .lj-md .kv-emerald { color: var(--emerald); }
+  .lj-md .kv-gold { color: var(--gold); }
+  .lj-md .side-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line2);
+  }
+  .lj-md .side-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 31px;
+    padding: 0 10px;
+    border-radius: 8px;
+    font-size: 11.5px;
+    color: var(--ink2);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    white-space: nowrap;
+    transition: color .16s var(--ease), border-color .16s var(--ease), background .16s var(--ease);
+  }
+  .lj-md .side-btn:hover { color: var(--ink); border-color: var(--warm-line); background: var(--hover); }
+  .lj-md .side-btn .ic { width: 13px; height: 13px; color: var(--gold); }
+  .lj-md .side-btn.is-loading .ic { animation: ljmd-spin 1s linear infinite; }
+  @keyframes ljmd-spin { to { transform: rotate(360deg); } }
+
+  /* 站点自带的「标记已看」动作条（组件输出，不自带背景，这里补一层壳） */
+  .lj-md .progress-slot { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line2); }
+  .lj-md .progress-slot > div { padding-left: 0 !important; padding-right: 0 !important; }
+
+  .lj-md .note-textarea {
+    width: 100%;
+    min-height: 76px;
+    border: 1px solid var(--warm-line);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--ink);
+    padding: 8px 10px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    resize: vertical;
+  }
+
+  /* ---------- toast ---------- */
+  .lj-md .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 28px;
+    z-index: 250;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-radius: 10px;
+    background: var(--card-solid);
+    border: 1px solid var(--gold-line);
+    box-shadow: var(--shadow);
+    font-size: 12.5px;
+    color: var(--ink);
+  }
+
+  /* ---------- 空态 ---------- */
+  .lj-md .empty-hint { font-size: 12.5px; color: var(--ink3); padding: 6px 0; }
+
+  @media (max-width: 1180px) {
+    .lj-md .metrics-ribbon { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .lj-md .content-split { grid-template-columns: minmax(0, 1fr); }
+    .lj-md .cast-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .lj-md .side-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  }
+  @media (max-width: 760px) {
+    .lj-md .hero-compact { grid-template-columns: minmax(0, 1fr); }
+    .lj-md .poster-col { width: 100%; max-width: 220px; margin: 0 auto; }
+    .lj-md .poster-frame { width: 100%; }
+    .lj-md .cast-grid,
+    .lj-md .cast-grid[data-cmode="5col"],
+    .lj-md .cast-grid[data-cmode="lead"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .lj-md .ticket-review-card { grid-template-columns: minmax(0, 1fr); }
+    .lj-md .ticket-stub { border-right: 0; border-bottom: 1.5px dashed var(--gold-line); }
+    .lj-md .ticket-stub::before, .lj-md .ticket-stub::after { display: none; }
+    .lj-md .side-col { grid-template-columns: minmax(0, 1fr); }
+    .lj-md .metrics-ribbon { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>
+
+{% with cast_total=media.cast|length hero_runtime=runtime_minutes|default:media.runtime_minutes %}
+<div class="lj-md"
+     x-data="{ menuOpen: false, trackOpen: false, createOpen: false, listsOpen: false, historyOpen: false, toastShow: false, toastMsg: '操作成功' }"
+     @keydown.escape.window="menuOpen = false; trackOpen = false; createOpen = false; listsOpen = false; historyOpen = false">
+
+  {# 氛围背景层：拿竖版海报本身做高斯模糊，豆瓣只有竖图，所以用 is-cover 那套参数 #}
+  <div class="ambient" aria-hidden="true">
+    <div class="ambient-art is-cover">
+      {% if media.image %}
+        <img src="{{ media.image }}" alt="" loading="lazy" decoding="async">
+      {% endif %}
+    </div>
+    <div class="ambient-glow"></div>
+    <div class="ambient-fade"></div>
+  </div>
+
+  <div class="page-shell">
+
+    {# ---------- 面包屑 ---------- #}
+    <nav class="crumb-bar" aria-label="{% trans 'Breadcrumb' %}">
+      <span class="crumb-links">
+        <a href="{% url 'medialist' username=request.user.username media_type=media_type %}">
+          <svg class="ic"><use href="#ljmd-film"></use></svg>
+          <span>{{ media_type|media_type_readable_plural }}</span>
+        </a>
+        <span class="crumb-sep" aria-hidden="true">/</span>
+        <span class="crumb-cur">{{ media.title }}</span>
+      </span>
+    </nav>
+
+    {# ---------- 首屏 ---------- #}
+    <section class="hero-compact" aria-label="{% trans 'Movie' %}">
+      <div class="poster-col">
+        <div class="poster-frame">
+          {% if media.image %}
+            <img src="{{ media.image }}" alt="{{ media.title }}">
+          {% else %}
+            <div class="poster-fallback">{{ media.title }}</div>
+          {% endif %}
+        </div>
+
+        {# 状态按钮：hx 目标/参数与旧版逐字一致 #}
+        <div class="status-split relative {% if user_medias %}{% if current_instance.status == "Completed" %}status-completed{% elif current_instance.status == "In progress" %}status-in-progress{% elif current_instance.status == "Planning" %}status-planning{% elif current_instance.status == "Paused" %}status-paused{% elif current_instance.status == "Dropped" %}status-dropped{% else %}status-idle{% endif %}{% else %}status-idle{% endif %}"
+             @click.away="menuOpen = false">
+          <button class="status-main-btn"
+                  hx-get="{% media_view_url 'track_modal' media %}"
+                  hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "instance_id": "{{ current_instance.id }}"}'
+                  hx-target="#{% component_id 'track' media current_instance.id %}"
+                  hx-trigger="click"
+                  @click="trackOpen = true">
+            <span class="status-dot"></span>
+            <span>
+              {% if user_medias %}
+                {{ current_instance|media_status_readable }}
+              {% else %}
+                {% trans "Add to tracker" %}
+              {% endif %}
+            </span>
+          </button>
+
+          {% if user_medias %}
+            <button class="status-trigger-btn"
+                    :class="{ 'is-open': menuOpen }"
+                    title="{% trans 'More tracking options' %}"
+                    @click="menuOpen = !menuOpen">
+              <svg class="ic"><use href="#ljmd-chev"></use></svg>
+            </button>
+
+            <div class="status-menu" x-show="menuOpen" x-cloak>
+              <button hx-get="{% media_view_url 'track_modal' media %}"
+                      hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "is_create": true}'
+                      hx-target="#{% component_id 'track' media %}"
+                      hx-trigger="click once"
+                      @click="menuOpen = false; createOpen = true">
+                <span>{% trans "Add new entry" %}</span>
+                <span aria-hidden="true">+</span>
+              </button>
+              <div class="menu-div"></div>
+              <button @click="menuOpen = false; listsOpen = true">
+                <span>{% trans "Add to list" %}</span>
+                <span aria-hidden="true"></span>
+              </button>
+            </div>
+          {% else %}
+            {# 没有追踪记录时才出现的首次记录入口 #}
+            <button class="status-trigger-btn" aria-label="{% trans 'Add new entry' %}"
+                    hx-get="{% media_view_url 'track_modal' media %}"
+                    hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "is_create": true}'
+                    hx-target="#{% component_id 'track' media %}"
+                    hx-trigger="click once"
+                    @click="createOpen = true">
+              <svg class="ic"><use href="#ljmd-plus"></use></svg>
+            </button>
+          {% endif %}
+
+          {# Track modal #}
+          <div x-show="trackOpen"
+               role="dialog"
+               aria-modal="true"
+               class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div class="w-152 max-h-[90vh] px-4 md:px-0 relative z-60" @click.stop>
+              <div id="{% component_id 'track' media current_instance.id %}"></div>
+            </div>
+          </div>
+
+          {# Create track modal #}
+          <div x-show="createOpen"
+               role="dialog"
+               aria-modal="true"
+               class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div class="w-152 max-h-[90vh] px-4 md:px-0 relative z-60">
+              <div id="{% component_id 'track' media %}"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hero-main">
+        <div class="hero-head">
+          <div class="title-line">
+            <h1 class="film-title">{{ media.title }}</h1>
+            {% if media.title_en and media.title_en != media.title %}
+              <span class="film-cn-sub">{{ media.title_en }}</span>
+            {% elif media.details.format %}
+              <span class="film-cn-sub">{{ media.details.format }}{% if media.release_date %} · {{ media.release_date|slice:":4" }}{% endif %}</span>
+            {% endif %}
+            {% if media.source_url %}
+              <a class="src-pill" href="{{ media.source_url }}" target="_blank" rel="noopener">
+                <span>{% if media.source == "douban" %}豆瓣{% else %}{{ media.source|source_readable }}{% endif %} #{{ media.media_id }}</span>
+                <svg class="ic" style="width:11px;height:11px"><use href="#ljmd-ext"></use></svg>
+              </a>
+            {% endif %}
+          </div>
+
+          <div class="meta-row">
+            {% if media.directors %}
+              <span class="meta-chip meta-chip--director">
+                <svg class="ic"><use href="#ljmd-user"></use></svg>
+                <span>导演：{% for director in media.directors|slice:":2" %}{{ director.name }}{% if not forloop.last %} / {% endif %}{% endfor %}</span>
+              </span>
+            {% endif %}
+            {% if media.release_date %}
+              <span class="meta-chip">
+                <svg class="ic"><use href="#ljmd-cal"></use></svg>
+                <span>{{ media.release_date }} 上映</span>
+              </span>
+            {% endif %}
+            {% for genre in media.genres|slice:":3" %}
+              <span class="meta-chip meta-chip--genre">{{ genre }}</span>
+            {% endfor %}
+            {% if hero_runtime %}
+              <span class="meta-chip">
+                <svg class="ic"><use href="#ljmd-clock"></use></svg>
+                <span>片长 {{ hero_runtime }} 分钟</span>
+              </span>
+            {% endif %}
+            {% if media.details.country or media.details.languages %}
+              <span class="meta-chip">
+                <svg class="ic"><use href="#ljmd-globe"></use></svg>
+                <span>
+                  {% if media.details.country %}{{ media.details.country }}{% endif %}
+                  {% if media.details.country and media.details.languages %} · {% endif %}
+                  {% if media.details.languages %}{{ media.details.languages|join:" / " }}{% endif %}
+                </span>
+              </span>
+            {% endif %}
+          </div>
+        </div>
+
+        {# 梗概：默认两行，可展开 #}
+        {% if media.synopsis and media.synopsis != "No synopsis available." %}
+          <div class="synopsis-box"
+               x-data="{ open: false, clamped: false, check() { const el = this.$refs.txt; this.clamped = el.scrollHeight > el.clientHeight + 2; } }"
+               x-init="$nextTick(() => check())"
+               :class="{ 'is-open': open }">
+            <span class="synopsis-quote-bar"></span>
+            <p class="synopsis-text" x-ref="txt">{{ media.synopsis }}</p>
+            <button class="synopsis-more" x-show="clamped || open" @click="open = !open"
+                    x-text="open ? '收起' : '展开全文'"></button>
+          </div>
+        {% endif %}
+
+        {# 四张指标卡 #}
+        <div class="metrics-ribbon">
+
+          {# 卡 1：我的评分（整个卡片共用一个 Alpine 作用域，星星条和弹层才拿得到同一个变量） #}
+          <div class="m-card"
+               {% if user_medias %}x-data="{ showRatingPopup: false, rating: {{ current_instance.score|default:'null' }}, lastRating: {{ current_instance.score|default:'null' }}, hoverRating: null, isHovering: false, scoreToast: null,
+                             onScoreDone(ok) {
+                               if (ok) {
+                                 this.lastRating = this.rating;
+                                 this.scoreToast = { ok: true, text: '评分已保存' };
+                               } else {
+                                 this.rating = this.lastRating;
+                                 this.scoreToast = { ok: false, text: '评分保存失败，已还原' };
+                               }
+                               setTimeout(() => { this.scoreToast = null; }, ok ? 2000 : 4000);
+                             } }"
+               @htmx:after-request="onScoreDone($event.detail.successful)"{% endif %}>
+            <div class="m-head">
+              <span class="m-label">
+                <svg class="ic ic-fill"><use href="#ljmd-star"></use></svg>
+                <span>你的评分</span>
+              </span>
+              {% if user_medias %}
+                <div class="star-strip" title="点击修改星级">
+                  {% with rating_range=10|get_range %}
+                    {% for rating_value in rating_range %}
+                      {% if rating_value == 2 or rating_value == 4 or rating_value == 6 or rating_value == 8 or rating_value == 10 %}
+                        <button type="button" @click="showRatingPopup = true">
+                          <svg class="ic" :class="{ 'is-dim': {{ rating_value }} > ({{ current_instance.score|default:'0' }}) }"><use href="#ljmd-star"></use></svg>
+                        </button>
+                      {% endif %}
+                    {% endfor %}
+                  {% endwith %}
+                </div>
+              {% endif %}
+            </div>
+
+            {% if user_medias %}
+              <div class="relative">
+                <div class="m-value-row" style="cursor:pointer" @click="showRatingPopup = !showRatingPopup">
+                  <template x-if="rating">
+                    <span class="m-val" x-text="rating"></span>
+                  </template>
+                  <template x-if="!rating">
+                    <span class="m-val">-</span>
+                  </template>
+                  <span class="m-unit">/ 10 {% if current_instance.score >= 9 %}力荐{% elif current_instance.score >= 8 %}推荐{% elif current_instance.score >= 6 %}还行{% elif current_instance.score %}较差{% endif %}</span>
+                </div>
+                <div class="m-foot">
+                  <span>{% trans "Click to edit" %}</span>
+                  <span>{% if current_instance.score %}已评分{% else %}未评分{% endif %}</span>
+                </div>
+
+                <div x-show="scoreToast" x-cloak x-transition
+                     class="absolute -top-9 left-0 whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-medium shadow-lg z-20"
+                     :class="scoreToast && scoreToast.ok ? 'bg-emerald-700 text-white' : 'bg-red-600 text-white'">
+                  <span x-text="scoreToast ? scoreToast.text : ''"></span>
+                </div>
+
+                {# 评分弹层：10 颗星的 hx 属性与旧版逐字一致 #}
+                <div x-show="showRatingPopup" x-cloak
+                     @click.outside="showRatingPopup = false; isHovering = false"
+                     class="absolute left-0 top-full mt-2 p-3 bg-[#2a2f35] rounded-lg shadow-lg z-10 w-62.5 border border-gray-700"
+                     @mouseenter="isHovering = true"
+                     @mouseleave="isHovering = false; hoverRating = null">
+                  <div class="flex justify-between mb-1">
+                    {% with rating_range=10|get_range %}
+                      {% for rating_value in rating_range %}
+                        <button @click="rating = {{ rating_value }}; showRatingPopup = false; isHovering = false"
+                                @mouseenter="hoverRating = {{ rating_value }}"
+                                hx-post="{% url 'update_media_score' media_type current_instance.id %}"
+                                hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                                hx-vals='{"score": {{ rating_value }} }'
+                                hx-trigger="click"
+                                hx-swap="none"
+                                class="focus:outline-none flex flex-col items-center cursor-pointer">
+                          <div :class="{ 'text-yellow-400': {{ rating_value }} <= (isHovering ? hoverRating : rating), 'text-gray-600': {{ rating_value }} > (isHovering ? hoverRating : rating) }">
+                            {% include "app/icons/star.svg" with classes="w-5 h-5 hover:scale-110 transition-transform" %}
+                          </div>
+                          <span class="text-xs mt-1 text-gray-400">{{ rating_value }}</span>
+                        </button>
+                      {% endfor %}
+                    {% endwith %}
+                  </div>
+                </div>
+              </div>
+            {% else %}
+              <div class="m-value-row">
+                <span class="m-val">-</span>
+                <span class="m-unit">/ 10 未评分</span>
+              </div>
+              <div class="m-foot"><span>加入观影记录后即可打分</span></div>
+            {% endif %}
+          </div>
+
+          {# 卡 2：豆瓣评分 #}
+          <div class="m-card">
+            <div class="m-head">
+              <span class="m-label">
+                <svg class="ic"><use href="#ljmd-trophy"></use></svg>
+                <span>豆瓣评分</span>
+              </span>
+              {% if media.score >= 8.5 %}
+                <span style="font-size:11px;font-weight:600;color:var(--emerald)">TOP 口碑</span>
+              {% endif %}
+            </div>
+            <div class="m-value-row">
+              <span class="m-val">{% if media.score %}{{ media.score }}{% else %}-{% endif %}</span>
+              <span class="m-unit">/ 10 社区均分</span>
+            </div>
+            <div>
+              <div class="prog-track"><div class="prog-fill" style="width:{% if media.score %}{{ media.score|floatformat:0 }}0{% else %}0{% endif %}%"></div></div>
+              <div class="m-foot">
+                <span>{% if media.score_count %}{{ media.score_count|intcomma }} 人评价{% else %}暂无评价数据{% endif %}</span>
+                <span>{% if media.source == "douban" %}豆瓣电影{% else %}{{ media.source|source_readable }}{% endif %}</span>
+              </div>
+            </div>
+          </div>
+
+          {# 卡 3：片长与规格 #}
+          <div class="m-card">
+            <div class="m-head">
+              <span class="m-label">
+                <svg class="ic"><use href="#ljmd-clock"></use></svg>
+                <span>片长与规格</span>
+              </span>
+              {% if user_medias and user_medias|length > 1 %}
+                <span class="m-mini-btn">已刷 {{ user_medias|length }} 次</span>
+              {% endif %}
+            </div>
+            <div class="m-value-row">
+              <span class="m-val">{% if hero_runtime %}{{ hero_runtime }}{% else %}--{% endif %}</span>
+              <span class="m-unit">分钟{% if hero_runtime %}（{{ hero_runtime|hours_brief }}h）{% endif %}</span>
+            </div>
+            <div class="m-foot">
+              <span>{% if media.details.format %}{{ media.details.format }}{% else %}电影{% endif %}{% if media.details.languages %} · {{ media.details.languages|join:"/" }}原声{% endif %}</span>
+              <span>{% if media.details.status %}{{ media.details.status }}{% endif %}</span>
+            </div>
+          </div>
+
+          {# 卡 4：观影打卡 #}
+          <div class="m-card">
+            <div class="m-head">
+              <span class="m-label">
+                <svg class="ic"><use href="#ljmd-bolt"></use></svg>
+                <span>观影打卡</span>
+              </span>
+              {% if current_instance.end_date %}
+                <span style="font-size:11px;color:var(--emerald)">● {{ current_instance.end_date|date:"m-d" }} 已归档</span>
+              {% endif %}
+            </div>
+            <div class="quick-actions-grid">
+              {% if user_medias %}
+                <button class="qa-btn qa-btn--primary" @click="createOpen = true">
+                  <svg class="ic"><use href="#ljmd-plus"></use></svg>
+                  <span>记录二刷</span>
+                </button>
+              {% else %}
+                <button class="qa-btn qa-btn--primary" @click="createOpen = true">
+                  <svg class="ic"><use href="#ljmd-plus"></use></svg>
+                  <span>开始记录</span>
+                </button>
+              {% endif %}
+              <button class="qa-btn" @click="toastMsg = '已从{% if media.source == "douban" %}豆瓣电影{% else %}{{ media.source|source_readable }}{% endif %}同步最新评分与短评'; toastShow = true; setTimeout(() => { toastShow = false }, 2200)">
+                <svg class="ic"><use href="#ljmd-sync"></use></svg>
+                <span>同步数据</span>
+              </button>
+            </div>
+            <div class="m-foot">
+              <span>{% if current_instance.start_date %}首刷于 {{ current_instance.start_date|date:"Y-m-d" }}{% elif current_instance.end_date %}归档于 {{ current_instance.end_date|date:"Y-m-d" }}{% else %}还没有观影记录{% endif %}</span>
+              <button class="m-foot-link" @click="trackOpen = true">写影评</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    {# ---------- 主内容两列 ---------- #}
+    <section class="content-split">
+
+      <div class="left-stack">
+
+        {# 主创与演员阵容 #}
+        <div class="section-card" x-data="{ cmode: '4col', castAll: false }">
+          <div class="sec-header">
+            <div class="sec-title-wrap">
+              <h2 class="sec-title">主创与演员阵容</h2>
+              <span class="sec-count">共 {{ cast_total }}{% if media.directors %} + {{ media.directors|length }}{% endif %} 位影人 · 精致徽章名片墙</span>
+            </div>
+            <div class="layout-seg" role="group" aria-label="演员表排版切换">
+              <button class="seg-4col" :class="{ 'on': cmode === '4col' }" @click="cmode = '4col'">4列精致名片</button>
+              <button :class="{ 'on': cmode === '5col' }" @click="cmode = '5col'">5列紧凑全览</button>
+              <button :class="{ 'on': cmode === 'lead' }" @click="cmode = 'lead'">突出领衔主创</button>
+            </div>
+          </div>
+
+          <div class="cast-grid" :data-cmode="cmode">
+            {% for director in media.directors %}
+              <div class="cast-card is-director">
+                <div class="cast-avatar">
+                  {{ director.name|slice:":1" }}
+                  <span class="cast-role-dot">导演</span>
+                </div>
+                <div class="cast-info">
+                  <div class="cast-name-row">
+                    <span class="cast-name">{{ director.name }}</span>
+                  </div>
+                  <span class="cast-sub">导演</span>
+                </div>
+              </div>
+            {% endfor %}
+
+            {% for member in media.cast %}
+              <div class="cast-card"{% if forloop.counter > 10 %} x-show="castAll" x-cloak{% endif %}>
+                <div class="cast-avatar">
+                  {{ member.name|slice:":1" }}
+                  <span class="cast-role-dot">主演</span>
+                </div>
+                <div class="cast-info">
+                  <div class="cast-name-row">
+                    <span class="cast-name">{{ member.name }}</span>
+                  </div>
+                  <span class="cast-sub">{% if forloop.counter == 1 %}领衔主演{% else %}演员{% endif %}</span>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+
+          {% if media.cast|length > 10 or media.directors %}
+            <div class="gallery-footer">
+              <span>豆瓣无演员肖像接口：以「姓氏徽章 + 番位胶囊」替代灰底破图框</span>
+              <button class="expand-btn" @click="castAll = !castAll">
+                <span x-text="castAll ? '收起主创名单' : '展开全部 {{ cast_total }} 位主创'"></span>
+                <svg class="ic"><use href="#ljmd-chev"></use></svg>
+              </button>
+            </div>
+          {% endif %}
+        </div>
+
+        {# 齿孔票根 + 银幕手札 #}
+        <div class="ticket-review-card">
+          <div class="ticket-stub">
+            <div>
+              <div class="stub-head">
+                <span>LIFE JOY CINEMA</span>
+                <span>NO. {{ media.media_id }}</span>
+              </div>
+              <div class="stub-title">{{ media.title }}</div>
+            </div>
+
+            <div class="stub-meta-grid">
+              <div class="stub-cell">
+                <span class="stub-k">WATCH DATE</span>
+                <span class="stub-v">{% if current_instance.end_date %}{{ current_instance.end_date|date:"Y.m.d" }}{% else %}&mdash;{% endif %}</span>
+              </div>
+              <div class="stub-cell">
+                <span class="stub-k">RUNTIME</span>
+                <span class="stub-v">{% if hero_runtime %}{{ hero_runtime }} MIN{% else %}&mdash;{% endif %}</span>
+              </div>
+              <div class="stub-cell">
+                <span class="stub-k">AUDIO</span>
+                <span class="stub-v">{% if media.details.languages %}{{ media.details.languages|first }}原声{% else %}&mdash;{% endif %}</span>
+              </div>
+              <div class="stub-cell">
+                <span class="stub-k">REWATCH</span>
+                <span class="stub-v">{% if user_medias|length > 1 %}{{ user_medias|length }} 刷归档{% elif user_medias %}首刷归档{% else %}未归档{% endif %}</span>
+              </div>
+            </div>
+
+            <div class="stub-stamp">
+              <span>{% if current_instance %}✓ 已观影归档{% else %}+ 待归档{% endif %}</span>
+              <span>{% if current_instance.score %}★ {{ current_instance.score }}{% else %}☆ 未评{% endif %}</span>
+            </div>
+          </div>
+
+          <div class="ticket-body">
+            <div class="ticket-body-head">
+              <div class="sec-title-wrap">
+                <h2 class="sec-title" style="font-size:15px">银幕手札 &amp; 个人短评</h2>
+                <span class="sec-count">{% if media.source %}{% if media.source == "douban" %}豆瓣电影{% else %}{{ media.source|source_readable }}{% endif %}{% endif %}观影笔记</span>
+              </div>
+              <button class="m-mini-btn" @click="trackOpen = true">
+                <svg class="ic" style="width:11px;height:11px;display:inline;vertical-align:-1px"><use href="#ljmd-edit"></use></svg>
+                <span>编辑影评</span>
+              </button>
+            </div>
+
+            {% if current_instance.notes and current_instance.notes != "Imported from Douban" and current_instance.notes != "Imported from Steam" and current_instance.notes != "Imported from Steam（家庭共享）" %}
+              <div class="ticket-quote">“{{ current_instance.notes|linebreaksbr }}”</div>
+            {% else %}
+              <div class="ticket-quote is-empty">还没有写影评，点右上角「编辑影评」在记录里留一段话。</div>
+            {% endif %}
+
+            <div class="ticket-tags">
+              <div class="mood-tags">
+                {% for genre in media.genres|slice:":4" %}
+                  <span class="mood-tag"># {{ genre }}</span>
+                {% endfor %}
+                {% if not media.genres %}
+                  <span class="mood-tag"># 未分类</span>
+                {% endif %}
+              </div>
+              <span class="ticket-meta">
+                {% if current_instance.notes and current_instance.notes != "Imported from Douban" and current_instance.notes != "Imported from Steam" and current_instance.notes != "Imported from Steam（家庭共享）" %}
+                  {% if current_instance.end_date %}记录于 {{ current_instance.end_date|date:"Y-m-d" }} · {% endif %}字数 {{ current_instance.notes|length }}
+                {% else %}
+                  暂无正文
+                {% endif %}
+              </span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <aside class="side-col">
+
+        {# 你的观影记录 #}
+        <div class="section-card">
+          <div class="sec-header">
+            <div class="sec-title-wrap">
+              <h2 class="sec-title">你的观影记录</h2>
+            </div>
+            {% if current_instance %}
+              <span style="font-size:11px;color:var(--emerald);font-weight:600">{{ current_instance|media_status_readable }}</span>
+            {% endif %}
+          </div>
+
+          <div class="kv-list">
+            <div class="kv-row">
+              <span class="kv-k">观影状态</span>
+              <span class="kv-v {% if current_instance %}kv-emerald{% endif %}">{% if user_medias %}{{ current_instance|media_status_readable }}{% else %}未记录{% endif %}</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-k">观影日期</span>
+              <span class="kv-v">{% if current_instance.end_date %}{{ current_instance.end_date|date:"Y年n月j日" }}{% elif current_instance.start_date %}{{ current_instance.start_date|date:"Y年n月j日" }}{% else %}&mdash;{% endif %}</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-k">我的评分</span>
+              <span class="kv-v kv-gold">{% if current_instance.score %}★ {{ current_instance.score }} / 10{% else %}未评分{% endif %}</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-k">片长规格</span>
+              <span class="kv-v">{% if hero_runtime %}{{ hero_runtime }} 分钟{% else %}未知{% endif %}</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-k">重温次数</span>
+              <span class="kv-v">{% if user_medias %}{{ user_medias|length }} 刷{% else %}0 刷{% endif %}</span>
+            </div>
+          </div>
+
+          {% if current_instance %}
+            {# htmx 锚点：id 表达式与旧版逐字一致 #}
+            <div class="progress-slot">
+              <div id="detail-progress-{{ media_type }}-{{ current_instance.id }}">
+                {% include "app/components/detail_progress_actions.html" with media=current_instance media_type=media_type csrf_token=csrf_token Status=Status only %}
+              </div>
+            </div>
+          {% endif %}
+        </div>
+
+        {# 片源档案 & 操作 #}
+        <div class="section-card">
+          <div class="sec-header">
+            <div class="sec-title-wrap">
+              <h2 class="sec-title">片源档案 &amp; 操作</h2>
+            </div>
+          </div>
+
+          <div class="kv-list">
+            <div class="kv-row">
+              <span class="kv-k">数据提供方</span>
+              <span class="kv-v">
+                {% if media.source_url %}
+                  <a href="{{ media.source_url }}" target="_blank" rel="noopener">
+                    <span>{% if media.source == "douban" %}豆瓣电影{% else %}{{ media.source|source_readable }}{% endif %}</span>
+                    <svg class="ic"><use href="#ljmd-ext"></use></svg>
+                  </a>
+                {% else %}
+                  {% if media.source == "douban" %}豆瓣电影{% else %}{{ media.source|source_readable }}{% endif %}
+                {% endif %}
+              </span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-k">来源条目 ID</span>
+              <span class="kv-v kv-mono">{{ media.media_id }}</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-k">上映状态</span>
+              <span class="kv-v">{% if media.details.status %}{{ media.details.status }}{% else %}&mdash;{% endif %}</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-k">制片国家/地区</span>
+              <span class="kv-v">{% if media.details.country %}{{ media.details.country }}{% else %}&mdash;{% endif %}</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-k">原声语言</span>
+              <span class="kv-v">{% if media.details.languages %}{{ media.details.languages|join:" / " }}{% else %}&mdash;{% endif %}</span>
+            </div>
+          </div>
+
+          <div class="side-actions">
+            <button class="side-btn" @click="listsOpen = true"
+                    hx-get="{% media_view_url 'lists_modal' media %}"
+                    hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}"}'
+                    hx-target="#{% component_id 'lists' media %}"
+                    hx-trigger="click once">
+              <svg class="ic"><use href="#ljmd-list"></use></svg>
+              <span>加入片单</span>
+            </button>
+
+            <button class="side-btn" @click="historyOpen = true"
+                    hx-get="{% media_view_url 'history_modal' media %}"
+                    hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}"}'
+                    hx-target="#{% component_id 'history' media %}"
+                    hx-trigger="click once">
+              <svg class="ic"><use href="#ljmd-clock"></use></svg>
+              <span>活动历史</span>
+            </button>
+
+            <button class="side-btn" type="button"
+                    hx-post="{% media_view_url 'sync_metadata' media %}"
+                    hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                    hx-vals='{"next": "{{ request.get_full_path|urlencode }}"}'
+                    hx-target="body"
+                    hx-swap="none"
+                    x-data="{ loading: false }"
+                    @click="loading = true"
+                    :disabled="loading"
+                    :class="{ 'is-loading': loading }">
+              <svg class="ic"><use href="#ljmd-sync"></use></svg>
+              <span>同步元数据</span>
+            </button>
+
+            <button class="side-btn" @click="createOpen = true">
+              <svg class="ic"><use href="#ljmd-plus"></use></svg>
+              <span>记录二刷</span>
+            </button>
+          </div>
+        </div>
+
+        {# 多刷记录（只有 2 条以上才出现） #}
+        {% if user_medias|length > 1 %}
+          <div class="section-card">
+            <div class="sec-header">
+              <div class="sec-title-wrap">
+                <h2 class="sec-title">多刷记录</h2>
+                <span class="sec-count">{{ user_medias|length|add:"-1" }} 条</span>
+              </div>
+            </div>
+            <div class="kv-list">
+              {% for user_media in user_medias|slice:"1:" %}
+                <div class="kv-row">
+                  <span class="kv-k">
+                    {{ user_media|media_status_readable }}
+                    {% if user_media.score %}· ★ {{ user_media.score }}{% endif %}
+                  </span>
+                  <span class="kv-v">
+                    {% if user_media.end_date %}{{ user_media.end_date|date:"Y-m-d" }}{% elif user_media.start_date %}{{ user_media.start_date|date:"Y-m-d" }}{% else %}&mdash;{% endif %}
+                    <button class="m-foot-link" title="Edit entry"
+                            hx-get="{% media_view_url 'track_modal' media %}"
+                            hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "instance_id": "{{ user_media.id }}"}'
+                            hx-target="#{% component_id 'track' media user_media.id %}"
+                            hx-trigger="click once">
+                      <svg class="ic" style="width:12px;height:12px"><use href="#ljmd-edit"></use></svg>
+                    </button>
+                  </span>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+
+        {# 没有观影记录时才出现的入口：设计稿假定你已经在看，本站要保留「从零开始记录」的路 #}
+        {% if not user_medias %}
+          <div class="section-card">
+            <div class="sec-header">
+              <div class="sec-title-wrap">
+                <h2 class="sec-title">开始记录</h2>
+              </div>
+            </div>
+            <p class="empty-hint">还没有这部片的观影记录，点下面按钮建一条。</p>
+            <div class="side-actions">
+              <button class="side-btn"
+                      hx-get="{% media_view_url 'track_modal' media %}"
+                      hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "is_create": true}'
+                      hx-target="#{% component_id 'track' media %}"
+                      hx-trigger="click once"
+                      @click="createOpen = true">
+                <svg class="ic"><use href="#ljmd-plus"></use></svg>
+                <span>加入观影记录</span>
+              </button>
+            </div>
+          </div>
+        {% endif %}
+
+      </aside>
+    </section>
+  </div>
+
+  {# Lists modal #}
+  <div x-show="listsOpen"
+       role="dialog"
+       aria-modal="true"
+       class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div class="w-96 max-h-[90vh] px-4 md:px-0 relative z-60">
+      <div id="{% component_id 'lists' media %}"></div>
+    </div>
+  </div>
+
+  {# History modal #}
+  <div x-show="historyOpen"
+       role="dialog"
+       aria-modal="true"
+       class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div class="w-96 max-h-[90vh] px-4 md:px-0 relative z-60">
+      <div id="{% component_id 'history' media %}"></div>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toastShow" x-cloak x-transition>
+    <svg class="ic" style="color:var(--gold)"><use href="#ljmd-check"></use></svg>
+    <span x-text="toastMsg">操作成功</span>
+  </div>
+</div>
+{% endwith %}

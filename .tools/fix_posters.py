@@ -20,12 +20,18 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime
+from pathlib import Path
 
-DB = r"C:\Users\USERNAME\Downloads\life joy\yamtrack\src\db\db.sqlite3"
-BACKUP_DIR = r"C:\Users\USERNAME\Downloads\life joy\yamtrack\.tools\backups"
+# 仓库根：可用 YAMTRACK_ROOT 环境变量覆盖，否则按脚本位置往上推两级。
+ROOT = os.environ.get("YAMTRACK_ROOT") or str(Path(__file__).resolve().parent.parent)
+PROJECT = os.path.dirname(ROOT)  # 上一级：life joy
+OUT_DIR = os.path.join(PROJECT, "ui-redesign", "shots", "impl")
+
+DB = os.path.join(ROOT, "src", "db", "db.sqlite3")
+BACKUP_DIR = os.path.join(ROOT, ".tools", "backups")
 BACKUP_PATH = os.path.join(BACKUP_DIR, "db_before_poster_fix.sqlite3")
-REPORT = r"C:\Users\USERNAME\Downloads\life joy\ui-redesign\shots\impl\L-report.txt"
-MANIFEST = r"C:\Users\USERNAME\Downloads\life joy\ui-redesign\shots\impl\L-manifest.json"
+REPORT = os.path.join(OUT_DIR, "L-report.txt")
+MANIFEST = os.path.join(OUT_DIR, "L-manifest.json")
 
 NEW_URL = "https://media.steampowered.com/steam/apps/{appid}/library_600x900.jpg"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"

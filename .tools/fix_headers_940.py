@@ -4,11 +4,17 @@
 """
 import argparse, csv, hashlib, json, os, sqlite3, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
-DB = r"C:\Users\USERNAME\Downloads\life joy\yamtrack\src\db\db.sqlite3"
-CSV = r"C:\Users\USERNAME\Downloads\life joy\ui-redesign\shots\impl\P1-header-scan.csv"
-OUT = r"C:\Users\USERNAME\Downloads\life joy\ui-redesign\shots\impl"
-BACKUPS = r"C:\Users\USERNAME\Downloads\life joy\yamtrack\.tools\backups"
+# 仓库根：可用 YAMTRACK_ROOT 环境变量覆盖，否则按脚本位置往上推两级。
+ROOT = os.environ.get("YAMTRACK_ROOT") or str(Path(__file__).resolve().parent.parent)
+PROJECT = os.path.dirname(ROOT)  # 上一级：life joy
+OUT_DIR = os.path.join(PROJECT, "ui-redesign", "shots", "impl")
+
+DB = os.path.join(ROOT, "src", "db", "db.sqlite3")
+CSV = os.path.join(OUT_DIR, "P1-header-scan.csv")
+OUT = OUT_DIR
+BACKUPS = os.path.join(ROOT, ".tools", "backups")
 UA = {"User-Agent": "Mozilla/5.0"}
 PROXY = "http://127.0.0.1:7897"
 BASE = "http://127.0.0.1:8001"

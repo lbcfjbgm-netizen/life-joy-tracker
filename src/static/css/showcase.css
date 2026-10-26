@@ -64,7 +64,7 @@ html[data-theme="light"] .lj-showcase .lj-episode { --lj-mark: #3f6a4a; }
 /* 一屏高度：1600×1000 下减掉顶栏 + 标题 + 筛选栏 + 底部留白，正好不出纵向滚动条 */
 .lj-showcase.lib-stage {
   position: relative;
-  height: calc(100dvh - 297px);
+  height: calc(100dvh - 287px);
   min-height: 420px;
 }.lj-showcase .lib-grid {
   display: grid;
@@ -945,7 +945,7 @@ html[data-theme="light"] .lj-showcase .libcard.libcard--active {
 }
 
 /* ---- 9.2 首卡模式：放开舞台高度，允许纵向滚动 ---------------------------- */
-/* 基础 .lj-showcase.lib-stage 是 height:calc(100dvh - 297px) + 网格 overflow:hidden；
+/* 基础 .lj-showcase.lib-stage 是 height:calc(100dvh - 287px) + 网格 overflow:hidden；
    这里只把高度约束和外层裁切放开，不给 .lib-grid 加新高度，行高回到 auto。 */
 .lj-showcase.lib-stage.is-lead {
   height: auto;
@@ -1432,12 +1432,17 @@ html[data-theme="light"] .lj-genre-panel .lj-genre-clear:hover {
 }
 #lj-density-pill {
   position: fixed;
-  top: 16px;
-  right: var(--lj-dp-right, 252px);
+  top: 12px;
+  /* 右偏移挂在 --lj-dp-right 上，JS 用「动作区实测宽度 w + 16 + 12」算出来，
+     其中 16 是顶栏改版前的固定内边距。顶栏内边距现在跟着设计稿走
+     （--lj-tp-pad = clamp(20px,3vw,40px)，1600 宽下是 40px），
+     这里补回差值，胶囊才不会压住右侧药丸；JS 不用动。 */
+  right: calc(var(--lj-dp-right, 252px) + var(--lj-tp-pad, 40px) - 16px);
   z-index: 51;
-  height: 32px;
+  /* 高 30、padding 1、border 1 → 内容区正好 26，和里面的药丸同高 */
+  height: 30px;
   margin: 0;
-  padding: 2px;
+  padding: 1px;
   border: 1px solid #2c3136;
   border-radius: 999px;
   background: #23272b;
@@ -1449,7 +1454,7 @@ html[data-theme="light"] #lj-density-pill {
   background: #fffdf8;
   box-shadow: 0 10px 24px -18px rgba(72, 55, 30, .35);
 }
-/* 顶栏高 64、胶囊高 32，top:16 正好垂直居中 */
+/* 顶栏高 54、胶囊高 30，top:12 正好垂直居中（12 + 30/2 = 27 = 顶栏中心） */
 
 /* 按钮：基础尺寸由模板 Tailwind 类保底，这里只做紧凑化与配色 */
 #lj-density-pill .lj-dp-btn {
@@ -1571,12 +1576,18 @@ main#main-content .relative.grow:has(> input[type="text"]) {
    解法：巨屏下让筛选行回到普通流，并把它里面的东西全收起 —— 巨屏不需要布局切换、
    状态/排序/分类，密度胶囊自己已经是 fixed 独立的，不受影响。
    （hero.css 不许改，所以覆盖写在这里。） */
+/* ⚠ 这里全部加 !important，是为了压住 hero.css 里同选择器的那条 fixed/z-index:5。
+   正常整页加载时本文件排在 hero.css 之后，光靠后加载就够；但软导航补样式表时
+   顺序一旦被弄反（hero.css 排到后面），这条覆盖就会失效 → 筛选行重新变成
+   position:fixed; z-index:5 的层叠上下文 → 里面的胶囊 z-index:52 只在内部比较，
+   整颗被 z-index:50 的顶栏盖住（元素有尺寸但看不见）。
+   加 !important 后本文件里这条永远赢，跟加载顺序无关，双保险。 */
 main#main-content:has(.lj-showcase.lj-hero) #filter-form + div {
-  position: static;
-  inset: auto;
-  top: auto;
-  right: auto;
-  z-index: auto;
+  position: static !important;
+  inset: auto !important;
+  top: auto !important;
+  right: auto !important;
+  z-index: auto !important;
   margin: 0;
 }
 /* ⚠ 不能写 `x > *:not(#pill)`：胶囊外面还包着一层 .flex.gap-2，
@@ -1588,7 +1599,7 @@ main#main-content:has(.lj-showcase.lj-hero) #filter-form + div [aria-label="卡�
 main#main-content:has(.lj-showcase.lj-hero) #lj-density-pill {
   display: flex !important;
   position: fixed !important;
-  top: 16px !important;
+  top: 12px !important;
   /* hero 本身是 position:fixed; inset:0; z-index:2，会盖住顶栏那一片，
      点下去命中的是 hero 而不是胶囊。把胶囊抬到 hero 之上（仍低于顶栏 50 之外
      的层级用 52 保证可点，但不影响顶栏自身按钮）。 */
@@ -1604,6 +1615,14 @@ main#main-content:has(.lj-showcase.lj-hero) .lj-showcase.lj-hero > * {
 }
 main#main-content:has(.lj-showcase.lj-hero) .lj-genre-dd {
   display: none;
+}
+
+/* 窄屏仍要收起胶囊（设计如此，见 11.1 那条 max-width:1180px）。
+   ⚠ 必须写在上面那条巨屏 #lj-density-pill{display:flex !important} 之后：
+   两边都是 !important、选择器权重也一样，靠后写的赢。写在前面会被巨屏规则反超，
+   结果 1100px 宽看巨屏页时胶囊照样挤在窄顶栏里（实测 239px 宽压在动作区上）。 */
+@media (max-width: 1180px) {
+  main#main-content:has(.lj-showcase.lj-hero) #lj-density-pill { display: none !important; }
 }
 
 /* ---- 12. 巨屏简介：两行硬截会咬在半个词上，放宽到五行 ------------------

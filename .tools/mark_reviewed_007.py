@@ -11,7 +11,13 @@ django.setup()
 
 from app.models import AICopy
 
-patches = json.load(open(r"C:\Users\USERNAME\Downloads\ui-redesign\quotes\audit-007-patches.json", encoding="utf-8"))
+# 素材目录在 ...\Downloads\ui-redesign\quotes（从 src 往上数三级）
+REPO_ROOT = os.path.dirname(SRC_DIR)                       # ...\yamtrack
+PROJECT_ROOT = os.path.dirname(REPO_ROOT)                  # ...\life joy
+_DOWNLOADS = os.path.dirname(PROJECT_ROOT)                 # ...\Downloads
+PATCHES = os.path.join(_DOWNLOADS, "ui-redesign", "quotes", "audit-007-patches.json")
+
+patches = json.load(open(PATCHES, encoding="utf-8"))
 # 留在数据里的 = pass + rewrite + downgrade（drop=0 条）
 keep_ids = list(patches["pass"]) + [x["item_id"] for x in patches["rewrite"]] + [x["item_id"] for x in patches["downgrade"]]
 drop_ids = [x["item_id"] for x in patches["drop"]]

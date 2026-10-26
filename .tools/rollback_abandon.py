@@ -19,10 +19,10 @@ import os
 import sqlite3
 import sys
 
-ROOT = r"C:\Users\USERNAME\Downloads\life joy"
-DB = os.path.join(ROOT, r"yamtrack\src\db\db.sqlite3")
-ROLLBACK = os.path.join(ROOT, r"yamtrack\.tools\backups\abandon_rollback.json")
-BAK_DB = os.path.join(ROOT, r"yamtrack\.tools\backups\db_before_abandon.sqlite3")
+ROOT = os.environ.get("YAMTRACK_ROOT") or str(Path(__file__).resolve().parent.parent)
+DB = os.path.join(ROOT, "src", "db", "db.sqlite3")
+ROLLBACK = os.path.join(ROOT, ".tools", "backups", "abandon_rollback.json")
+BAK_DB = os.path.join(ROOT, ".tools", "backups", "db_before_abandon.sqlite3")
 
 
 def main():

@@ -1,338 +1,1423 @@
 {% extends "base.html" %}
 {% load static %}
 {% load app_tags %}
+{% load humanize %}
 
 {% block title %}
   年度游玩报告 · {{ year }} - LIFE JOY
 {% endblock title %}
 
-{% block content %}
-  {% comment %}
-    年度报告页：整页一次性渲染，不走 hx-boost 软导航（顶栏那个入口标了
-    hx-boost="false"），否则 block js 里的 Chart.js 不会重跑、图会空白，
-    跟统计页是同一个坑。
+{% comment %}
+  年度报告页的视觉层：照 ui-redesign/stats-year-1.html 那版设计稿重做。
 
-    配色只用两套：暗色沿用 bg-[#2a2f35] / bg-[#39404b] / text-gray-400，
-    亮色由 main.css 里已有的 html[data-theme="light"] 覆盖块自动接管，
-    所以这里不用手写亮色类名。下面 <style> 只管字号、条形填充和图表容器，
-    全部限定在 .lj-yir 作用域内，不会污染别的页面。
-  {% endcomment %}
+  ⚠️ 三条铁律，动之前先看：
+
+  1. 年份切换链接的 href 表达式一个字都不许改（见下面 content 块里的注释）。
+     它必须生成「绝对路径 + 显式带 tab=year」，否则从 /statistics?tab=year
+     点年份会变成 /statistics?year=2025 丢掉 tab，视图回落到统计总览。
+
+  2. 所有样式挂 .lj-yir 作用域，变量一律 --yir- 开头（统计总览页用的是 --st-）。
+     写成普通声明的类选择器优先级高于 main.css 里任何 @layer 内的规则，
+     所以能压住共用组件的 Tailwind 类；反过来，元素级重置必须包进
+     @layer base，否则会把 bg-indigo-600 / p-3 这类 utility 全压死
+     （详情页踩过：5 个按钮变透明）。
+
+  3. 两个 canvas 是验收硬指标（#yir-genre-chart / #yir-age-chart），
+     它们只能画在模板自己的 {% block js %} 里，且必须是整页加载
+     （所以年份链接、页签链接全都 hx-boost="false"）。
+{% endcomment %}
+{% block extra_head %}
   <style>
+    /* ==================================================================
+       0. 主题变量：只作用于 .lj-yir，不碰全局
+       ================================================================== */
     .lj-yir {
-      --lj-yir-accent: #818cf8;
-      --lj-yir-accent-2: #34d399;
-      --lj-yir-track: rgba(255, 255, 255, .08);
+      --yir-radius: 14px;
+      --yir-ease: cubic-bezier(.22, .8, .24, 1);
+      --yir-serif: "Noto Serif SC", "Source Han Serif SC", "Source Han Serif CN", "Songti SC", "STSong", serif;
+      --yir-mono: "JetBrains Mono", "Cascadia Mono", "Consolas", ui-monospace, monospace;
+
+      /* 暗色（默认）：夜间深曜石 */
+      --yir-bg-elev: #1b1f25;
+      --yir-panel: #1d2229;
+      --yir-panel-2: #232932;
+      --yir-card: rgba(29, 34, 41, .86);
+      --yir-card-hover: rgba(38, 45, 54, .94);
+      --yir-ink: #f4f1ea;
+      --yir-ink2: rgba(244, 241, 234, .76);
+      --yir-ink3: rgba(244, 241, 234, .48);
+      --yir-line: rgba(255, 255, 255, .09);
+      --yir-line2: rgba(255, 255, 255, .055);
+      --yir-warm-line: rgba(232, 201, 130, .38);
+      --yir-gold: #e8c982;
+      --yir-gold-soft: rgba(232, 201, 130, .14);
+      --yir-gold-line: rgba(232, 201, 130, .30);
+      --yir-violet: #9d8df7;
+      --yir-violet-soft: rgba(139, 122, 245, .15);
+      --yir-emerald: #34d399;
+      --yir-emerald-bg: #10b981;
+      --yir-skylight: inset 0 1px 0 rgba(255, 255, 255, .07);
+      --yir-shadow: 0 22px 54px -14px rgba(0, 0, 0, .62);
+      --yir-shadow-s: 0 8px 24px -6px rgba(0, 0, 0, .42);
+      --yir-hover: rgba(255, 255, 255, .06);
+      --yir-track: rgba(255, 255, 255, .075);
+      --yir-tag-bg: rgba(255, 255, 255, .055);
+      --yir-warn-bg: rgba(232, 201, 130, .08);
+      --yir-warn-line: rgba(232, 201, 130, .26);
     }
+    /* 亮色：日间暖纸画册 */
     html[data-theme="light"] .lj-yir {
-      --lj-yir-accent: #4f46e5;
-      --lj-yir-accent-2: #047857;
-      --lj-yir-track: rgba(38, 34, 28, .10);
+      --yir-bg-elev: #ebe4d6;
+      --yir-panel: #fffcf6;
+      --yir-panel-2: #f9f3e8;
+      --yir-card: rgba(255, 252, 246, .82);
+      --yir-card-hover: #ffffff;
+      --yir-ink: #221d17;
+      --yir-ink2: rgba(34, 29, 23, .78);
+      --yir-ink3: rgba(34, 29, 23, .52);
+      --yir-line: rgba(48, 34, 18, .12);
+      --yir-line2: rgba(48, 34, 18, .07);
+      --yir-warm-line: rgba(154, 107, 31, .36);
+      --yir-gold: #9a6b1f;
+      --yir-gold-soft: rgba(154, 107, 31, .11);
+      --yir-gold-line: rgba(154, 107, 31, .26);
+      --yir-violet: #5f4bc4;
+      --yir-violet-soft: rgba(95, 75, 196, .10);
+      --yir-emerald: #0d9468;
+      --yir-emerald-bg: #0f9f6e;
+      --yir-skylight: inset 0 1px 0 rgba(255, 255, 255, .92);
+      --yir-shadow: 0 4px 12px rgba(48, 34, 18, .06), 0 24px 52px -16px rgba(48, 34, 18, .16);
+      --yir-shadow-s: 0 2px 5px rgba(48, 34, 18, .05), 0 14px 32px -12px rgba(48, 34, 18, .11);
+      --yir-hover: rgba(48, 34, 18, .05);
+      --yir-track: rgba(48, 34, 18, .09);
+      --yir-tag-bg: rgba(48, 34, 18, .055);
+      --yir-warn-bg: rgba(154, 107, 31, .09);
+      --yir-warn-line: rgba(154, 107, 31, .28);
     }
-    /* 开场大字：等价 text-6xl 以上，用 clamp 让它随屏宽自己缩放 */
-    .lj-yir-hero-num {
-      font-size: clamp(3.25rem, 9vw, 7rem);
-      line-height: .95;
-      font-weight: 800;
-      letter-spacing: -.03em;
+
+    /* ==================================================================
+       1. 元素级重置 —— 必须待在 @layer base 里
+       main.css 是 Tailwind 4 产物（@layer theme, base, components, utilities），
+       不在任何 layer 里的普通声明会赢过所有 utility。所以这些「按钮/链接
+       默认长什么样」的规则一律进 base 层，让 bg-indigo-600、p-3 这类
+       utility 依然能盖住它们。
+       ================================================================== */
+    @layer base {
+      .lj-yir button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; }
+      .lj-yir a { color: inherit; text-decoration: none; }
+      .lj-yir p, .lj-yir h1, .lj-yir h2, .lj-yir h3 { margin: 0; }
+      .lj-yir img { display: block; max-width: 100%; }
+    }
+
+    /* 抽屉收起时必须真的不显示：author 层的 display 会盖掉浏览器默认的
+       [hidden]{display:none}，所以这里显式再写一遍。 */
+    .lj-yir [hidden] { display: none !important; }
+
+    /* ==================================================================
+       2. 页面外壳 + 命令式页头
+       ================================================================== */
+    .lj-yir.yir-shell {
+      max-width: 1320px;
+      margin: 0 auto;
+      color: var(--yir-ink);
       font-variant-numeric: tabular-nums;
     }
-    .lj-yir-hero-unit { font-size: clamp(1.25rem, 3vw, 2rem); font-weight: 600; }
-    .lj-yir-track { background: var(--lj-yir-track); }
-    .lj-yir-fill { background: var(--lj-yir-accent); }
-    .lj-yir-fill-2 { background: var(--lj-yir-accent-2); }
-    .lj-yir-chart { position: relative; height: 220px; }
-    .lj-yir-chart-tall { position: relative; height: 260px; }
-    .lj-yir-dot { width: .6rem; height: .6rem; border-radius: 9999px; }
-    .lj-yir-num { font-variant-numeric: tabular-nums; }
-    .lj-yir-cover { background-color: #3e454d; }
-    html[data-theme="light"] .lj-yir-cover { background-color: #e8dfcd; }
-    @media (max-width: 640px) {
-      .lj-yir-chart, .lj-yir-chart-tall { height: 200px; }
+
+    .yir-cmd {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      min-height: 60px;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--yir-line2);
+    }
+    .yir-cmd-title-group { display: flex; flex-direction: column; gap: 2px; }
+    .yir-eyebrow-line {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      color: var(--yir-gold);
+    }
+    .yir-eyebrow-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--yir-gold);
+      box-shadow: 0 0 8px var(--yir-gold);
+      flex: 0 0 auto;
+    }
+    .yir-cmd-headline { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    .lj-yir .yir-cmd-title {
+      font-family: var(--yir-serif);
+      font-size: clamp(21px, 2vw, 25px);
+      font-weight: 700;
+      letter-spacing: .02em;
+      color: var(--yir-ink);
+      line-height: 1.3;
+    }
+    .yir-cmd-sub { font-size: 12.5px; color: var(--yir-ink3); line-height: 1.5; }
+    .yir-cmd-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+    /* 共用的三页签组件（app/components/stats_tabs.html）不许改本体，
+       所以只能从外面用这层壳子把它的下划线样式改造成设计稿的分段胶囊。
+       激活态用的是组件里写死的 border-indigo-500 类名，这里按类名子串匹配；
+       万一以后组件换了类名，最坏情况只是三个页签都显示成未选中，不影响跳转。 */
+    .yir-seg-host { display: inline-flex; }
+    .lj-yir .yir-seg-host > nav {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 3px;
+      margin: 0;
+      border: 1px solid var(--yir-line);
+      border-radius: 10px;
+      background: var(--yir-bg-elev);
+      box-shadow: var(--yir-skylight);
+      overflow: visible;
+    }
+    .lj-yir .yir-seg-host > nav > a {
+      display: inline-flex;
+      align-items: center;
+      height: 30px;
+      padding: 0 12px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--yir-ink2);
+      white-space: nowrap;
+      text-decoration: none;
+      transition: all .2s var(--yir-ease);
+    }
+    .lj-yir .yir-seg-host > nav > a:hover { color: var(--yir-ink); background: var(--yir-hover); }
+    .lj-yir .yir-seg-host > nav > a[class*="border-indigo-500"] {
+      background: var(--yir-panel);
+      color: var(--yir-gold);
+      font-weight: 600;
+      border-color: var(--yir-gold-line);
+      box-shadow: var(--yir-skylight), var(--yir-shadow-s);
+    }
+
+    /* 年份切换胶囊 */
+    .yir-year-pills {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 3px;
+      border: 1px solid var(--yir-line);
+      border-radius: 10px;
+      background: var(--yir-bg-elev);
+      box-shadow: var(--yir-skylight);
+    }
+    .lj-yir .yir-year-pill {
+      display: inline-flex;
+      align-items: center;
+      height: 30px;
+      padding: 0 11px;
+      border-radius: 7px;
+      font-family: var(--yir-mono);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--yir-ink2);
+      text-decoration: none;
+      transition: all .18s var(--yir-ease);
+    }
+    .lj-yir .yir-year-pill:hover { color: var(--yir-ink); background: var(--yir-hover); }
+    .lj-yir .yir-year-pill.on {
+      background: var(--yir-gold);
+      color: #16130e;
+      box-shadow: 0 2px 10px rgba(232, 201, 130, .28);
+    }
+    html[data-theme="light"] .lj-yir .yir-year-pill.on { color: #fffcf6; }
+
+    /* ==================================================================
+       3. Hero 年度纪事横幅
+       ================================================================== */
+    .yir-hero {
+      position: relative;
+      display: grid;
+      grid-template-columns: 1.15fr 1fr;
+      gap: 18px;
+      padding: 18px 22px;
+      margin-bottom: 14px;
+      border: 1px solid var(--yir-line);
+      border-radius: var(--yir-radius);
+      background: var(--yir-card);
+      box-shadow: var(--yir-skylight), var(--yir-shadow-s);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      overflow: hidden;
+    }
+    .yir-hero::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--yir-gold) 0%, var(--yir-violet) 55%, var(--yir-emerald) 100%);
+      opacity: .78;
+    }
+    .yir-hero-left {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 8px;
+      padding-right: 12px;
+      border-right: 1px solid var(--yir-line2);
+      min-width: 0;
+    }
+    .yir-hero-kicker { font-size: 12.5px; color: var(--yir-ink2); line-height: 1.5; }
+    .yir-hero-kicker strong { color: var(--yir-ink); font-weight: 600; }
+    .yir-hero-num-row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 2px 0;
+    }
+    .yir-hero-giant {
+      font-family: var(--yir-serif);
+      font-size: clamp(46px, 4.6vw, 64px);
+      font-weight: 800;
+      line-height: .96;
+      letter-spacing: -.025em;
+      color: var(--yir-gold);
+      font-variant-numeric: tabular-nums;
+    }
+    .yir-hero-unit { font-family: var(--yir-serif); font-size: 18px; font-weight: 700; color: var(--yir-ink); }
+    .yir-hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border: 1px solid var(--yir-gold-line);
+      border-radius: 999px;
+      background: var(--yir-gold-soft);
+      color: var(--yir-gold);
+      font-size: 11.5px;
+      font-weight: 600;
+    }
+    .yir-truth {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 7px 11px;
+      border: 1px solid var(--yir-warn-line);
+      border-left: 3px solid var(--yir-gold);
+      border-radius: 9px;
+      background: var(--yir-warn-bg);
+      font-size: 11.5px;
+      color: var(--yir-ink2);
+    }
+    .yir-truth-text { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+    .yir-truth-text b { color: var(--yir-ink); font-weight: 600; }
+    .lj-yir .yir-caliber-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 9px;
+      border: 1px solid var(--yir-gold-line);
+      border-radius: 6px;
+      background: var(--yir-gold-soft);
+      color: var(--yir-gold);
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+      transition: all .18s var(--yir-ease);
+    }
+    .lj-yir .yir-caliber-btn:hover { background: var(--yir-gold); color: #16130e; }
+
+    .yir-drawer {
+      grid-column: 1 / -1;
+      margin-top: 2px;
+      padding: 12px 14px;
+      border: 1px dashed var(--yir-gold-line);
+      border-radius: 10px;
+      background: var(--yir-bg-elev);
+      font-size: 12px;
+      line-height: 1.65;
+      color: var(--yir-ink2);
+    }
+    .yir-drawer b { color: var(--yir-ink); }
+
+    /* 右侧 2×2 核心指标 */
+    .yir-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .yir-kpi {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 2px;
+      padding: 11px 14px;
+      border: 1px solid var(--yir-line2);
+      border-radius: 11px;
+      background: var(--yir-panel-2);
+      box-shadow: var(--yir-skylight);
+      transition: border-color .2s var(--yir-ease), transform .2s var(--yir-ease);
+    }
+    .yir-kpi:hover { border-color: var(--yir-warm-line); transform: translateY(-1px); }
+    .yir-kpi-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--yir-ink3);
+      letter-spacing: .04em;
+    }
+    .yir-kpi-tag {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: var(--yir-tag-bg);
+      color: var(--yir-ink2);
+      white-space: nowrap;
+    }
+    .yir-kpi-val { display: flex; align-items: baseline; gap: 5px; margin: 4px 0 2px; }
+    .yir-kpi-num {
+      font-family: var(--yir-serif);
+      font-size: 24px;
+      font-weight: 800;
+      line-height: 1.05;
+      color: var(--yir-ink);
+      font-variant-numeric: tabular-nums;
+    }
+    .yir-kpi-num.is-gold { color: var(--yir-gold); }
+    .yir-kpi-num.is-emerald { color: var(--yir-emerald); }
+    .yir-kpi-num.is-violet { color: var(--yir-violet); }
+    .yir-kpi-unit { font-size: 12px; font-weight: 600; color: var(--yir-ink2); }
+    .yir-kpi-foot {
+      font-size: 11px;
+      color: var(--yir-ink3);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ==================================================================
+       4. 通用卡片 / 区块头
+       ================================================================== */
+    .yir-card {
+      display: flex;
+      flex-direction: column;
+      padding: 16px 18px;
+      border: 1px solid var(--yir-line);
+      border-radius: var(--yir-radius);
+      background: var(--yir-card);
+      box-shadow: var(--yir-skylight), var(--yir-shadow-s);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      min-width: 0;
+    }
+    .yir-sec-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--yir-line2);
+    }
+    .yir-sec-eyebrow {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: var(--yir-gold);
+      margin-bottom: 2px;
+    }
+    .lj-yir .yir-sec-title {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-family: var(--yir-serif);
+      font-size: 17px;
+      font-weight: 700;
+      line-height: 1.35;
+      color: var(--yir-ink);
+    }
+    .yir-sec-title-aside { font-size: 13px; font-weight: 500; color: var(--yir-gold); }
+    .yir-sec-sub { font-size: 11.5px; color: var(--yir-ink3); margin-top: 2px; line-height: 1.5; }
+    .yir-sec-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      flex: 0 0 auto;
+      padding: 4px 9px;
+      border: 1px solid var(--yir-line);
+      border-radius: 999px;
+      background: var(--yir-tag-bg);
+      font-size: 11px;
+      color: var(--yir-ink2);
+      white-space: nowrap;
+    }
+    .yir-foot-note {
+      margin-top: 12px;
+      padding-top: 9px;
+      border-top: 1px solid var(--yir-line2);
+      font-size: 11px;
+      line-height: 1.45;
+      color: var(--yir-ink3);
+    }
+    .yir-foot-note b { color: var(--yir-ink2); }
+
+    /* ==================================================================
+       5. 首屏主分栏：左 Top 5 榜单 + 右通关海报墙
+       ================================================================== */
+    .yir-split {
+      display: grid;
+      grid-template-columns: 430px minmax(0, 1fr);
+      gap: 16px;
+      align-items: stretch;
+      margin-bottom: 16px;
+    }
+    .yir-ranks {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      justify-content: space-between;
+      flex: 1 1 auto;
+    }
+    .lj-yir .yir-rank {
+      display: grid;
+      grid-template-columns: 30px 42px minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+      min-height: 68px;
+      padding: 7px 10px;
+      border: 1px solid var(--yir-line2);
+      border-radius: 11px;
+      background: var(--yir-panel-2);
+      box-shadow: var(--yir-skylight);
+      transition: all .2s var(--yir-ease);
+    }
+    .lj-yir .yir-rank:hover {
+      border-color: var(--yir-warm-line);
+      background: var(--yir-card-hover);
+      transform: translateX(2px);
+    }
+    .yir-rank-num {
+      display: grid;
+      place-items: center;
+      width: 28px; height: 28px;
+      border: 1px solid var(--yir-line2);
+      border-radius: 8px;
+      background: var(--yir-tag-bg);
+      font-family: var(--yir-mono);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--yir-ink3);
+    }
+    .yir-rank[data-rank="1"] .yir-rank-num {
+      background: linear-gradient(135deg, rgba(232, 201, 130, .28), rgba(232, 201, 130, .08));
+      border-color: var(--yir-gold-line);
+      color: var(--yir-gold);
+    }
+    .yir-rank[data-rank="2"] .yir-rank-num {
+      background: rgba(200, 210, 228, .14);
+      border-color: rgba(200, 210, 228, .30);
+      color: #d6deeb;
+    }
+    html[data-theme="light"] .yir-rank[data-rank="2"] .yir-rank-num {
+      background: rgba(100, 116, 139, .12);
+      color: #4b5563;
+    }
+    .yir-rank[data-rank="3"] .yir-rank-num {
+      background: rgba(212, 148, 106, .15);
+      border-color: rgba(212, 148, 106, .32);
+      color: #e2a57b;
+    }
+    html[data-theme="light"] .yir-rank[data-rank="3"] .yir-rank-num { color: #9a582c; }
+
+    .yir-rank-poster {
+      width: 42px;
+      height: 63px;
+      aspect-ratio: 2 / 3;
+      border: 1px solid var(--yir-line);
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--yir-bg-elev);
+      flex: 0 0 auto;
+    }
+    .yir-rank-poster img { width: 100%; height: 100%; aspect-ratio: 2 / 3; object-fit: cover; }
+
+    .yir-rank-body { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+    .yir-rank-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+    .yir-rank-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--yir-ink);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: color .18s;
+    }
+    .lj-yir .yir-rank:hover .yir-rank-title { color: var(--yir-gold); }
+    .yir-rank-hours {
+      font-family: var(--yir-mono);
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--yir-gold);
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
+    .yir-rank-track {
+      width: 100%;
+      height: 5px;
+      border-radius: 999px;
+      background: var(--yir-track);
+      overflow: hidden;
+    }
+    .yir-rank-fill {
+      height: 100%;
+      min-width: 4px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--yir-gold) 0%, var(--yir-violet) 100%);
+      transition: width .45s var(--yir-ease);
+    }
+    .yir-rank-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      font-size: 10.5px;
+      color: var(--yir-ink3);
+    }
+    .yir-rank-meta b { color: var(--yir-ink2); }
+
+    /* 右栏：6 列 × 2 排竖版通关海报墙 */
+    .yir-completed {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 11px;
+      align-content: space-between;
+      flex: 1 1 auto;
+    }
+    .lj-yir .yir-poster { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+    .yir-poster-box {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 2 / 3;
+      border: 1px solid var(--yir-line);
+      border-radius: 9px;
+      overflow: hidden;
+      background: var(--yir-panel-2);
+      box-shadow: var(--yir-skylight), var(--yir-shadow-s);
+      transition: transform .28s var(--yir-ease), border-color .28s var(--yir-ease), box-shadow .28s var(--yir-ease);
+    }
+    .lj-yir .yir-poster:hover .yir-poster-box {
+      transform: translateY(-3px);
+      border-color: var(--yir-gold-line);
+      box-shadow: var(--yir-skylight), var(--yir-shadow);
+    }
+    .yir-poster-box img {
+      width: 100%;
+      height: 100%;
+      aspect-ratio: 2 / 3;
+      object-fit: cover;
+      transition: transform .45s var(--yir-ease);
+    }
+    .lj-yir .yir-poster:hover .yir-poster-box img { transform: scale(1.04); }
+    .yir-poster-pill {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      padding: 2px 6px;
+      border: 1px solid rgba(255, 255, 255, .14);
+      border-radius: 5px;
+      background: rgba(15, 18, 24, .78);
+      color: #f4f1ea;
+      font-family: var(--yir-mono);
+      font-size: 10px;
+      font-weight: 600;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+    .yir-poster-scrim {
+      position: absolute;
+      inset: auto 0 0 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+      padding: 16px 7px 5px;
+      background: linear-gradient(to top, rgba(12, 15, 19, .88) 0%, rgba(12, 15, 19, .42) 62%, transparent 100%);
+      color: rgba(244, 241, 234, .88);
+      font-family: var(--yir-mono);
+      font-size: 10px;
+    }
+    .yir-poster-title {
+      padding: 0 1px;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--yir-ink);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: color .18s;
+    }
+    .lj-yir .yir-poster:hover .yir-poster-title { color: var(--yir-gold); }
+
+    /* ==================================================================
+       6. 第二屏：三栏年度遥测 Bento
+       ================================================================== */
+    .yir-bento {
+      display: grid;
+      grid-template-columns: 1.08fr 1fr .96fr;
+      gap: 16px;
+      align-items: stretch;
+      margin-bottom: 16px;
+    }
+
+    /* 栏 1：口味画像（环形图 + 比例带） */
+    .yir-genre-layout {
+      display: grid;
+      grid-template-columns: 148px minmax(0, 1fr);
+      gap: 16px;
+      align-items: center;
+      flex: 1 1 auto;
+    }
+    .yir-donut-wrap {
+      position: relative;
+      width: 148px;
+      height: 148px;
+      margin: 0 auto;
+      flex: 0 0 auto;
+    }
+    .yir-donut-center {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      pointer-events: none;
+    }
+    .yir-donut-pct {
+      font-family: var(--yir-serif);
+      font-size: 21px;
+      font-weight: 800;
+      line-height: 1.05;
+      color: var(--yir-gold);
+    }
+    .yir-donut-name { margin-top: 2px; font-size: 11px; font-weight: 600; color: var(--yir-ink); }
+    .yir-donut-sub { font-size: 9.5px; color: var(--yir-ink3); }
+
+    .yir-genre-bars { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+    .yir-genre-row { display: flex; flex-direction: column; gap: 3px; }
+    .yir-genre-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 6px;
+      font-size: 12px;
+    }
+    .yir-genre-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      font-weight: 600;
+      color: var(--yir-ink);
+    }
+    .yir-genre-label > span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .yir-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+    .yir-genre-stats { font-size: 11px; color: var(--yir-ink3); white-space: nowrap; }
+    .yir-genre-stats b { margin-left: 4px; font-family: var(--yir-mono); color: var(--yir-ink); }
+    .yir-genre-track { width: 100%; height: 5px; border-radius: 999px; background: var(--yir-track); overflow: hidden; }
+    .yir-genre-fill { height: 100%; border-radius: 999px; transition: width .45s var(--yir-ease); }
+
+    /* 栏 2：发售年份对比（图表 + 四档格子） */
+    .yir-age-chart { position: relative; height: 128px; margin-bottom: 10px; }
+
+    /* 栏 3：成就快照 + 收官金句签 */
+    .yir-col3 { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+    .yir-ach-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+    .yir-ach-box {
+      padding: 9px 10px;
+      border: 1px solid var(--yir-line2);
+      border-radius: 9px;
+      background: var(--yir-panel-2);
+      box-shadow: var(--yir-skylight);
+      min-width: 0;
+    }
+    .yir-ach-num {
+      font-family: var(--yir-serif);
+      font-size: 20px;
+      font-weight: 800;
+      line-height: 1.15;
+      color: var(--yir-ink);
+      font-variant-numeric: tabular-nums;
+    }
+    .yir-ach-num.is-emerald { color: var(--yir-emerald); }
+    .yir-ach-num.is-gold { color: var(--yir-gold); }
+    .yir-ach-label { margin-top: 2px; font-size: 10.5px; color: var(--yir-ink3); }
+    .yir-ach-prog { display: flex; flex-direction: column; gap: 5px; }
+    .yir-ach-prog-head { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--yir-ink2); }
+    .yir-ach-track { height: 7px; border-radius: 999px; background: var(--yir-track); overflow: hidden; }
+    .yir-ach-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--yir-emerald-bg), var(--yir-emerald));
+      transition: width .45s var(--yir-ease);
+    }
+
+    .yir-finale {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 8px;
+      flex: 1 1 auto;
+      padding: 15px 18px;
+      border: 1px solid var(--yir-gold-line);
+      border-radius: var(--yir-radius);
+      background: linear-gradient(135deg, var(--yir-gold-soft) 0%, var(--yir-violet-soft) 100%);
+      box-shadow: var(--yir-skylight), var(--yir-shadow-s);
+      overflow: hidden;
+    }
+    .yir-finale-mark {
+      position: absolute;
+      top: -8px;
+      right: 12px;
+      font-family: var(--yir-serif);
+      font-size: 68px;
+      line-height: 1;
+      color: var(--yir-gold);
+      opacity: .14;
+      pointer-events: none;
+    }
+    .yir-finale-eyebrow {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      color: var(--yir-gold);
+    }
+    .lj-yir .yir-finale-text {
+      font-family: var(--yir-serif);
+      font-size: 15.5px;
+      font-weight: 700;
+      line-height: 1.5;
+      color: var(--yir-ink);
+    }
+    .yir-hl-genre { color: var(--yir-gold); }
+    .yir-hl-pct { font-family: var(--yir-mono); color: var(--yir-emerald); }
+    .yir-finale-sub { font-size: 11px; color: var(--yir-ink2); line-height: 1.5; }
+
+    /* ==================================================================
+       7. 底部完整口径说明
+       ================================================================== */
+    .yir-caliber {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 20px;
+      align-items: start;
+      padding: 18px 22px;
+      border: 1px solid var(--yir-line);
+      border-radius: var(--yir-radius);
+      background: var(--yir-card);
+      box-shadow: var(--yir-skylight);
+    }
+    .yir-caliber-left {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding-right: 16px;
+      border-right: 1px solid var(--yir-line2);
+    }
+    .lj-yir .yir-caliber-title {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-family: var(--yir-serif);
+      font-size: 15.5px;
+      font-weight: 700;
+      line-height: 1.35;
+      color: var(--yir-ink);
+    }
+    .yir-caliber-title-ico { color: var(--yir-gold); flex: 0 0 auto; }
+    .yir-caliber-lead { font-size: 12px; line-height: 1.55; color: var(--yir-ink2); }
+    .yir-caliber-right {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--yir-ink2);
+    }
+    .yir-point {
+      padding: 10px 12px;
+      border: 1px solid var(--yir-line2);
+      border-radius: 10px;
+      background: var(--yir-panel-2);
+    }
+    .yir-point-title { margin-bottom: 4px; font-size: 12px; font-weight: 700; color: var(--yir-gold); }
+    .yir-point b { color: var(--yir-ink); }
+
+    /* ==================================================================
+       8. 轻提示 Toast / 空态 / 按钮
+       ================================================================== */
+    .yir-toast {
+      position: fixed;
+      right: 28px;
+      bottom: 24px;
+      z-index: 250;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      border: 1px solid var(--yir-gold-line);
+      border-radius: 10px;
+      background: var(--yir-panel);
+      box-shadow: var(--yir-shadow);
+      color: var(--yir-ink);
+      font-size: 12.5px;
+      opacity: 0;
+      transform: translateY(10px);
+      pointer-events: none;
+      transition: opacity .25s var(--yir-ease), transform .25s var(--yir-ease);
+    }
+    .yir-toast.show { opacity: 1; transform: translateY(0); }
+
+    .yir-empty {
+      padding: 32px 24px;
+      border: 1px solid var(--yir-line);
+      border-radius: var(--yir-radius);
+      background: var(--yir-card);
+      box-shadow: var(--yir-skylight);
+      text-align: center;
+    }
+    .lj-yir .yir-empty-title {
+      margin-bottom: 12px;
+      font-family: var(--yir-serif);
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--yir-ink);
+    }
+    .yir-empty-lead {
+      max-width: 28rem;
+      margin: 0 auto 22px;
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--yir-ink2);
+    }
+    .yir-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+    .lj-yir .yir-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 34px;
+      padding: 0 14px;
+      border: 1px solid var(--yir-line);
+      border-radius: 8px;
+      background: var(--yir-panel-2);
+      color: var(--yir-ink);
+      font-size: 12.5px;
+      font-weight: 600;
+      transition: all .18s var(--yir-ease);
+    }
+    .lj-yir .yir-btn:hover { border-color: var(--yir-warm-line); background: var(--yir-card-hover); }
+    .lj-yir .yir-btn-primary { border-color: var(--yir-gold-line); background: var(--yir-gold); color: #16130e; }
+    html[data-theme="light"] .lj-yir .yir-btn-primary { color: #fffcf6; }
+    .yir-empty-line { font-size: 12.5px; color: var(--yir-ink3); }
+
+    /* ==================================================================
+       9. 响应式
+       ================================================================== */
+    @media (max-width: 1200px) {
+      .yir-hero { grid-template-columns: 1fr; }
+      .yir-hero-left { padding-right: 0; padding-bottom: 12px; border-right: 0; border-bottom: 1px solid var(--yir-line2); }
+      .yir-split { grid-template-columns: 1fr; }
+      .yir-bento { grid-template-columns: 1fr; }
+      .yir-caliber { grid-template-columns: 1fr; }
+      .yir-caliber-left { padding-right: 0; padding-bottom: 10px; border-right: 0; border-bottom: 1px solid var(--yir-line2); }
+      .yir-caliber-right { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 860px) {
+      .yir-completed { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .yir-genre-layout { grid-template-columns: 1fr; }
+      .yir-kpi-grid { grid-template-columns: 1fr; }
     }
   </style>
+{% endblock extra_head %}
 
-  <div class="lj-yir max-w-6xl mx-auto">
+{% block content %}
+  {% comment %}
+    年份切换必须生成「绝对路径 + 显式带 tab=year」，否则从
+    /statistics?tab=year 点年份会变成 /statistics?year=2025，把 tab 丢掉，
+    视图就回落到统计总览（这是以前的 bug）。
 
-    {# ---------- 顶部：年份切换 ---------- #}
-    <div class="flex flex-wrap items-center justify-between gap-3 mb-8">
-      <div>
-        <h1 class="text-3xl font-bold mb-2">年度游玩报告</h1>
-        <p class="text-gray-400 text-sm">把你这个游戏库的累计时长，摊开看一眼</p>
+    本模板被两个 URL 共用：/statistics?tab=year 和旧的 /year-in-review。
+    用 request.resolver_match.url_name 判断当前是哪个入口，各自回各自的地盘。
+    —— 下面这四行连同每个年份链接的 href 表达式一个字都不许动，
+       视觉改造只换外层 class 和排版。
+  {% endcomment %}
+  {% url 'statistics' as stats_url %}
+  {% url 'year_in_review' as yir_url %}
+
+  <div class="lj-yir yir-shell">
+
+    {# ---------- 页头：眉标 + 标题 + 副标 + 三页签 + 年份胶囊 ---------- #}
+    <header class="yir-cmd">
+      <div class="yir-cmd-title-group">
+        <div class="yir-eyebrow-line">
+          <span class="yir-eyebrow-dot"></span>
+          <span>ANNUAL GAMING CHRONICLE · 年度游玩年鉴</span>
+        </div>
+        <div class="yir-cmd-headline">
+          <h1 class="yir-cmd-title">年度游玩报告</h1>
+          <p class="yir-cmd-sub">把你这个游戏库的累计时长，按通关与开玩年份摊开看一眼</p>
+        </div>
       </div>
-      <div class="flex flex-wrap items-center gap-2">
-        {% for option_year in year_options %}
-          <a href="?year={{ option_year }}"
-             class="px-3 py-1 text-sm rounded-lg transition-colors {% if option_year == year %}bg-indigo-600 text-white{% else %}bg-[#2a2f35] text-gray-300 hover:bg-[#39404b]{% endif %}">
-            {{ option_year }}
-          </a>
-        {% endfor %}
+
+      <div class="yir-cmd-controls">
+        {# 三个子页签（统计总览 / 年度报告 / 临门一脚），整页跳转。组件本体不改，只在外层套壳改样式。 #}
+        <div class="yir-seg-host">{% include "app/components/stats_tabs.html" %}</div>
+
+        <div class="yir-year-pills" role="tablist" aria-label="选择报告年份">
+          {% for option_year in year_options %}
+            <a href="{% if request.resolver_match.url_name == 'statistics' %}{{ stats_url }}?tab=year&year={{ option_year }}{% else %}{{ yir_url }}?year={{ option_year }}{% endif %}"
+               hx-boost="false"
+               role="tab"
+               {% if option_year == year %}aria-current="page"{% endif %}
+               class="yir-year-pill{% if option_year == year %} on{% endif %}">{{ option_year }}</a>
+          {% endfor %}
+        </div>
       </div>
-    </div>
+    </header>
 
     {% if not report.has_data %}
       {# ---------- 空态：这一年没有任何可统计的游戏 ---------- #}
-      <div class="bg-[#2a2f35] rounded-xl p-8 text-center ring-1 ring-white/5">
-        <div class="text-3xl font-bold mb-3">{{ year }} 年，一片空白</div>
-        <p class="text-gray-400 mb-6 max-w-md mx-auto">
+      <div class="yir-empty">
+        <div class="yir-empty-title">{{ year }} 年，一片空白</div>
+        <p class="yir-empty-lead">
           这一年没有游戏的通关日期或开始游玩日期记录，所以还算不出报告。
           <br>
           换一年看看，或者先去玩点什么。
         </p>
-        <div class="flex flex-wrap justify-center gap-2">
+        <div class="yir-empty-actions">
           <a href="{% url 'medialist' request.user.username 'game' %}"
-             class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 transition-colors">回游戏库</a>
-          {% if year_options %}<a href="?year={{ year_options.0 }}"
-             class="px-4 py-2 bg-[#39404b] text-gray-200 rounded-lg text-sm hover:bg-[#454d59] transition-colors">看 {{ year_options.0 }} 年</a>{% endif %}
+             class="yir-btn yir-btn-primary">回游戏库</a>
+          {% if year_options %}
+            <a href="{% if request.resolver_match.url_name == 'statistics' %}{{ stats_url }}?tab=year&year={{ year_options.0 }}{% else %}{{ yir_url }}?year={{ year_options.0 }}{% endif %}"
+               hx-boost="false"
+               class="yir-btn">看 {{ year_options.0 }} 年</a>
+          {% endif %}
         </div>
       </div>
     {% else %}
 
-      {# ---------- 1. 开场大字：累计口径 ---------- #}
-      <section class="bg-[#2a2f35] rounded-xl p-8 mb-8 ring-1 ring-white/5">
-        <div class="text-gray-400 text-lg mb-3">
-          这批游戏（{{ year }} 年通关或开始玩的）的<b class="text-gray-300">游戏库累计时长</b>
-        </div>
-        <div class="flex flex-wrap items-baseline gap-3">
-          <span class="lj-yir-hero-num text-white">{{ report.total_hours_text }}</span>
-          <span class="lj-yir-hero-unit text-gray-300">小时</span>
-          <span class="lj-yir-hero-unit text-gray-500">累计</span>
-        </div>
-        <p class="text-gray-300 mt-4 text-base">
-          这是 {{ report.game_count }} 款游戏<b class="text-white">从入库到现在的累计时长</b>，
-          <b class="text-white">不是 {{ year }} 这一年玩的</b>。
-        </p>
-        <p class="text-gray-400 mt-2 text-sm">
-          库里没按年保存游玩时长，所以这里只能给累计值；
-          整库 {{ report.library.games }} 款游戏合计 {{ report.library.hours_text }} 小时，
-          上面这批占其中的 {{ report.library.share }}%。
-        </p>
-        <div class="flex flex-wrap gap-6 mt-6 pt-4 border-t border-gray-700">
-          <div>
-            <div class="text-2xl font-bold text-white lj-yir-num">{{ report.game_count }}</div>
-            <div class="text-gray-400 text-sm">款游戏在这一年通关或开始玩</div>
+      {# ---------- 1. Hero：累计时长大字 + 四个核心指标 ---------- #}
+      <section class="yir-hero" aria-label="年度累计时长与核心指标">
+        <div class="yir-hero-left">
+          <div class="yir-hero-kicker">
+            这批游戏（<strong>{{ year }} 年</strong>通关或开始玩的）的<strong>游戏库累计时长</strong>
           </div>
-          <div>
-            <div class="text-2xl font-bold text-white lj-yir-num">{{ report.played_count }}</div>
-            <div class="text-gray-400 text-sm">款真的花过时间（累计）</div>
-          </div>
-          <div>
-            <div class="text-2xl font-bold text-white lj-yir-num">{{ report.completed.count }}</div>
-            <div class="text-gray-400 text-sm">款在这一年打到通关</div>
-          </div>
-        </div>
-        <p class="text-gray-500 text-xs mt-4">
-          口径说明：本库没有逐日游玩记录（历史表 5669 条全是导入时的批量快照，
-          全挤在同一个月，变更原因全为空，时间戳不可信），
-          所以「某年玩过」= <b>通关日期或开始游玩日期</b>落在该年的游戏 —— 这是真实的年内事件。
-          （成就同步时间不参与判年份：那 2782 条全是导入时一次性刷的，
-          挤在同一个月，拿它算会让某一年凭空多出几千款游戏。）
-          但时长取的是这些游戏的累计游玩分钟数，<b>不代表它们在当年玩了多少</b>。
-        </p>
-      </section>
 
-      {# ---------- 2. 累计最常玩的 Top 5 ---------- #}
-      <section class="mb-8">
-        <h2 class="text-2xl font-bold mb-2">累计玩得最多的 {{ report.top_games|length }} 款</h2>
-        <p class="text-gray-400 text-sm mb-4">
-          按这些游戏在游戏库里的累计时长排，不是这一年玩的时长
-        </p>
-        {% if report.top_games %}
-          <div class="space-y-4">
-            {% for game in report.top_games %}
-              <div class="bg-[#2a2f35] rounded-xl p-4 ring-1 ring-white/5 flex items-center gap-4">
-                <div class="shrink-0 w-20 rounded-lg overflow-hidden lj-yir-cover">
-                  <img class="lazyload w-full aspect-2/3 object-cover"
-                       alt="{{ game.title }}"
-                       data-src="{{ game.image|relay_image }}">
-                </div>
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-baseline justify-between gap-3">
-                    <a href="{% url 'media_details' source=game.source media_type='game' media_id=game.media_id title=game.title|slug %}"
-                       class="font-semibold truncate hover:text-indigo-400 transition-colors">{{ game.title }}</a>
-                    <span class="text-gray-300 text-sm shrink-0 lj-yir-num">累计 {{ game.hours }} 小时</span>
-                  </div>
-                  <div class="lj-yir-track rounded-full h-2 mt-3 overflow-hidden">
-                    <div class="lj-yir-fill h-2 rounded-full"
-                         style="width: {{ game.percent }}%"></div>
-                  </div>
-                  <div class="text-gray-400 text-xs mt-2">
-                    占这批游戏累计时长的 <span class="text-gray-300 lj-yir-num">{{ game.percent }}%</span>
-                  </div>
-                </div>
-                <div class="shrink-0 text-3xl font-bold text-gray-500 lj-yir-num">{{ forloop.counter }}</div>
-              </div>
-            {% endfor %}
+          <div class="yir-hero-num-row">
+            {# data-value 里放裸数字，方便脚本核对；显示层照设计稿带千分位 #}
+            <span class="yir-hero-giant" data-value="{{ report.total_hours_text|cut:',' }}">{{ report.total_hours_text }}</span>
+            <span class="yir-hero-unit">小时</span>
+            <span class="yir-hero-badge">累计口径 · 占整库 {{ report.library.games|intcomma:False }} 款 ({{ report.library.hours_text }}h) 的 {{ report.library.share }}%</span>
           </div>
-        {% else %}
-          <p class="text-gray-400">这批游戏没有记录到游玩时长。</p>
-        {% endif %}
-      </section>
 
-      {# ---------- 3. 这一年通关的游戏 ---------- #}
-      <section class="mb-8">
-        <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
-          <h2 class="text-2xl font-bold">{{ year }} 年通关了 {{ report.completed.count }} 款</h2>
-          <span class="text-gray-400 text-sm">
-            这些游戏累计 {{ report.completed.hours }} 小时
-          </span>
+          <div class="yir-truth">
+            <span class="yir-truth-text">
+              ⚠️ 这是 <b>{{ report.game_count }} 款游戏</b>从入库到现在的累计总时长，<b>不是 {{ year }} 这一年玩的</b>（库里未按年切分游玩时长）。
+            </span>
+            <button type="button"
+                    class="yir-caliber-btn"
+                    id="yir-caliber-btn"
+                    aria-expanded="false"
+                    aria-controls="yir-caliber-drawer">📖 展开完整口径说明</button>
+          </div>
         </div>
-        <p class="text-gray-400 text-sm mb-4">
-          通关数量是这一年真实发生的事；后面标的时长是这些游戏在库里的累计时长
-        </p>
-        {% if report.completed.covers %}
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {% for cover in report.completed.covers %}
-              <a href="{% url 'media_details' source=cover.source media_type='game' media_id=cover.media_id title=cover.title|slug %}"
-                 class="group block">
-                <div class="rounded-lg overflow-hidden lj-yir-cover">
-                  <img class="lazyload w-full aspect-2/3 object-cover group-hover:opacity-90 transition-opacity"
-                       alt="{{ cover.title }}"
-                       data-src="{{ cover.image|relay_image }}">
-                </div>
-                <div class="text-sm font-medium truncate mt-2 group-hover:text-indigo-400 transition-colors">{{ cover.title }}</div>
-                <div class="text-gray-400 text-xs">
-                  {{ cover.end_date }} 通关 · 累计 {{ cover.hours }} 小时
-                </div>
-              </a>
-            {% endfor %}
-          </div>
-          {% if report.completed.hidden %}
-            <p class="text-gray-400 text-sm mt-4">还有 {{ report.completed.hidden }} 个没铺出来，去游戏库慢慢看。</p>
-          {% endif %}
-        {% else %}
-          <p class="text-gray-400">这一年没有标记通关的游戏。</p>
-        {% endif %}
-      </section>
 
-      {# ---------- 4. 类型画像（累计口径） ---------- #}
-      <section class="bg-[#2a2f35] rounded-xl p-6 mb-8 ring-1 ring-white/5">
-        <h2 class="text-2xl font-bold mb-2">口味画像</h2>
-        <p class="text-gray-400 text-sm mb-2">按累计游玩时长算，你最常泡在哪几口</p>
-        <p class="text-gray-500 text-xs mb-6">
-          分母是这批游戏的累计总时长；一款游戏带多个类型会重复计入各类型，所以各项加起来会超过 100%，这是正常的。
-        </p>
-        {% if report.genres %}
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 items-center">
-            <div class="lj-yir-chart-tall">
-              <canvas id="yir-genre-chart"></canvas>
+        <div class="yir-kpi-grid">
+          <div class="yir-kpi">
+            <div class="yir-kpi-top">
+              <span>年内通关或开玩</span>
+              <span class="yir-kpi-tag">真实年内事件</span>
             </div>
-            <div class="space-y-4">
-              {% for genre in report.genres %}
-                <div>
-                  <div class="flex items-baseline justify-between gap-2 text-sm">
-                    <span class="flex items-center gap-2 min-w-0">
-                      <span class="lj-yir-dot shrink-0"
-                            style="background: {{ genre.color }}"></span>
-                      <span class="truncate">{{ genre.name }}</span>
-                    </span>
-                    <span class="text-gray-300 shrink-0 lj-yir-num">{{ genre.percent }}%</span>
+            <div class="yir-kpi-val">
+              <span class="yir-kpi-num" data-value="{{ report.game_count }}">{{ report.game_count }}</span>
+              <span class="yir-kpi-unit">款游戏</span>
+            </div>
+            <div class="yir-kpi-foot">通关日期或开玩日期落在 {{ year }} 年</div>
+          </div>
+
+          <div class="yir-kpi">
+            <div class="yir-kpi-top">
+              <span>实际投入时长</span>
+              <span class="yir-kpi-tag">{% widthratio report.played_count report.game_count 100 %}% 真的花过时间</span>
+            </div>
+            <div class="yir-kpi-val">
+              <span class="yir-kpi-num is-gold">{{ report.played_count }}</span>
+              <span class="yir-kpi-unit">款游戏</span>
+            </div>
+            <div class="yir-kpi-foot">游戏库记录有累计游玩分钟数</div>
+          </div>
+
+          <div class="yir-kpi">
+            <div class="yir-kpi-top">
+              <span>年内打到通关</span>
+              <span class="yir-kpi-tag">通关战果</span>
+            </div>
+            <div class="yir-kpi-val">
+              <span class="yir-kpi-num is-emerald" data-value="{{ report.completed.count }}">{{ report.completed.count }}</span>
+              <span class="yir-kpi-unit">款通关</span>
+            </div>
+            <div class="yir-kpi-foot">这些通关游戏累计 {{ report.completed.hours|intcomma:False }} 小时</div>
+          </div>
+
+          <div class="yir-kpi">
+            <div class="yir-kpi-top">
+              <span>当前成就战绩</span>
+              <span class="yir-kpi-tag">当前快照</span>
+            </div>
+            <div class="yir-kpi-val">
+              <span class="yir-kpi-num is-violet" data-value="{{ report.achievements.unlocked }}">{{ report.achievements.unlocked|intcomma:False }}</span>
+              <span class="yir-kpi-unit">枚解锁</span>
+            </div>
+            <div class="yir-kpi-foot">{{ report.achievements.perfect }} 款全成就 · 完成度 {{ report.achievements.percent }}%</div>
+          </div>
+        </div>
+
+        {# 页内折叠口径抽屉（点「展开完整口径说明」就地展开，不占首屏高度） #}
+        <div class="yir-drawer" id="yir-caliber-drawer" hidden>
+          <b>口径说明：</b>本库没有逐日游玩记录（历史表 5,669 条全是导入时的批量快照，全挤在同一个月，变更原因全为空，时间戳不可信），所以「某年玩过」= <b>通关日期或开始游玩日期</b>落在该年的游戏 —— 这是真实的年内事件。（<b>成就同步时间不参与判年份</b>：那 2,782 条全是导入时一次性刷的，挤在同一个月，拿它算会让某一年凭空多出几千款游戏。）但时长取的是这些游戏的累计游玩分钟数，<b>不代表它们在当年玩了多少</b>。
+        </div>
+      </section>
+
+      {# ---------- 2. 首屏主分栏：左 Top 5 榜单 + 右通关海报墙 ---------- #}
+      <section class="yir-split" aria-label="年度最常玩与通关海报墙">
+
+        <article class="yir-card">
+          <div class="yir-sec-head">
+            <div>
+              <div class="yir-sec-eyebrow">TOP 5 MOST PLAYED · 累计时长榜</div>
+              <h2 class="yir-sec-title">累计玩得最多的 {{ report.top_games|length }} 款</h2>
+              <p class="yir-sec-sub">按这些游戏在游戏库里的累计时长排，不是当年单年玩的时长</p>
+            </div>
+            {% if report.top_games %}
+              <span class="yir-sec-badge">Top 5 占 {{ report.top_share }}%</span>
+            {% endif %}
+          </div>
+
+          {% if report.top_games %}
+            <div class="yir-ranks">
+              {% for game in report.top_games %}
+                <a class="yir-rank"
+                   data-rank="{{ forloop.counter }}"
+                   href="{% url 'media_details' source=game.source media_type='game' media_id=game.media_id title=game.title|slug %}">
+                  <span class="yir-rank-num">#{{ forloop.counter|stringformat:"02d" }}</span>
+                  <div class="yir-rank-poster">
+                    <img class="lazyload"
+                         alt="{{ game.title }}"
+                         data-src="{{ game.image|relay_image }}">
                   </div>
-                  <div class="text-gray-400 text-xs mt-1">累计 {{ genre.hours }} 小时 · {{ genre.games }} 款</div>
-                </div>
+                  <div class="yir-rank-body">
+                    <div class="yir-rank-top">
+                      <span class="yir-rank-title">{{ game.title }}</span>
+                      <span class="yir-rank-hours">累计 {{ game.hours|intcomma:False }} 小时</span>
+                    </div>
+                    <div class="yir-rank-track">
+                      <div class="yir-rank-fill" style="width: {{ game.percent }}%"></div>
+                    </div>
+                    <div class="yir-rank-meta">
+                      <span>占这批游戏累计时长的 <b>{{ game.percent }}%</b></span>
+                      <span>库内累计口径</span>
+                    </div>
+                  </div>
+                </a>
               {% endfor %}
             </div>
+          {% else %}
+            <p class="yir-empty-line">这批游戏没有记录到游玩时长。</p>
+          {% endif %}
+        </article>
+
+        <article class="yir-card">
+          <div class="yir-sec-head">
+            <div>
+              <div class="yir-sec-eyebrow">COMPLETED IN {{ year }} · 年度通关陈列</div>
+              <h2 class="yir-sec-title">
+                {{ year }} 年通关了 {{ report.completed.count }} 款
+                <span class="yir-sec-title-aside">（累计 {{ report.completed.hours|intcomma:False }} 小时）</span>
+              </h2>
+              <p class="yir-sec-sub">通关数量是当年真实发生的事；角标时长是这些游戏在库里的累计总时长</p>
+            </div>
+            {% if report.completed.hidden %}
+              <span class="yir-sec-badge">展示最近通关的 {{ report.completed.covers|length }} 款 · 其余 {{ report.completed.hidden }} 款在游戏库</span>
+            {% endif %}
           </div>
-        {% else %}
-          <p class="text-gray-400">这批游戏还没抓到类型标签。</p>
-        {% endif %}
+
+          {% if report.completed.covers %}
+            <div class="yir-completed">
+              {% for cover in report.completed.covers %}
+                <a class="yir-poster"
+                   href="{% url 'media_details' source=cover.source media_type='game' media_id=cover.media_id title=cover.title|slug %}"
+                   title="{{ cover.title }}{% if cover.end_date %}（{{ cover.end_date }} 通关{% if cover.hours %} · 累计 {{ cover.hours }} 小时{% endif %}）{% endif %}">
+                  <div class="yir-poster-box">
+                    <img class="lazyload"
+                         alt="{{ cover.title }}"
+                         data-src="{{ cover.image|relay_image }}">
+                    <span class="yir-poster-pill">{% if cover.hours >= 100 %}{{ cover.hours|floatformat:"0" }}{% else %}{{ cover.hours }}{% endif %}h</span>
+                    <div class="yir-poster-scrim">
+                      <span>{{ cover.end_date }}</span>
+                      <span>✓</span>
+                    </div>
+                  </div>
+                  <div class="yir-poster-title">{{ cover.title }}</div>
+                </a>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="yir-empty-line">这一年没有标记通关的游戏。</p>
+          {% endif %}
+        </article>
       </section>
 
-      {# ---------- 5. 成就战绩 ---------- #}
-      <section class="bg-[#2a2f35] rounded-xl p-6 mb-8 ring-1 ring-white/5">
-        <h2 class="text-2xl font-bold mb-6">成就战绩</h2>
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-6">
-          <div>
-            <div class="text-2xl font-bold text-white lj-yir-num">{{ report.achievements.unlocked }}</div>
-            <div class="text-gray-400 text-sm">这一年这些游戏累计解锁的成就</div>
-          </div>
-          <div>
-            <div class="text-2xl font-bold text-white lj-yir-num">{{ report.achievements.perfect }}</div>
-            <div class="text-gray-400 text-sm">款目前是全成就</div>
-          </div>
-          <div>
-            <div class="text-2xl font-bold text-white lj-yir-num">{{ report.achievements.percent }}%</div>
-            <div class="text-gray-400 text-sm">
-              这批游戏当前的成就完成度（{{ report.achievements.unlocked }}/{{ report.achievements.available }}）
+      {# ---------- 3. 第二屏：三栏年度遥测 Bento ---------- #}
+      <section class="yir-bento" aria-label="口味画像、游戏年龄与成就收官">
+
+        <article class="yir-card">
+          <div class="yir-sec-head">
+            <div>
+              <div class="yir-sec-eyebrow">TASTE PROFILE · 口味画像</div>
+              <h2 class="yir-sec-title">按累计游玩时长算最常泡在哪几口</h2>
+              <p class="yir-sec-sub">分母为这批游戏的累计总时长</p>
             </div>
           </div>
-        </div>
-        <div class="lj-yir-track rounded-full h-2 mt-6 overflow-hidden">
-          <div class="lj-yir-fill-2 h-2 rounded-full"
-               style="width: {{ report.achievements.percent }}%"></div>
-        </div>
-        <p class="text-gray-500 text-xs mt-4">
-          成就这块用的是「当前快照」：解锁数、全成就数、完成度都是这些游戏此刻的状态，
-          同步时间被导入统一覆盖过，所以看不出具体是哪天解锁的。
-          另外只有 {{ report.achievements.games_with_data }} 款游戏的成就数据抓得到（Steam 有些游戏不开放接口），
-          所以这里是「能看到的」那一部分。
-        </p>
-      </section>
 
-      {# ---------- 6. 游戏年龄 ---------- #}
-      <section class="bg-[#2a2f35] rounded-xl p-6 mb-8 ring-1 ring-white/5">
-        <h2 class="text-2xl font-bold mb-2">你玩的都是「多大岁数」的游戏</h2>
-        <p class="text-gray-400 text-sm mb-2">拿游戏发售年份跟 {{ year }} 比，看这些游戏是赶新还是怀旧</p>
-        <p class="text-gray-500 text-xs mb-6">每档后面的时长同样是这些游戏的累计时长，不是这一年玩的</p>
-        <div class="lj-yir-chart mb-6">
-          <canvas id="yir-age-chart"></canvas>
-        </div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {% for bucket in report.age.buckets %}
-            <div class="bg-[#39404b] rounded-lg p-4">
-              <div class="flex items-baseline justify-between gap-2">
-                <span class="font-medium">{{ bucket.label }}</span>
-                <span class="text-gray-300 text-sm lj-yir-num">累计 {{ bucket.hours }} 小时</span>
+          {% if report.genres %}
+            <div class="yir-genre-layout">
+              <div class="yir-donut-wrap">
+                <canvas id="yir-genre-chart"></canvas>
+                <div class="yir-donut-center">
+                  <span class="yir-donut-pct">{{ report.favorite.percent }}%</span>
+                  <span class="yir-donut-name">{{ report.favorite.name }}</span>
+                  <span class="yir-donut-sub">榜首类型</span>
+                </div>
               </div>
-              <div class="text-gray-400 text-xs mt-1">
-                {{ bucket.games }} 款 · 占累计时长 {{ bucket.percent }}%
+
+              <div class="yir-genre-bars">
+                {% for genre in report.genres %}
+                  <div class="yir-genre-row">
+                    <div class="yir-genre-head">
+                      <span class="yir-genre-label">
+                        <span class="yir-dot" data-genre-dot="{{ forloop.counter0 }}" style="background: {{ genre.color }}"></span>
+                        <span>{{ genre.name }}</span>
+                      </span>
+                      <span class="yir-genre-stats">累计 {{ genre.hours|intcomma:False }} 小时 · {{ genre.games }} 款 <b>{{ genre.percent }}%</b></span>
+                    </div>
+                    <div class="yir-genre-track">
+                      <div class="yir-genre-fill"
+                           style="width: {% if genre.percent > 100 %}100{% else %}{{ genre.percent }}{% endif %}%; background: {{ genre.color }}"></div>
+                    </div>
+                  </div>
+                {% endfor %}
               </div>
             </div>
-          {% endfor %}
+            <div class="yir-foot-note">
+              💡 一款游戏带多个类型会重复计入各类型，因此各项百分比合计超过 100% 属正常现象。
+            </div>
+          {% else %}
+            <p class="yir-empty-line">这批游戏还没抓到类型标签。</p>
+          {% endif %}
+        </article>
+
+        <article class="yir-card">
+          <div class="yir-sec-head">
+            <div>
+              <div class="yir-sec-eyebrow">RELEASE VINTAGE · 发售年份对比 {{ year }}</div>
+              <h2 class="yir-sec-title">你玩的都是「多大岁数」的游戏</h2>
+              <p class="yir-sec-sub">拿游戏发售年份跟 {{ year }} 比，看这批游戏是赶新还是怀旧</p>
+            </div>
+          </div>
+
+          {# 设计稿这里是纯 CSS 堆叠条；本站那张能交互的 canvas 信息量更大，保留图表并压到 128px 高。 #}
+          <div class="yir-age-chart">
+            <canvas id="yir-age-chart"></canvas>
+          </div>
+
+          <div class="yir-ach-row" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+            {% for bucket in report.age.buckets %}
+              <div class="yir-ach-box">
+                <div class="yir-genre-head" style="margin-bottom: 3px;">
+                  <span class="yir-genre-label">
+                    <span class="yir-dot" data-age-dot="{{ forloop.counter0 }}"></span>
+                    <span>{{ bucket.label }}</span>
+                  </span>
+                  <span class="yir-genre-stats" style="color: var(--yir-gold); font-family: var(--yir-mono); font-weight: 700;">{{ bucket.percent }}%</span>
+                </div>
+                <div class="yir-ach-num" style="font-size: 15px;">累计 {{ bucket.hours|intcomma:False }} 小时</div>
+                <div class="yir-ach-label">{{ bucket.games }} 款 · 占累计时长 {{ bucket.percent }}%</div>
+              </div>
+            {% endfor %}
+          </div>
+
+          <div class="yir-foot-note">
+            {% if report.age.missing_games %}
+              📌 另有 {{ report.age.missing_games }} 款游戏没有发售日期，未算进上面四档；每档时长同样为库内累计时长。
+            {% else %}
+              📌 全部 {{ report.game_count }} 款游戏均有明确发售年份；每档时长同样为库内累计时长。
+            {% endif %}
+          </div>
+        </article>
+
+        <div class="yir-col3">
+          <article class="yir-card">
+            <div class="yir-sec-head" style="margin-bottom: 10px; padding-bottom: 8px;">
+              <div>
+                <div class="yir-sec-eyebrow">ACHIEVEMENT SNAPSHOT · 当前快照</div>
+                <h2 class="yir-sec-title">成就战绩</h2>
+              </div>
+              <span class="yir-sec-badge">{{ report.achievements.games_with_data }} 款开放接口</span>
+            </div>
+
+            <div class="yir-ach-row">
+              <div class="yir-ach-box">
+                <div class="yir-ach-num is-gold" data-value="{{ report.achievements.unlocked }}">{{ report.achievements.unlocked|intcomma:False }}</div>
+                <div class="yir-ach-label">累计解锁成就</div>
+              </div>
+              <div class="yir-ach-box">
+                <div class="yir-ach-num is-emerald">{{ report.achievements.perfect }}</div>
+                <div class="yir-ach-label">款目前全成就</div>
+              </div>
+              <div class="yir-ach-box">
+                <div class="yir-ach-num">{{ report.achievements.percent }}%</div>
+                <div class="yir-ach-label">完成度 ({{ report.achievements.unlocked }}/{{ report.achievements.available }})</div>
+              </div>
+            </div>
+
+            <div class="yir-ach-prog">
+              <div class="yir-ach-prog-head">
+                <span>这批游戏当前成就完成度</span>
+                <span>{{ report.achievements.unlocked|intcomma:False }} / {{ report.achievements.available|intcomma:False }} ({{ report.achievements.percent }}%)</span>
+              </div>
+              <div class="yir-ach-track">
+                <div class="yir-ach-fill" style="width: {{ report.achievements.percent }}%"></div>
+              </div>
+            </div>
+
+            <div class="yir-foot-note" style="margin-top: 9px; padding-top: 8px;">
+              仅 <b>{{ report.achievements.games_with_data }}</b> 款开放 Steam 成就接口的游戏参与统计；同步时间在导入时统一覆盖过，因此展示此刻快照。
+            </div>
+          </article>
+
+          {% if report.favorite %}
+            <article class="yir-finale" aria-label="年度收官金句">
+              <span class="yir-finale-mark">“</span>
+              <div class="yir-finale-eyebrow">ANNUAL FINALE · 年度收官金句签</div>
+              <p class="yir-finale-text">
+                “你累计投入最多的类型是<span class="yir-hl-genre">「{{ report.favorite.name }}」</span>，占这批游戏累计时长的 <span class="yir-hl-pct">{{ report.favorite.percent }}%</span>”
+              </p>
+              <p class="yir-finale-sub">
+                时长口径是累计，{{ year }} 年到底玩了多少小时，库里没有这个记录。
+              </p>
+            </article>
+          {% endif %}
         </div>
-        {% if report.age.missing_games %}
-          <p class="text-gray-500 text-xs mt-4">
-            另有 {{ report.age.missing_games }} 款游戏没有发售日期，没算进上面四档。
-          </p>
-        {% endif %}
       </section>
 
-      {# ---------- 7. 收官一句 ---------- #}
-      {% if report.favorite %}
-        <section class="bg-[#39404b] rounded-xl p-8 ring-1 ring-white/5 text-center">
-          <p class="text-2xl leading-tight">
-            你累计投入最多的类型是
-            <span class="font-bold text-indigo-400">{{ report.favorite.name }}</span>
-            ，占这批游戏累计时长的
-            <span class="font-bold text-white lj-yir-num">{{ report.favorite.percent }}%</span>
+      {# ---------- 4. 底部：这条报告的时长是怎么来的 ---------- #}
+      <section class="yir-caliber" aria-label="数据口径完整说明">
+        <div class="yir-caliber-left">
+          <h2 class="yir-caliber-title">
+            <span class="yir-caliber-title-ico">🛈</span>
+            <span>这条报告的时长是怎么来的</span>
+          </h2>
+          <p class="yir-caliber-lead">
+            数据库中只保存累计游玩时长，没有按年切分的历史记录，因此本页的时长是累计值，不代表这一年的游玩量。
           </p>
-          <p class="text-gray-400 text-sm mt-3">
-            时长口径是累计，{{ year }} 年到底玩了多少小时，库里没有这个记录。
-          </p>
-        </section>
-      {% endif %}
-
-      {# ---------- 8. 底部免责（口径说明，必须留） ---------- #}
-      <section class="bg-[#2a2f35] rounded-xl p-6 mt-8 ring-1 ring-white/5">
-        <h2 class="text-lg font-bold mb-2">这条报告的时长是怎么来的</h2>
-        <p class="text-gray-300 text-sm leading-relaxed">
-          数据库中只保存累计游玩时长，没有按年切分的历史记录，因此本页的时长是累计值，不代表这一年的游玩量。
-        </p>
-        <p class="text-gray-400 text-xs mt-3 leading-relaxed">
-          具体来说：游戏的游玩分钟数是「从入库到今天」的总和；
-          历史表 5669 条全是导入时的批量快照，全挤在同一个月、
-          变更原因全为空，所以时间线不可信；
-          只有<b>通关日期或开始游玩日期</b>是真实的年内事件，代表「这一年」。
-          <b>成就同步时间不算</b>：那 2782 条是导入 Steam 数据时一次性刷进去的，
-          全挤在同一个月，它只说明「什么时候导入的」，不说明「什么时候玩的」。
-        </p>
+        </div>
+        <div class="yir-caliber-right">
+          <div class="yir-point">
+            <div class="yir-point-title">① 为什么时长是累计值？</div>
+            <p>游戏的游玩分钟数是<b>「从入库到今天」的总和</b>；历史表 5,669 条全是导入时的批量快照，全挤在同一个月、变更原因全为空，所以时间线不可信。</p>
+          </div>
+          <div class="yir-point">
+            <div class="yir-point-title">② 怎么判定「这一年玩过」？</div>
+            <p>只有<b>通关日期或开始游玩日期</b>是真实的年内事件，代表「这一年」。凡是通关日期或开玩日期落在该年的游戏，均归入该年年鉴。</p>
+          </div>
+          <div class="yir-point">
+            <div class="yir-point-title">③ 为什么成就同步时间不算？</div>
+            <p><b>成就同步时间不算</b>：那 2,782 条是导入 Steam 数据时一次性刷进去的，全挤在同一个月，它只说明「什么时候导入的」，不说明「什么时候玩的」。</p>
+          </div>
+        </div>
       </section>
 
     {% endif %}
   </div>
+
+  {# 轻提示：切年份后回到新页面弹一下，只传一个 sessionStorage 标记，不拦点击不 delay 跳转 #}
+  <div class="lj-yir yir-toast" id="yir-toast" role="status" aria-live="polite">
+    <span aria-hidden="true">🏆</span>
+    <span id="yir-toast-msg">已切换年份</span>
+  </div>
 {% endblock content %}
 
 {% block js %}
-  {% if report.has_data %}
+  <script>
+    (function () {
+      /* ---------- 口径抽屉 + 切年份轻提示（与图表无关，永远跑） ---------- */
+      var btn = document.getElementById('yir-caliber-btn');
+      var drawer = document.getElementById('yir-caliber-drawer');
+      if (btn && drawer) {
+        btn.addEventListener('click', function () {
+          var open = !drawer.hidden;
+          drawer.hidden = open;
+          btn.setAttribute('aria-expanded', String(!open));
+          btn.textContent = open ? '📖 展开完整口径说明' : '📖 收起口径说明';
+        });
+      }
+
+      var toast = document.getElementById('yir-toast');
+      var toastMsg = document.getElementById('yir-toast-msg');
+      var SWITCH_KEY = 'lj-yir-switched-to';
+      var toastTimer = null;
+
+      function showToast(text) {
+        if (!toast || !toastMsg) return;
+        toastMsg.textContent = text;
+        toast.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () { toast.classList.remove('show'); }, 2300);
+      }
+
+      // 上一页点过年份 → 这一页加载完把「已切换」弹出来
+      try {
+        var pending = sessionStorage.getItem(SWITCH_KEY);
+        if (pending) {
+          sessionStorage.removeItem(SWITCH_KEY);
+          showToast('已切换到 ' + pending + ' 年');
+        }
+      } catch (e) { /* 隐私模式禁用 storage 时静默跳过 */ }
+
+      // 点年份只记一个标记，不 preventDefault、不改 href，跳转照走
+      document.querySelectorAll('.yir-year-pill').forEach(function (pill) {
+        pill.addEventListener('click', function () {
+          try { sessionStorage.setItem(SWITCH_KEY, pill.textContent.trim()); } catch (e) {}
+        });
+      });
+    })();
+  </script>
+
+  {% if report.has_data and report.genres %}
     <script src="{% static 'js/libraries/chartjs-4.4.9.min.js' %}"></script>
     {{ report.genres|json_script:"yir-genre-data" }}
     {{ report.age.buckets|json_script:"yir-age-data" }}
@@ -350,24 +1435,29 @@
           var light = document.documentElement.getAttribute('data-theme') === 'light';
           return {
             light: light,
-            ink: light ? '#26221c' : '#D1D5DB',
-            inkDim: light ? '#615a4d' : '#9ca3af',
-            grid: light ? 'rgba(38,34,28,.12)' : 'rgba(255,255,255,.10)',
+            ink: light ? '#221d17' : '#f4f1ea',
+            inkDim: light ? '#615a4d' : 'rgba(244,241,234,.55)',
+            grid: light ? 'rgba(48,34,18,.12)' : 'rgba(255,255,255,.08)',
+            cardBg: light ? '#fffcf6' : '#1e232a',
             slices: light
-              ? ['#4f46e5', '#047857', '#b45309', '#b91c1c', '#0369a1', '#7e22ce']
-              : ['#818cf8', '#34d399', '#fbbf24', '#fb7185', '#38bdf8', '#c084fc']
+              ? ['#9a6b1f', '#0d9468', '#5f4bc4', '#b4362c', '#0369a1', '#7e22ce']
+              : ['#e8c982', '#34d399', '#9d8df7', '#fb7185', '#38bdf8', '#c084fc']
           };
         }
 
-        // 给每个类型配一个稳定的颜色，服务端只负责名字，颜色在前端补。
-        var p0 = palette();
-        genres.forEach(function (g, i) {
-          g.color = p0.slices[i % p0.slices.length];
-        });
-        var legendDots = document.querySelectorAll('.lj-yir-dot');
-        legendDots.forEach(function (dot, i) {
-          if (i < genres.length) dot.style.background = genres[i].color;
-        });
+        // 服务端给的类型色在亮色下偏亮，统一按当前主题重刷一遍色块和圆点。
+        function paintDots() {
+          var p = palette();
+          document.querySelectorAll('[data-genre-dot]').forEach(function (dot, i) {
+            dot.style.background = p.slices[i % p.slices.length];
+          });
+          document.querySelectorAll('[data-age-dot]').forEach(function (dot, i) {
+            dot.style.background = p.slices[i % p.slices.length];
+          });
+          document.querySelectorAll('.yir-genre-fill').forEach(function (fill, i) {
+            fill.style.background = p.slices[i % p.slices.length];
+          });
+        }
 
         var genreChart = null;
         var ageChart = null;
@@ -384,7 +1474,7 @@
               datasets: [{
                 data: genres.map(function (g) { return g.minutes; }),
                 backgroundColor: p.slices.slice(0, genres.length),
-                borderColor: p.light ? '#fffdf8' : '#2a2f35',
+                borderColor: p.cardBg,
                 borderWidth: 2,
                 hoverOffset: 6
               }]
@@ -392,7 +1482,8 @@
             options: {
               responsive: true,
               maintainAspectRatio: false,
-              cutout: '62%',
+              cutout: '64%',
+              layout: { padding: 2 },
               plugins: {
                 legend: { display: false },
                 tooltip: {
@@ -420,8 +1511,8 @@
               datasets: [{
                 data: ages.map(function (a) { return a.hours; }),
                 backgroundColor: p.slices.slice(0, ages.length),
-                borderRadius: 6,
-                maxBarThickness: 34
+                borderRadius: 5,
+                maxBarThickness: 16
               }]
             },
             options: {
@@ -443,12 +1534,12 @@
                 x: {
                   beginAtZero: true,
                   grid: { color: p.grid, drawTicks: false },
-                  ticks: { color: p.inkDim, font: { size: 11 } },
+                  ticks: { color: p.inkDim, font: { size: 10 } },
                   border: { display: false }
                 },
                 y: {
                   grid: { display: false },
-                  ticks: { color: p.ink, font: { size: 12 } },
+                  ticks: { color: p.ink, font: { size: 11 } },
                   border: { display: false }
                 }
               }
@@ -456,8 +1547,13 @@
           });
         }
 
-        drawGenres();
-        drawAges();
+        function redraw() {
+          paintDots();
+          drawGenres();
+          drawAges();
+        }
+
+        redraw();
 
         // 主题切换只改 html[data-theme]，不重载页面，所以图要跟着重画一次。
         var lastTheme = document.documentElement.getAttribute('data-theme');
@@ -465,8 +1561,7 @@
           var now = document.documentElement.getAttribute('data-theme');
           if (now === lastTheme) return;
           lastTheme = now;
-          drawGenres();
-          drawAges();
+          redraw();
         }).observe(document.documentElement, {
           attributes: true,
           attributeFilter: ['data-theme']

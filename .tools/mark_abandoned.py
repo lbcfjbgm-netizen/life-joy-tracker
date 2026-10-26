@@ -24,11 +24,12 @@ import sys
 import time
 import unicodedata
 
-ROOT = r"C:\Users\USERNAME\Downloads\life joy"
-DB = os.path.join(ROOT, r"yamtrack\src\db\db.sqlite3")
-OUT_DIR = os.path.join(ROOT, r"ui-redesign\shots\impl")
+ROOT = os.environ.get("YAMTRACK_ROOT") or str(Path(__file__).resolve().parent.parent)
+PROJECT = os.path.dirname(ROOT)  # 上一级：life joy
+DB = os.path.join(ROOT, "src", "db", "db.sqlite3")
+OUT_DIR = os.path.join(PROJECT, "ui-redesign", "shots", "impl")
 OUT_TXT = os.path.join(OUT_DIR, "Q-list.txt")
-BAK_DIR = os.path.join(ROOT, r"yamtrack\.tools\backups")
+BAK_DIR = os.path.join(ROOT, ".tools", "backups")
 BAK_DB = os.path.join(BAK_DIR, "db_before_abandon.sqlite3")
 ROLLBACK = os.path.join(BAK_DIR, "abandon_rollback.json")
 

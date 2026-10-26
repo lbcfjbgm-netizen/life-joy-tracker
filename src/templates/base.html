@@ -117,6 +117,14 @@
         text-decoration: none;
         box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4);
       }
+      /* 日/夜切换的圆形扩散（View Transitions API，见文件末尾 __toggleTheme）。
+         两条默认规则必须关掉：View Transitions 自带一层交叉淡入淡出，
+         叠加在 clip-path 上会让边界糊成一片，扩散圆就不清楚。 */
+      ::view-transition-old(root),
+      ::view-transition-new(root) {
+        animation: none;
+        mix-blend-mode: normal;
+      }
     </style>
 
     <script src="{% static 'js/libraries/htmx-2.0.4.min.js' %}"></script>
@@ -172,8 +180,14 @@
         // 品牌区那个库名也跟着当前页面换
         const lib = document.getElementById('lj-tn-lib');
         if (lib) lib.textContent = window.__ljLibLabel(parts, currentType);
+        // 「筛选 / 定位」按钮的显隐必须在这里重算一次：它原本只在上面的初始化脚本里跑一次，
+        // 而 hx-boost 换页不重跑脚本，于是从别的页面软导航进列表页后它一直保持 hidden
+        // → 顶栏动作区窄一截（实测 224px 掉到 147px），密度胶囊按动作区宽度算的 right 也跟着漂。
+        window.__ljSyncFilterBtns && window.__ljSyncFilterBtns();
         // 换页后宽度可能变了（比如从有筛选行的列表页换到设置页），重新量一次溢出
         window.__ljRelayout && window.__ljRelayout();
+        // 通知页面级脚本（media_list.html 里那个 Alpine 组件）重算密度胶囊的 right 偏移
+        document.dispatchEvent(new CustomEvent('lj:navigate', { detail: { url: window.location.href } }));
       });
       // 库名映射：列表页按媒体类型，别的页面按路径给个人话名，认不出就留空
       window.__ljLibLabel = function (parts, mediaType) {
@@ -181,7 +195,8 @@
         if (mediaType && byType[mediaType]) return byType[mediaType];
         if (parts.length === 0) return '首页';
         const head = parts[0];
-        const fixed = { statistics: '统计', 'year-in-review': '年度报告', journal: '日志', lists: '列表', list: '列表', calendar: '日历', search: '搜索', settings: '设置', details: '详情' };
+        // 年度报告 / 临门一脚已并进统计当分页，软导航过去也显示「统计」，跟上面模板里那套判断对齐
+        const fixed = { statistics: '统计', 'year-in-review': '统计', 'near-complete': '统计', journal: '日志', lists: '列表', list: '列表', calendar: '日历', search: '搜索', settings: '设置', details: '详情' };
         return fixed[head] || '';
       };
     </script>
@@ -257,8 +272,7 @@
                 {% elif media_type == "movie" %}电影库
                 {% elif media_type == "tv" or media_type == "season" or media_type == "episode" %}剧集库
                 {% elif request.path == "/" %}首页
-                {% elif "/statistics" in request.path %}统计
-                {% elif "/year-in-review" in request.path %}年度报告
+                {% elif "/statistics" in request.path or "/year-in-review" in request.path or "/near-complete" in request.path %}统计
                 {% elif "/journal" in request.path %}日志
                 {% elif "/lists" in request.path %}列表
                 {% elif "/calendar" in request.path %}日历
@@ -345,30 +359,6 @@
                   {% include "app/icons/bars-pyramid.svg" with classes="w-5 h-5" %}
                 </a>
               {% endif %}
-
-              {% url 'year_in_review' as year_in_review_url %}
-              {# 年度报告页的 Chart.js 也在 block js 里，软导航换 #main-content 时不会执行 → 整页跳转 #}
-              <a href="{{ year_in_review_url }}"
-                 hx-boost="false"
-                 data-lj-prio="3.5"
-                 data-lj-group="工具"
-                 class="lj-tn-item{% if request.path == year_in_review_url %} is-on{% endif %}"
-                 title="年度报告"
-                 aria-label="年度报告">
-                {% include "app/icons/trophy.svg" with classes="w-5 h-5" %}
-              </a>
-
-              {% url 'near_complete' as near_complete_url %}
-              {# 临门一脚：整页一次性渲染，跟年度报告一样走整页跳转，不做软导航 #}
-              <a href="{{ near_complete_url }}"
-                 hx-boost="false"
-                 data-lj-prio="3.4"
-                 data-lj-group="工具"
-                 class="lj-tn-item{% if request.path == near_complete_url %} is-on{% endif %}"
-                 title="临门一脚"
-                 aria-label="临门一脚">
-                {% include "app/icons/award.svg" with classes="w-5 h-5" %}
-              </a>
 
               {% url 'journal' as journal_url %}
               {% if sidebar_items.journal_enabled %}
@@ -478,7 +468,7 @@
               {# 日/夜：沿用原来的 __toggleTheme，只把按钮从右下角搬到顶栏 #}
               <button type="button"
                       id="theme-toggle"
-                      onclick="window.__toggleTheme()"
+                      onclick="window.__toggleTheme(event)"
                       title="{% trans 'Switch theme' %}"
                       aria-label="{% trans 'Switch theme' %}"
                       class="lj-tn-pill">
@@ -598,13 +588,51 @@
 
 
     <script>
-      window.__toggleTheme = function () {
+      // 日/夜切换。点了按钮就从点击位置向外扩散一个圆，把新主题「推」满全屏。
+      // 用的是浏览器自带的 View Transitions API：它先把旧画面拍成快照，
+      // 我们让 apply() 把主题换掉，再用 clip-path 从圆点向外长出新画面的快照。
+      // 不支持这个 API 的浏览器（老 Safari/Firefox）直接换，功能不少任何一样。
+      window.__toggleTheme = function (ev) {
         var root = document.documentElement;
         var next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
-        root.setAttribute('data-theme', next);
-        root.classList.toggle('scheme-dark', next === 'dark');
-        try { localStorage.setItem('yamtrack-theme', next); } catch (e) {}
-        if (window.__setThemeMeta) window.__setThemeMeta(next);
+
+        // 四件事绑在一起，动画包装和降级都调它，保证语义和以前完全一致
+        function apply() {
+          root.setAttribute('data-theme', next);
+          root.classList.toggle('scheme-dark', next === 'dark');
+          try { localStorage.setItem('yamtrack-theme', next); } catch (e) {}
+          if (window.__setThemeMeta) window.__setThemeMeta(next);
+        }
+
+        // 键盘回车 / 用代码调用时 ev 为空或坐标是 0，退回到按钮所在位置（右上角）
+        var x = (ev && ev.clientX) ? ev.clientX : window.innerWidth - 60;
+        var y = (ev && ev.clientY) ? ev.clientY : 28;
+
+        if (!document.startViewTransition) {
+          apply();
+          return;
+        }
+
+        // 圆要长到能盖住离点击点最远的那个角
+        var endRadius = Math.hypot(
+          Math.max(x, window.innerWidth - x),
+          Math.max(y, window.innerHeight - y)
+        );
+
+        var vt = document.startViewTransition(apply);
+        vt.ready.then(function () {
+          root.animate(
+            { clipPath: [
+              'circle(0px at ' + x + 'px ' + y + 'px)',
+              'circle(' + endRadius + 'px at ' + x + 'px ' + y + 'px)'
+            ] },
+            {
+              duration: 420,
+              easing: 'cubic-bezier(.22,.8,.24,1)',
+              pseudoElement: '::view-transition-new(root)'
+            }
+          );
+        }).catch(function () {});
       };
       // 导航折叠：只读写 localStorage，不碰数据库、不发请求。
       // 按钮在顶栏 header 里、header 带 hx-boost，所以按钮必须 type=button + onclick 自己处理。
@@ -1148,11 +1176,97 @@
           setTimeout(function () { row.classList.remove('lj-tn-hit'); }, 1800);
           var i = row.querySelector('input[type="text"]'); if (i) i.focus({ preventScroll: true });
         };
+        // 顶栏的两个按钮在整页加载时挂一次点击；显隐则抽成 __ljSyncFilterBtns 供软导航后重算
         ['lj-tn-filter', 'lj-tn-locate'].forEach(function (id) {
           var b = $(id); if (!b) return;
-          b.addEventListener('click', gotoFilter); if (document.querySelector('#filter-form')) b.hidden = false;
+          b.addEventListener('click', gotoFilter);
         });
+        // 软导航换进来的新页面有没有筛选行，决定这两个按钮该不该露出来。
+        // 原来这段只在整页加载时跑一次，hx-boost 换页后不再执行 → 从首页软导航进列表页按钮永远 hidden。
+        window.__ljSyncFilterBtns = function () {
+          var hasFilter = !!document.querySelector('#filter-form');
+          ['lj-tn-filter', 'lj-tn-locate'].forEach(function (id) {
+            var b = $(id); if (b) b.hidden = !hasFilter;
+          });
+        };
+        window.__ljSyncFilterBtns();
         window.__ljRelayout(); addEventListener('resize', function () { clearTimeout(window.__ljTimer); window.__ljTimer = setTimeout(window.__ljRelayout, 120); });
+      })();
+    </script>
+
+    {% comment %}
+      软导航后补页面自己 head 里的样式表。
+
+      为什么需要：hx-boost（顶栏 #lj-topnav）换页只把 #main-content 换掉，<head> 一个字节不动。
+      而 media_list.html 的 {% block extra_head %} 里那个 hero.css 只在「整页加载这个页面」时才进 head。
+      所以从首页 / 统计页 / 日志页点进游戏库时，页面上永远没有 hero.css → 巨幕主图
+      object-fit 从 cover 退化成 fill，1600×1000 被拉成 1472×475（用户说的「拉成超宽」）。
+      从电影库点进游戏不复现，因为电影库整页加载时已经把 hero.css 带进来了。
+
+      做法：从响应文本的 <link> 标签里抽出 /static/ 开头的 .css href，缺哪个补哪个。
+        （只认 <link> 标签，不认正文里的裸字符串：SELECT2_CSS 那种 JS 数组是「用到才加载」的，
+          照抄进 head 只会平白多两份样式表。）
+      只做「缺了补」，不删多余的：
+        hero.css 全部规则都挂在 .lj-showcase.lj-hero / main:has(.lj-showcase.lj-hero) 作用域下，
+        留在 head 里对别的页面零影响；反过来误删 base 里的 main.css 会直接白屏，风险完全不对等。
+        也不做「多了删」：从游戏库点回首页时 hero.css 会留在 head 里，实测首页没有任何元素
+        命中 .lj-showcase.lj-hero，一条规则都不生效，页面高度/图片数量和整页加载完全一致。
+      去重只比较 ? 之前的部分：模板里 href 末尾带查询串（mtime），带查询串比会重复叠加。
+    {% endcomment %}
+    <script>
+      (function () {
+        // 只认真正的 link 标签（形如「link 标签 + href 指向 /static/ 下的 .css」），不认裸字符串：
+        // 页面正文里的 JS 数组（比如 SELECT2_CSS）也写着 /static/ 下的样式表路径字面量，
+        // 那是「用到才加载」的，一律照抄进 head 反而平白多两份样式表。
+        var LINK_RE = /<link\b[^>]*\bhref\s*=\s*["']([^"']+\.css(?:\?[^"']*)?)["']/gi;
+        var norm = function (href) {
+          var s = String(href || ''), q = s.indexOf('?');
+          return q < 0 ? s : s.slice(0, q);
+        };
+        var pickHrefs = function (html) {
+          var out = [], m, rx = new RegExp(LINK_RE.source, 'gi');
+          while ((m = rx.exec(html))) {
+            if (/\/static\//.test(m[1])) out.push(m[1]);
+          }
+          return out;
+        };
+        var ensureStylesheets = function (html) {
+          if (!html) return;
+          var found = pickHrefs(html);
+          if (!found.length) return;
+          var have = {};
+          [].slice.call(document.head.querySelectorAll('link[rel="stylesheet"][href]')).forEach(function (l) {
+            have[norm(l.getAttribute('href'))] = 1;
+          });
+          found.forEach(function (raw) {
+            var href = raw.replace(/&amp;/g, '&'), key = norm(href);
+            if (!key || have[key]) return;
+            have[key] = 1;
+            var link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.type = 'text/css';
+            link.href = href;
+            // 🔴 必须插到 base 自己那批样式表**前面**，不能 appendChild 挂到 head 末尾：
+            //    页面级 extra_head（hero.css）在整页加载时本来就排在 main.css 之前（见本文件 59 行），
+            //    挂到末尾会把它排到 showcase.css / topnav.css 之后 —— 层叠顺序反转，后加载的把前者覆盖掉。
+            //    实测后果：showcase.css 里那条「巨屏下把筛选行改回 static」的覆盖被 hero.css 的
+            //    fixed/z-index:5 反超 → 筛选行变成层叠上下文 → 里面的密度胶囊 z-index:52 只在内部生效，
+            //    整颗被 z-index:50 的顶栏盖住 = 元素有尺寸但看不见（只发生在软导航后）。
+            var firstBase = null;
+            [].slice.call(document.head.querySelectorAll('link[rel="stylesheet"][href]')).forEach(function (l) {
+              if (!firstBase && /\/css\/main\.css$/.test(norm(l.getAttribute('href')))) firstBase = l;
+            });
+            if (firstBase && firstBase.parentNode === document.head) document.head.insertBefore(link, firstBase);
+            else document.head.appendChild(link);
+          });
+        };
+        document.addEventListener('htmx:afterRequest', function (e) {
+          var xhr = e.detail && e.detail.xhr;
+          if (!xhr || xhr.status !== 200) return;
+          var ct = (xhr.getResponseHeader('content-type') || '');
+          if (ct.indexOf('html') < 0) return;
+          ensureStylesheets(xhr.responseText);
+        });
       })();
     </script>
 

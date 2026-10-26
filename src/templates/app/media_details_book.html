@@ -1,0 +1,1447 @@
+{% load app_tags humanize i18n %}
+{% media_section_count media user_medias watch_providers watch_provider_region as section_total %}
+
+{% comment %}
+  图书详情页（设计稿版）。
+  全部视觉挂在外层 .lj-bk 作用域，样式只写在本片段内联 <style> 里
+  （heads/book.html 不许改，主模板也没给第二入口）。
+  元素级重置必须包进 @layer base：main.css 是 Tailwind 4
+  `@layer theme, base, components, utilities` 的产物，不带层的普通声明会压过所有层，
+  把功能按钮上的 bg-emerald-700 之类一起清成透明（亮色主题下白字看不见）。
+{% endcomment %}
+<style>
+  /* ---------- 变量：照抄设计稿两套配色，作用域改为 .lj-bk ---------- */
+  .lj-bk {
+    --radius: 14px;
+    --radius-sm: 10px;
+    --ease: cubic-bezier(.22, .8, .24, 1);
+    --pad: clamp(20px, 3vw, 40px);
+    --font-ui: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+    --font-serif: "Noto Serif SC", "Source Han Serif SC", "Source Han Serif CN", "Songti SC", "STSong", serif;
+    --font-mono: "JetBrains Mono", "Cascadia Mono", "Consolas", ui-monospace, monospace;
+    --bg: #14171b;
+    --bg-elev: #1b1f25;
+    --panel: #1d2229;
+    --panel-2: #232932;
+    --card: rgba(29, 34, 41, .84);
+    --card-solid: #1e232a;
+    --card-hover: rgba(38, 45, 54, .94);
+    --ink: #f4f1ea;
+    --ink2: rgba(244, 241, 234, .76);
+    --ink3: rgba(244, 241, 234, .48);
+    --line: rgba(255, 255, 255, .09);
+    --line2: rgba(255, 255, 255, .055);
+    --warm-line: rgba(232, 201, 130, .38);
+    --gold: #e8c982;
+    --gold-soft: rgba(232, 201, 130, .14);
+    --gold-line: rgba(232, 201, 130, .30);
+    --violet: #9d8df7;
+    --violet-soft: rgba(139, 122, 245, .15);
+    --violet-line: rgba(157, 141, 247, .30);
+    --emerald: #34d399;
+    --emerald-bg: #10b981;
+    --emerald-soft: rgba(16, 185, 129, .16);
+    --verm: #e0675a;
+    --verm-soft: rgba(224, 103, 90, .14);
+    --verm-line: rgba(224, 103, 90, .32);
+    --accent: #e8c982;
+    --skylight: inset 0 1px 0 rgba(255, 255, 255, .07);
+    --shadow: 0 22px 54px -14px rgba(0, 0, 0, .62);
+    --shadow-s: 0 8px 24px -6px rgba(0, 0, 0, .42);
+    --hover: rgba(255, 255, 255, .06);
+    --scrim: 20, 23, 27;
+    --hero-alpha: .32;
+    --tag-bg: rgba(255, 255, 255, .055);
+    --tag-ink: rgba(244, 241, 234, .84);
+    --thought-bg: linear-gradient(135deg, rgba(232, 201, 130, .09) 0%, rgba(29, 34, 41, .92) 100%);
+    --quote-sub-bg: rgba(15, 18, 23, .56);
+    position: relative;
+    isolation: isolate;
+    font-family: var(--font-ui);
+    color: var(--ink);
+  }
+
+  html[data-theme="light"] .lj-bk {
+    --bg: #f4efe5;
+    --bg-elev: #ebe4d6;
+    --panel: #fffcf6;
+    --panel-2: #f9f3e8;
+    --card: rgba(255, 252, 246, .84);
+    --card-solid: #fffcf6;
+    --card-hover: #ffffff;
+    --ink: #221d17;
+    --ink2: rgba(34, 29, 23, .78);
+    --ink3: rgba(34, 29, 23, .52);
+    --line: rgba(48, 34, 18, .12);
+    --line2: rgba(48, 34, 18, .07);
+    --warm-line: rgba(154, 107, 31, .36);
+    --gold: #9a6b1f;
+    --gold-soft: rgba(154, 107, 31, .11);
+    --gold-line: rgba(154, 107, 31, .26);
+    --violet: #5f4bc4;
+    --violet-soft: rgba(95, 75, 196, .10);
+    --violet-line: rgba(95, 75, 196, .22);
+    --emerald: #0d9468;
+    --emerald-bg: #0f9f6e;
+    --emerald-soft: rgba(15, 159, 110, .12);
+    --verm: #b4362c;
+    --verm-soft: rgba(180, 54, 44, .10);
+    --verm-line: rgba(180, 54, 44, .26);
+    --accent: #b4362c;
+    --skylight: inset 0 1px 0 rgba(255, 255, 255, .94);
+    --shadow: 0 4px 12px rgba(48, 34, 18, .06), 0 24px 52px -16px rgba(48, 34, 18, .16);
+    --shadow-s: 0 2px 5px rgba(48, 34, 18, .05), 0 14px 32px -12px rgba(48, 34, 18, .11);
+    --hover: rgba(48, 34, 18, .05);
+    --scrim: 244, 239, 229;
+    --hero-alpha: .22;
+    --tag-bg: rgba(48, 34, 18, .055);
+    --tag-ink: rgba(34, 29, 23, .82);
+    --thought-bg: linear-gradient(135deg, rgba(154, 107, 31, .08) 0%, rgba(255, 252, 246, .96) 100%);
+    --quote-sub-bg: rgba(235, 228, 214, .52);
+  }
+
+  .lj-bk *,
+  .lj-bk *::before,
+  .lj-bk *::after { box-sizing: border-box; }
+  .lj-bk [hidden],
+  .lj-bk [x-cloak] { display: none !important; }
+
+  /* ---------- 元素级重置：全部关进 @layer base，别压到 Tailwind 工具类 ---------- */
+  @layer base {
+    .lj-bk button,
+    .lj-bk input,
+    .lj-bk textarea,
+    .lj-bk select { font-family: inherit; color: inherit; }
+    .lj-bk button { background: none; border: 0; padding: 0; margin: 0; cursor: pointer; }
+    .lj-bk h1,
+    .lj-bk h2,
+    .lj-bk h3,
+    .lj-bk h4,
+    .lj-bk p,
+    .lj-bk blockquote { margin: 0; }
+    .lj-bk ul,
+    .lj-bk ol { margin: 0; padding: 0; list-style: none; }
+    .lj-bk a { color: inherit; text-decoration: none; }
+    .lj-bk img { display: block; max-width: 100%; }
+  }
+
+  .lj-bk ::selection { background: var(--accent); color: #fffcf6; }
+  .lj-bk :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lj-bk .ic { width: 17px; height: 17px; display: block; flex: 0 0 auto; }
+
+  /* ---------- 背景光斑 ---------- */
+  .lj-bk .ambient { position: absolute; inset: 0 0 auto 0; height: 540px; z-index: 0; overflow: hidden; pointer-events: none; }
+  .lj-bk .ambient-art { position: absolute; inset: 0; opacity: var(--hero-alpha); transition: opacity .6s var(--ease); }
+  .lj-bk .ambient-art img {
+    width: 100%; height: 100%; object-fit: cover; object-position: center 25%;
+    filter: blur(28px) saturate(1.12) contrast(1.04); transform: scale(1.14);
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, .68) 46%, rgba(0, 0, 0, .20) 78%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, .68) 46%, rgba(0, 0, 0, .20) 78%, transparent 100%);
+  }
+  .lj-bk .ambient-glow {
+    position: absolute; inset: -20% -10% 0 -10%;
+    background:
+      radial-gradient(46% 52% at 22% 24%, rgba(212, 160, 82, .24) 0%, transparent 72%),
+      radial-gradient(40% 48% at 76% 20%, rgba(180, 54, 44, .16) 0%, transparent 70%);
+    filter: blur(48px);
+  }
+  html[data-theme="light"] .lj-bk .ambient-glow {
+    background:
+      radial-gradient(46% 52% at 22% 24%, rgba(196, 138, 52, .17) 0%, transparent 72%),
+      radial-gradient(40% 48% at 76% 20%, rgba(180, 54, 44, .10) 0%, transparent 70%);
+  }
+  .lj-bk .ambient-fade {
+    position: absolute; inset: 0;
+    background: linear-gradient(to bottom, rgba(var(--scrim), .18) 0%, rgba(var(--scrim), .48) 45%, rgba(var(--scrim), .86) 78%, var(--bg) 100%);
+  }
+
+  /* ---------- 外壳 ---------- */
+  .lj-bk .page-shell { position: relative; z-index: 1; max-width: 1440px; margin: 0 auto; padding: 10px var(--pad) 56px; }
+
+  .lj-bk .crumb-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 28px; margin-bottom: 10px; font-size: 12px; color: var(--ink3); }
+  .lj-bk .crumb-links { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+  .lj-bk .crumb-links a { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 3px 8px 3px 4px; border-radius: 6px; color: var(--ink2); transition: background .2s, color .2s; }
+  .lj-bk .crumb-links a:hover { background: var(--hover); color: var(--ink); }
+  .lj-bk .crumb-links a .ic { width: 14px; height: 14px; }
+  .lj-bk .crumb-sep { opacity: .45; }
+  .lj-bk .crumb-cur { color: var(--ink2); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .lj-bk .pill-btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); box-shadow: var(--skylight); font-size: 11.5px; color: var(--ink2); transition: all .2s var(--ease); flex: 0 0 auto; }
+  .lj-bk .pill-btn:hover { color: var(--ink); border-color: var(--warm-line); background: var(--card-hover); }
+  .lj-bk .pill-btn .ic { width: 13px; height: 13px; color: var(--gold); }
+
+  /* ---------- 头部 ---------- */
+  .lj-bk .hero-compact { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: start; margin-bottom: 18px; }
+  .lj-bk .poster-col { display: flex; flex-direction: column; gap: 8px; width: 200px; }
+  .lj-bk .poster-frame {
+    position: relative; width: 200px; aspect-ratio: 2 / 3; border-radius: 6px 12px 12px 6px;
+    overflow: hidden; background: var(--panel); border: 1px solid var(--line);
+    box-shadow: var(--skylight), var(--shadow);
+  }
+  .lj-bk .poster-frame::after {
+    content: ''; position: absolute; inset: 0 auto 0 0; width: 12px; pointer-events: none;
+    background: linear-gradient(90deg, rgba(0, 0, 0, .45) 0%, rgba(255, 255, 255, .18) 38%, rgba(0, 0, 0, .16) 76%, transparent 100%);
+  }
+  .lj-bk .poster-frame img { width: 100%; height: 100%; object-fit: cover; transition: transform .5s var(--ease); }
+  .lj-bk .poster-frame:hover img { transform: scale(1.025); }
+  .lj-bk .poster-badge {
+    position: absolute; top: 8px; left: 14px; z-index: 2; padding: 2px 7px; border-radius: 6px;
+    font-size: 10px; font-weight: 600; letter-spacing: .04em; color: #f4f1ea;
+    background: rgba(15, 18, 24, .78); border: 1px solid rgba(255, 255, 255, .14);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  }
+
+  .lj-bk .status-wrap { position: relative; }
+  .lj-bk .status-split {
+    display: grid; grid-template-columns: 1fr 34px; height: 34px; overflow: visible;
+    border-radius: 9px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), 0 4px 12px rgba(0, 0, 0, .22);
+  }
+  .lj-bk .status-split--single { grid-template-columns: 1fr; }
+  .lj-bk .status-main-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 0; padding: 0 10px;
+    border-radius: 9px 0 0 9px; font-size: 12.5px; font-weight: 600; letter-spacing: .06em; color: #fff; transition: filter .2s;
+  }
+  .lj-bk .status-main-btn > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lj-bk .status-main-btn:hover { filter: brightness(1.08); }
+  .lj-bk .status-split--single .status-main-btn { border-radius: 9px; }
+  .lj-bk .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 3px rgba(255, 255, 255, .26); flex: 0 0 auto; }
+  .lj-bk .status-Trigger { display: grid; place-items: center; border-left: 1px solid rgba(255, 255, 255, .22); border-radius: 0 9px 9px 0; color: #fff; transition: filter .2s; }
+  .lj-bk .status-Trigger:hover { filter: brightness(1.08); }
+  .lj-bk .status-Trigger .ic, .lj-bk .status-Trigger svg { width: 13px; height: 13px; color: #fff; }
+  .lj-bk .status-chev { display: flex; transition: transform .2s var(--ease); }
+  .lj-bk .status-menu {
+    position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 50;
+    padding: 5px; border-radius: 10px; background: var(--panel); color: var(--ink);
+    border: 1px solid var(--line); box-shadow: var(--shadow), var(--skylight);
+  }
+  .lj-bk .status-menu button { width: 100%; display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 7px; font-size: 12px; color: var(--ink2); transition: background .15s, color .15s; }
+  .lj-bk .status-menu button:hover { background: var(--hover); color: var(--ink); }
+  .lj-bk .status-menu .ic, .lj-bk .status-menu svg { width: 13px; height: 13px; color: var(--gold); }
+
+  .lj-bk .hero-main { display: flex; flex-direction: column; justify-content: space-between; min-height: 342px; gap: 11px; min-width: 0; }
+  .lj-bk .hero-head { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .lj-bk .title-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px 14px; min-width: 0; }
+  .lj-bk .game-title { font-family: var(--font-serif); font-size: clamp(24px, 2.2vw, 31px); font-weight: 700; letter-spacing: .02em; line-height: 1.18; color: var(--ink); overflow-wrap: anywhere; }
+  .lj-bk .game-cn-sub { font-size: 13px; font-weight: 500; color: var(--gold); padding: 2px 10px; border-radius: 6px; background: var(--gold-soft); border: 1px solid var(--gold-line); }
+  .lj-bk .steam-pill { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-family: var(--font-mono); color: var(--ink2); background: var(--tag-bg); border: 1px solid var(--line); transition: border-color .2s, color .2s; }
+  .lj-bk .steam-pill:hover { color: var(--ink); border-color: var(--warm-line); }
+  .lj-bk .steam-pill .ic, .lj-bk .steam-pill svg { width: 11px; height: 11px; }
+
+  .lj-bk .meta-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+  .lj-bk .meta-chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 6px; font-size: 11.5px; background: var(--tag-bg); color: var(--tag-ink); border: 1px solid var(--line2); }
+  .lj-bk .meta-chip--author { background: var(--gold-soft); color: var(--gold); border-color: var(--gold-line); font-weight: 600; }
+  .lj-bk .meta-chip--genre { background: var(--violet-soft); color: var(--violet); border-color: var(--violet-line); font-weight: 500; }
+  .lj-bk .meta-chip--done { background: var(--emerald-soft); color: var(--emerald); border-color: transparent; font-weight: 600; }
+  .lj-bk .meta-chip .ic, .lj-bk .meta-chip svg { width: 12px; height: 12px; opacity: .8; }
+
+  .lj-bk .synopsis-box { padding: 9px 14px; border-radius: 10px; background: var(--card); border: 1px solid var(--line2); box-shadow: var(--skylight); display: flex; flex-direction: column; gap: 6px; }
+  .lj-bk .synopsis-body { display: flex; align-items: flex-start; gap: 10px; font-size: 12.5px; line-height: 1.56; color: var(--ink2); }
+  .lj-bk .synopsis-quote-bar { width: 3px; align-self: stretch; border-radius: 3px; flex: 0 0 auto; background: linear-gradient(to bottom, var(--gold), var(--verm)); }
+  .lj-bk .synopsis-text { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .lj-bk .synopsis-text.is-clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .lj-bk .synopsis-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+  .lj-bk .synopsis-toggle { font-size: 11px; color: var(--ink3); padding: 2px 7px; border-radius: 5px; transition: color .18s; }
+  .lj-bk .synopsis-toggle:hover { color: var(--gold); }
+
+  /* ---------- 四张指标卡 ---------- */
+  .lj-bk .metrics-ribbon { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .lj-bk .m-card {
+    position: relative; padding: 12px 14px; border-radius: 12px; background: var(--card);
+    border: 1px solid var(--line); box-shadow: var(--skylight), var(--shadow-s);
+    display: flex; flex-direction: column; justify-content: space-between; gap: 6px; min-height: 114px; min-width: 0;
+    transition: transform .22s var(--ease), border-color .22s var(--ease), background .22s var(--ease);
+  }
+  .lj-bk .m-card:hover { transform: translateY(-1px); border-color: var(--warm-line); background: var(--card-solid); }
+  .lj-bk .m-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .lj-bk .m-label { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--ink3); letter-spacing: .04em; }
+  .lj-bk .m-label .ic, .lj-bk .m-label svg { width: 14px; height: 14px; color: var(--gold); }
+  .lj-bk .m-mini-btn { padding: 2px 7px; border-radius: 6px; font-size: 11px; font-weight: 600; background: var(--gold-soft); color: var(--gold); border: 1px solid var(--gold-line); transition: all .18s; flex: 0 0 auto; }
+  .lj-bk .m-value-row { display: flex; align-items: baseline; gap: 6px; margin: 4px 0 2px; min-width: 0; }
+  .lj-bk .m-val { font-family: var(--font-serif); font-size: 22px; font-weight: 700; letter-spacing: -.01em; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .lj-bk .m-unit { font-size: 12px; color: var(--ink3); font-weight: 500; }
+  .lj-bk .m-foot { font-size: 11px; color: var(--ink3); display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .lj-bk .m-foot--em { color: var(--emerald); font-weight: 600; }
+  .lj-bk .prog-track { width: 100%; height: 5px; border-radius: 999px; background: var(--line); overflow: hidden; margin: 6px 0 2px; }
+  .lj-bk .prog-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--emerald), var(--gold)); transition: width .4s var(--ease); }
+
+  .lj-bk .rating-anchor { position: relative; }
+  .lj-bk .rating-display { display: flex; align-items: baseline; gap: 6px; cursor: pointer; }
+  .lj-bk .rating-stars-mini { display: inline-flex; align-items: center; gap: 2px; color: var(--gold); }
+  .lj-bk .rating-stars-mini svg { width: 13px; height: 13px; fill: currentColor; stroke: none; }
+  .lj-bk .rating-stars-mini > span { opacity: .26; display: flex; }
+  .lj-bk .rating-stars-mini > span.is-on { opacity: 1; }
+  .lj-bk .rating-popup { position: absolute; left: 0; top: calc(100% + 6px); z-index: 60; width: 248px; max-width: 72vw; padding: 9px 10px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); }
+  .lj-bk .rating-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 2px; }
+  .lj-bk .rating-star { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--ink3); padding: 2px 1px; border-radius: 5px; transition: color .15s; }
+  .lj-bk .rating-star:hover { background: var(--hover); }
+  .lj-bk .rating-star.is-on { color: var(--gold); }
+  .lj-bk .rating-star svg { width: 15px; height: 15px; }
+  .lj-bk .rating-star.is-on svg { fill: currentColor; stroke: none; }
+  .lj-bk .rating-star span { font-size: 9.5px; line-height: 1; }
+  .lj-bk .rating-toast { position: absolute; left: 0; top: -30px; z-index: 70; white-space: nowrap; padding: 3px 9px; border-radius: 7px; font-size: 11px; font-weight: 500; box-shadow: var(--shadow-s); }
+  .lj-bk .rating-toast.ok { background: var(--emerald-bg); color: #fff; }
+  .lj-bk .rating-toast.fail { background: var(--verm); color: #fff; }
+
+  /* ---------- 两栏 ---------- */
+  .lj-bk .content-split { display: grid; grid-template-columns: minmax(0, 1fr) 308px; gap: 20px; align-items: start; }
+  .lj-bk .section-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--skylight), var(--shadow-s); padding: 16px 18px 18px; min-width: 0; }
+  .lj-bk .sec-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 12px; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--line2); }
+  .lj-bk .sec-header--tight { margin-bottom: 10px; padding-bottom: 8px; }
+  .lj-bk .sec-title-wrap { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+  .lj-bk .sec-title { font-family: var(--font-serif); font-size: 16px; font-weight: 700; letter-spacing: .04em; display: inline-flex; align-items: center; gap: 8px; color: var(--ink); }
+  .lj-bk .sec-title::before { content: ''; width: 3px; height: 15px; border-radius: 2px; background: var(--gold); }
+  .lj-bk .sec-title--sm { font-size: 14.5px; }
+  .lj-bk .sec-count { font-size: 11.5px; color: var(--ink3); padding: 2px 9px; border-radius: 999px; background: var(--tag-bg); border: 1px solid var(--line2); }
+  .lj-bk .gallery-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .lj-bk .layout-seg { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border-radius: 9px; background: var(--panel); border: 1px solid var(--line); }
+  .lj-bk .layout-seg button { padding: 4px 10px; border-radius: 6px; font-size: 11.5px; color: var(--ink3); transition: all .18s; border: 1px solid transparent; }
+  .lj-bk .layout-seg button:hover { color: var(--ink); }
+  .lj-bk .layout-seg button.on { background: var(--gold-soft); color: var(--gold); font-weight: 600; border-color: var(--gold-line); }
+
+  /* ---------- 划线 / 想法 卡片 ---------- */
+  .lj-bk .notes-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
+  .lj-bk .notes-grid[data-cols="1"] { grid-template-columns: minmax(0, 1fr); }
+  .lj-bk .note-card {
+    position: relative; border-radius: 11px; padding: 13px 15px; background: var(--panel);
+    border: 1px solid var(--line); box-shadow: var(--skylight);
+    display: flex; flex-direction: column; justify-content: space-between; gap: 9px; min-width: 0;
+    transition: transform .22s var(--ease), border-color .22s var(--ease), box-shadow .22s var(--ease);
+  }
+  .lj-bk .note-card:hover { transform: translateY(-2px); border-color: var(--warm-line); box-shadow: var(--shadow-s); }
+  .lj-bk .note-card--thought { background: var(--thought-bg); border-color: var(--gold-line); }
+  .lj-bk .note-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+  .lj-bk .note-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 5px; font-size: 10.5px; font-weight: 600; letter-spacing: .03em; flex: 0 0 auto; }
+  .lj-bk .note-badge--thought { background: var(--verm-soft); color: var(--verm); border: 1px solid var(--verm-line); }
+  html[data-theme="dark"] .lj-bk .note-badge--thought { background: var(--gold-soft); color: var(--gold); border-color: var(--gold-line); }
+  .lj-bk .note-badge--highlight { background: var(--violet-soft); color: var(--violet); border: 1px solid var(--violet-line); }
+  .lj-bk .note-chapter { font-size: 11px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 62%; }
+  .lj-bk .thought-comment { font-size: 13.5px; font-weight: 600; line-height: 1.56; color: var(--ink); letter-spacing: .01em; overflow-wrap: anywhere; }
+  .lj-bk .thought-source-quote { padding: 8px 11px; border-radius: 8px; background: var(--quote-sub-bg); border-left: 2.5px solid var(--gold); font-family: var(--font-serif); font-size: 12px; line-height: 1.62; color: var(--ink2); overflow-wrap: anywhere; }
+  .lj-bk .highlight-quote { position: relative; padding-left: 11px; border-left: 2.5px solid var(--violet); font-family: var(--font-serif); font-size: 13px; line-height: 1.68; color: var(--ink); overflow-wrap: anywhere; }
+  .lj-bk .highlight-quote,
+  .lj-bk .thought-comment,
+  .lj-bk .thought-source-quote { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+  .lj-bk .highlight-quote { -webkit-line-clamp: 6; }
+  .lj-bk .thought-comment { -webkit-line-clamp: 8; }
+  .lj-bk .thought-source-quote { -webkit-line-clamp: 6; }
+  .lj-bk .highlight-quote.is-open,
+  .lj-bk .thought-comment.is-open,
+  .lj-bk .thought-source-quote.is-open { display: block; -webkit-line-clamp: unset; overflow: visible; }
+  .lj-bk .note-more { align-self: flex-start; font-size: 11px; color: var(--gold); }
+  .lj-bk .note-more:hover { text-decoration: underline; }
+  .lj-bk .note-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding-top: 6px; border-top: 1px dashed var(--line2); font-size: 11px; color: var(--ink3); }
+  .lj-bk .note-card-foot > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lj-bk .copy-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--ink3); padding: 2px 6px; border-radius: 5px; transition: color .15s, background .15s; flex: 0 0 auto; }
+  .lj-bk .copy-btn:hover { color: var(--gold); background: var(--hover); }
+  .lj-bk .copy-btn .ic, .lj-bk .copy-btn svg { width: 11px; height: 11px; }
+
+  .lj-bk .gallery-footer { margin-top: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line2); font-size: 12px; color: var(--ink3); }
+  .lj-bk .gallery-footer > span { min-width: 0; }
+  .lj-bk .expand-btn { display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); color: var(--ink2); font-size: 12px; font-weight: 500; transition: all .2s; flex: 0 0 auto; }
+  .lj-bk .expand-btn:hover { color: var(--ink); border-color: var(--warm-line); }
+  .lj-bk .expand-btn .ic, .lj-bk .expand-btn svg { width: 12px; height: 12px; }
+
+  /* ---------- 空态 ---------- */
+  .lj-bk .bk-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 34px 18px; border-radius: 11px; background: var(--panel); border: 1px dashed var(--line); text-align: center; }
+  .lj-bk .bk-empty .ic, .lj-bk .bk-empty svg { width: 26px; height: 26px; color: var(--ink3); }
+  .lj-bk .bk-empty-title { font-size: 13px; font-weight: 600; color: var(--ink2); }
+  .lj-bk .bk-empty-sub { font-size: 11.5px; color: var(--ink3); max-width: 34ch; line-height: 1.6; }
+
+  /* ---------- 右栏 ---------- */
+  .lj-bk .side-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .lj-bk .note-box { position: relative; padding: 12px 13px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line2); font-size: 12.5px; line-height: 1.68; color: var(--ink2); margin-bottom: 12px; overflow-wrap: anywhere; }
+  .lj-bk .note-box-quote { position: absolute; left: 4px; top: -2px; font-family: var(--font-serif); font-size: 34px; line-height: 1; color: var(--gold); opacity: .45; pointer-events: none; }
+  .lj-bk .note-box-body { padding-top: 14px; }
+  .lj-bk .note-box--muted { color: var(--ink3); }
+  .lj-bk .kv-list { display: flex; flex-direction: column; gap: 8px; }
+  .lj-bk .kv-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; padding: 4px 0; border-bottom: 1px dashed var(--line2); }
+  .lj-bk .kv-row:last-child { border-bottom: 0; padding-bottom: 0; }
+  .lj-bk .kv-k { color: var(--ink3); flex: 0 0 auto; }
+  .lj-bk .kv-v { color: var(--ink2); font-weight: 500; font-variant-numeric: tabular-nums; text-align: right; min-width: 0; overflow-wrap: anywhere; }
+  .lj-bk .kv-v a { color: var(--gold); display: inline-flex; align-items: center; gap: 3px; }
+  .lj-bk .kv-v a:hover { text-decoration: underline; }
+  .lj-bk .kv-v a .ic, .lj-bk .kv-v a svg { width: 11px; height: 11px; }
+  .lj-bk .kv-v--ok { color: var(--emerald); font-weight: 600; }
+  .lj-bk .side-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line2); }
+  .lj-bk .side-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 31px; min-height: 31px; padding: 0 10px; border-radius: 8px; font-size: 11.5px; background: var(--panel); border: 1px solid var(--line); color: var(--ink2); transition: all .18s; min-width: 0; }
+  .lj-bk .side-btn:hover { color: var(--ink); border-color: var(--warm-line); background: var(--hover); }
+  .lj-bk .side-btn .ic, .lj-bk .side-btn svg { width: 13px; height: 13px; color: var(--gold); }
+  .lj-bk .side-btn > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* 把 include 进来的进度条压成指标卡里的迷你尺寸 */
+  .lj-bk .bk-quick { padding: 0; margin: 0; }
+  .lj-bk .bk-quick > div { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 !important; background: transparent !important; }
+  .lj-bk .bk-quick .w-8 { width: 22px; height: 22px; border-radius: 6px; }
+  .lj-bk .bk-quick .text-sm { font-size: 11.5px; }
+  .lj-bk .bk-quick button { height: 28px; min-height: 28px; padding: 0 10px; border-radius: 7px; font-size: 11.5px; border: 1px solid var(--line); }
+  .lj-bk .bk-quick .ms-auto { margin-left: auto; }
+
+  /* ---------- 弹层 / toast ---------- */
+  .lj-bk .bk-modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, .5); z-index: 200; }
+  .lj-bk .bk-modal-box { width: 24rem; max-height: 90vh; padding: 0 16px; position: relative; z-index: 210; }
+  .lj-bk .toast {
+    position: fixed; bottom: 24px; right: 28px; z-index: 250; padding: 10px 16px; border-radius: 10px;
+    background: var(--panel); color: var(--ink); border: 1px solid var(--gold-line); box-shadow: var(--shadow);
+    font-size: 12.5px; display: flex; align-items: center; gap: 8px; opacity: 0; transform: translateY(10px);
+    pointer-events: none; transition: opacity .25s var(--ease), transform .25s var(--ease);
+  }
+  .lj-bk .toast.show { opacity: 1; transform: translateY(0); }
+  .lj-bk .toast .ic, .lj-bk .toast svg { width: 14px; height: 14px; color: var(--gold); }
+
+  /* ---------- 响应式 ---------- */
+  @media (max-width: 1180px) {
+    .lj-bk .metrics-ribbon { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .lj-bk .content-split { grid-template-columns: minmax(0, 1fr); }
+    .lj-bk .side-col { display: grid; grid-template-columns: 1fr 1fr; align-items: start; }
+  }
+  @media (max-width: 760px) {
+    .lj-bk .hero-compact { grid-template-columns: 1fr; }
+    .lj-bk .poster-col { margin: 0 auto; }
+    .lj-bk .notes-grid { grid-template-columns: 1fr; }
+    .lj-bk .side-col { grid-template-columns: 1fr; }
+    .lj-bk .title-line { gap: 8px 10px; }
+    .lj-bk .steam-pill { margin-left: 0; }
+    .lj-bk .gallery-footer { flex-direction: column; align-items: flex-start; }
+  }
+</style>
+
+<div class="lj-bk"
+     x-data="{
+       tab: 'overview',
+       noteFilter: 'all',
+       noteCols: '2',
+       notesExpanded: true,
+       shareToast: false,
+       shareMsg: '',
+       _toastTimer: null,
+       flash(msg) {
+         this.shareMsg = msg;
+         this.shareToast = true;
+         clearTimeout(this._toastTimer);
+         this._toastTimer = setTimeout(() => { this.shareToast = false; }, 1800);
+       },
+       shareLink() {
+         if (navigator.clipboard) {
+           navigator.clipboard.writeText(window.location.href)
+             .then(() => this.flash('链接已复制'))
+             .catch(() => this.flash('复制失败'));
+         } else { this.flash('当前环境不支持复制'); }
+       },
+       copyText(text) {
+         if (!text || !text.trim()) { this.flash('没有可复制的内容'); return; }
+         if (navigator.clipboard) {
+           navigator.clipboard.writeText(text)
+             .then(() => this.flash('已复制'))
+             .catch(() => this.flash('复制失败'));
+         } else { this.flash('当前环境不支持复制'); }
+       }
+     }">
+
+  {# ---------- 背景光斑 ---------- #}
+  <div class="ambient" aria-hidden="true">
+    {% if media.image %}<div class="ambient-art"><img src="{{ media.image }}" alt=""></div>{% endif %}
+    <div class="ambient-glow"></div>
+    <div class="ambient-fade"></div>
+  </div>
+
+  <div class="page-shell">
+
+    {# ---------- 面包屑 ---------- #}
+    <nav class="crumb-bar" aria-label="{% trans 'Breadcrumb' %}">
+      <div class="crumb-links">
+        <a href="{% url 'medialist' username=request.user.username media_type=media_type %}">
+          {% include "app/icons/right-arrow.svg" with classes="ic rotate-180" %}
+          <span>{{ media_type|media_type_readable_plural }}</span>
+        </a>
+        <span class="crumb-sep" aria-hidden="true">/</span>
+        <span class="crumb-cur" title="{{ media.title }}">{{ media.title }}</span>
+      </div>
+      <button type="button" class="pill-btn" title="复制本页链接" @click="shareLink()">
+        {% include "app/icons/link.svg" with classes="ic" %}
+        <span>分享</span>
+      </button>
+    </nav>
+
+    {# ---------- 头部：封面 + 标题 + 简介 + 四张指标卡 ---------- #}
+    <section class="hero-compact">
+      <div class="poster-col">
+        <div class="poster-frame">
+          <span class="poster-badge">{{ media.source|source_readable }}</span>
+          {% if media.image %}<img src="{{ media.image }}" alt="{{ media.title }}">{% endif %}
+        </div>
+
+        {# 状态按钮：hx 属性全部沿用，只换外壳 #}
+        <div class="status-wrap"
+             x-data="{ trackOpen: false, createOpen: false, menuOpen: false }"
+             @click.away="menuOpen = false"
+             @keydown.escape.window="trackOpen = false; createOpen = false; menuOpen = false">
+          <div class="status-split {% if not user_medias %}status-split--single{% endif %}">
+            <button class="status-main-btn {% if user_medias %}{{ current_instance.status|status_button_color }}{% else %}bg-gray-600 hover:bg-gray-700{% endif %}"
+                    title="{% if user_medias %}编辑追踪状态{% else %}加入追踪{% endif %}"
+                    hx-get="{% media_view_url 'track_modal' media %}"
+                    hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "instance_id": "{{ current_instance.id }}"}'
+                    hx-target="#{% component_id 'track' media current_instance.id %}"
+                    hx-trigger="click"
+                    @click="trackOpen = true">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span>
+                {% if user_medias %}
+                  {{ current_instance|media_status_readable }}
+                {% else %}
+                  {% trans "Add to tracker" %}
+                {% endif %}
+              </span>
+            </button>
+
+            {% if user_medias %}
+              <button class="status-Trigger {{ current_instance.status|status_button_color }}"
+                      title="更多追踪选项"
+                      aria-label="更多追踪选项"
+                      @click="menuOpen = !menuOpen">
+                <span class="status-chev" :class="{ 'rotate-180': menuOpen }">
+                  {% include "app/icons/chevron-down.svg" with classes="ic" %}
+                </span>
+              </button>
+            {% endif %}
+          </div>
+
+          {% if user_medias %}
+            <div x-show="menuOpen" x-cloak x-transition.opacity class="status-menu">
+              <button hx-get="{% media_view_url 'track_modal' media %}"
+                      hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "is_create": true}'
+                      hx-target="#{% component_id 'track' media %}"
+                      hx-trigger="click once"
+                      @click="menuOpen = false; createOpen = true">
+                {% include "app/icons/plus.svg" with classes="ic" %}
+                <span class="font-medium">{% trans "Add new entry" %}</span>
+              </button>
+            </div>
+
+            <div x-show="createOpen" x-cloak role="dialog" aria-modal="true" class="bk-modal">
+              <div class="bk-modal-box">
+                <div id="{% component_id 'track' media %}"></div>
+              </div>
+            </div>
+          {% endif %}
+
+          <div x-show="trackOpen" x-cloak role="dialog" aria-modal="true" class="bk-modal">
+            <div class="bk-modal-box" @click.stop>
+              <div id="{% component_id 'track' media current_instance.id %}"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hero-main">
+        <div class="hero-head">
+          <div class="title-line">
+            <h1 class="game-title">{{ media.title }}</h1>
+            {% if media.score %}<span class="game-cn-sub">{{ media.source|source_readable }} {{ media.score }}</span>{% endif %}
+            <a class="steam-pill"
+               href="{{ media.source_url }}"
+               target="_blank"
+               rel="noopener noreferrer"
+               title="在 {{ media.source|source_readable }} 打开">
+              <span>{{ media.source|source_readable }} #{{ media.media_id }}</span>
+              {% include "app/icons/external-link.svg" with classes="ic" %}
+            </a>
+          </div>
+
+          <div class="meta-row">
+            {% if user_medias %}
+              <span class="meta-chip {% if current_instance.status == Status.COMPLETED.value %}meta-chip--done{% endif %}">
+                {% include "app/icons/circle-check.svg" with classes="ic" %}
+                <span>{{ current_instance|media_status_readable }}</span>
+              </span>
+              <span class="meta-chip">
+                {% include "app/icons/book-open.svg" with classes="ic" %}
+                <span>进度 {{ current_instance.formatted_progress }}{% if not current_instance.item.total_pages %}%{% endif %}</span>
+              </span>
+              <span class="meta-chip">
+                {% include "app/icons/clock.svg" with classes="ic" %}
+                <span>{% if current_instance.reading_seconds %}{{ current_instance.reading_seconds|seconds_to_duration }}{% else %}未记录时长{% endif %}</span>
+              </span>
+            {% else %}
+              <span class="meta-chip">
+                {% include "app/icons/info.svg" with classes="ic" %}
+                <span>尚未加入书库</span>
+              </span>
+            {% endif %}
+            {% if media.details.author %}<span class="meta-chip meta-chip--author">{{ media.details.author }}</span>{% endif %}
+            {% if media.details.publishers %}
+              {% for publisher in media.details.publishers %}
+                <span class="meta-chip">{{ publisher }}</span>
+              {% endfor %}
+            {% endif %}
+          </div>
+        </div>
+
+        {% if media.synopsis and media.synopsis != "No synopsis available." %}
+          <div class="synopsis-box" x-data="{ open: false }">
+            <div class="synopsis-body">
+              <span class="synopsis-quote-bar" aria-hidden="true"></span>
+              <p class="synopsis-text" :class="{ 'is-clamped': !open }" x-ref="syn">{{ media.synopsis|linebreaksbr }}</p>
+            </div>
+            {% if media.synopsis|length > 150 %}
+              <div class="synopsis-foot">
+                <button type="button" class="synopsis-toggle" @click="open = !open">
+                  <span x-text="open ? '收起简介' : '展开简介'"></span>
+                </button>
+              </div>
+            {% endif %}
+          </div>
+        {% endif %}
+
+        {% with hl_count=highlights|length nt_count=book_notes|length %}
+          <div class="metrics-ribbon">
+
+            {# 卡1 阅读进度：内层是原生 htmx 进度条锚点（id 一字不改） #}
+            <div class="m-card">
+              <div class="m-head">
+                <span class="m-label">
+                  {% include "app/icons/book-open.svg" with classes="ic" %}
+                  <span>阅读进度</span>
+                </span>
+                {% if user_medias and current_instance.progress >= 100 %}<span class="m-mini-btn">完结</span>{% endif %}
+              </div>
+              {% if current_instance %}
+                <div id="detail-progress-{{ media_type }}-{{ current_instance.id }}" class="bk-quick">
+                  {% include "app/components/detail_progress_actions.html" with media=current_instance media_type=media_type csrf_token=csrf_token Status=Status only %}
+                </div>
+                <div class="prog-track">
+                  <div class="prog-fill" style="width: {% if current_instance.progress %}{{ current_instance.progress }}{% else %}0{% endif %}%"></div>
+                </div>
+                <div class="m-foot">
+                  <span>口径：{% if current_instance.item.total_pages %}按页数{% else %}按百分比{% endif %}</span>
+                  <span class="{% if current_instance.progress >= 100 %}m-foot--em{% endif %}">已读 {{ current_instance.formatted_progress }}{% if not current_instance.item.total_pages %}%{% endif %}</span>
+                </div>
+              {% else %}
+                <div class="m-value-row"><span class="m-val">未开始</span></div>
+                <div class="m-foot"><span>加入书库后开始记进度</span></div>
+              {% endif %}
+            </div>
+
+            {# 卡2 读书笔记 #}
+            <div class="m-card">
+              <div class="m-head">
+                <span class="m-label">
+                  {% include "app/icons/page.svg" with classes="ic" %}
+                  <span>读书笔记</span>
+                </span>
+                <span class="m-mini-btn">{{ media.source|source_readable }}</span>
+              </div>
+              <div class="m-value-row">
+                <span class="m-val">{{ hl_count|add:nt_count }}</span>
+                <span class="m-unit">条批注</span>
+              </div>
+              <div class="m-foot">
+                <span>✒️ {{ hl_count }} 条划线</span>
+                <span>💡 {{ nt_count }} 条想法</span>
+              </div>
+            </div>
+
+            {# 卡3 你的评分：10 个 hx-post 评分按钮原样保留 #}
+            <div class="m-card">
+              <div class="m-head">
+                <span class="m-label">
+                  {% include "app/icons/star.svg" with classes="ic" %}
+                  <span>你的评分</span>
+                </span>
+              </div>
+              {% if user_medias %}
+                <div class="rating-anchor"
+                     x-data="{ showRatingPopup: false, rating: {{ current_instance.score|default:'null' }}, lastRating: {{ current_instance.score|default:'null' }}, hoverRating: null, isHovering: false, scoreToast: null,
+                               onScoreDone(ok) {
+                                 if (ok) {
+                                   this.lastRating = this.rating;
+                                   this.scoreToast = { ok: true, text: '评分已保存' };
+                                 } else {
+                                   this.rating = this.lastRating;
+                                   this.scoreToast = { ok: false, text: '评分保存失败，已还原' };
+                                 }
+                                 setTimeout(() => { this.scoreToast = null; }, ok ? 2000 : 4000);
+                               } }"
+                     @htmx:after-request="onScoreDone($event.detail.successful)">
+                  <div class="rating-display" title="点击修改评分" @click="showRatingPopup = !showRatingPopup">
+                    <template x-if="rating">
+                      <span class="m-val" x-text="rating"></span>
+                    </template>
+                    <template x-if="!rating">
+                      <span class="m-val" style="color: var(--ink3)">-</span>
+                    </template>
+                    <span class="m-unit">/ 10</span>
+                    <span class="rating-stars-mini" style="margin-left: auto">
+                      {% for _star in 5|get_range %}
+                        <span :class="{ 'is-on': rating >= {{ forloop.counter }} }">
+                          {% include "app/icons/star.svg" %}
+                        </span>
+                      {% endfor %}
+                    </span>
+                  </div>
+
+                  <div x-show="scoreToast" x-cloak class="rating-toast" :class="scoreToast && scoreToast.ok ? 'ok' : 'fail'">
+                    <span x-text="scoreToast ? scoreToast.text : ''"></span>
+                  </div>
+
+                  <div x-show="showRatingPopup" x-cloak class="rating-popup"
+                       @click.outside="showRatingPopup = false; isHovering = false"
+                       @mouseenter="isHovering = true"
+                       @mouseleave="isHovering = false; hoverRating = null">
+                    <div class="rating-row">
+                      {% with rating_range=10|get_range %}
+                        {% for rating_value in rating_range %}
+                          <button type="button"
+                                  class="rating-star"
+                                  :class="{ 'is-on': {{ rating_value }} <= (isHovering ? hoverRating : rating) }"
+                                  @click="rating = {{ rating_value }}; showRatingPopup = false; isHovering = false"
+                                  @mouseenter="hoverRating = {{ rating_value }}"
+                                  hx-post="{% url 'update_media_score' media_type current_instance.id %}"
+                                  hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                                  hx-vals='{"score": {{ rating_value }} }'
+                                  hx-trigger="click"
+                                  hx-swap="none"
+                                  title="打 {{ rating_value }} 分">
+                            {% include "app/icons/star.svg" %}
+                            <span>{{ rating_value }}</span>
+                          </button>
+                        {% endfor %}
+                      {% endwith %}
+                    </div>
+                  </div>
+                </div>
+                <div class="m-foot">
+                  <span>点击星星修改</span>
+                  <span>{% if current_instance.score %}{{ current_instance.score }} / 10{% else %}未评分{% endif %}</span>
+                </div>
+              {% else %}
+                <div class="m-value-row"><span class="m-val" style="color: var(--ink3)">-</span></div>
+                <div class="m-foot"><span>加入书库后才能评分</span></div>
+              {% endif %}
+            </div>
+
+            {# 卡4 读毕归档 #}
+            <div class="m-card">
+              <div class="m-head">
+                <span class="m-label">
+                  {% include "app/icons/clock.svg" with classes="ic" %}
+                  <span>读毕归档</span>
+                </span>
+                {% if user_medias and current_instance.status == Status.COMPLETED.value %}
+                  <span class="m-foot m-foot--em" style="margin:0">● 已读完</span>
+                {% endif %}
+              </div>
+              <div class="m-value-row">
+                <span class="m-val">{% if current_instance.reading_seconds %}{{ current_instance.reading_seconds|seconds_to_duration }}{% else %}—{% endif %}</span>
+                <span class="m-unit">阅读时长</span>
+              </div>
+              <div class="m-foot">
+                {% if current_instance.end_date %}
+                  <span>读完于 {{ current_instance.end_date|date:"Y-m-d" }}{% if current_instance.completion_estimated %}（推算）{% endif %}</span>
+                {% elif current_instance.start_date %}
+                  <span>开始于 {{ current_instance.start_date|date:"Y-m-d" }}</span>
+                {% else %}
+                  <span>没有日期记录</span>
+                {% endif %}
+                <span>{{ hl_count|add:nt_count }} 条摘录</span>
+              </div>
+            </div>
+          </div>
+        {% endwith %}
+      </div>
+    </section>
+
+    {% comment %}
+      两栏：左边核心是「划线与想法」，右边是阅读手札和书目档案。
+      划线（Highlight）与想法（Note）严格分开渲染，绝不混成一个列表。
+    {% endcomment %}
+    {% with hl_count=highlights|length nt_count=book_notes|length %}
+      <section class="content-split">
+
+        {# ===== 左：划线与想法 ===== #}
+        <div class="section-card">
+          <div class="sec-header">
+            <div class="sec-title-wrap">
+              <h2 class="sec-title">划线与想法</h2>
+              <span class="sec-count">{{ hl_count }} 处划线 · {{ nt_count }} 条想法</span>
+            </div>
+            {% if hl_count or nt_count %}
+              <div class="gallery-tools">
+                <div class="layout-seg" role="group" aria-label="按类型筛选">
+                  <button type="button" :class="{ 'on': noteFilter === 'all' }" @click="noteFilter = 'all'">全部 {{ hl_count|add:nt_count }}</button>
+                  <button type="button" :class="{ 'on': noteFilter === 'thought' }" @click="noteFilter = 'thought'">💡 想法 {{ nt_count }}</button>
+                  <button type="button" :class="{ 'on': noteFilter === 'highlight' }" @click="noteFilter = 'highlight'">✒️ 划线 {{ hl_count }}</button>
+                </div>
+                <div class="layout-seg" role="group" aria-label="切换排版">
+                  <button type="button" :class="{ 'on': noteCols === '2' }" @click="noteCols = '2'">双栏</button>
+                  <button type="button" :class="{ 'on': noteCols === '1' }" @click="noteCols = '1'">单栏</button>
+                </div>
+              </div>
+            {% endif %}
+          </div>
+
+          {% if hl_count or nt_count %}
+            <div class="notes-grid" :data-cols="noteCols">
+
+              {% for hl in highlights %}
+                <article class="note-card note-card--highlight"
+                         data-bk-kind="highlight"
+                         x-data="{ open: false }"
+                         x-show="(noteFilter === 'all' || noteFilter === 'highlight') && (notesExpanded || {{ forloop.counter0 }} < 6)"
+                         x-cloak>
+                  <div class="note-card-head">
+                    <span class="note-badge note-badge--highlight">✒️ 书中划线</span>
+                    {% if hl.chapter %}<span class="note-chapter" title="{{ hl.chapter }}">{{ hl.chapter }}</span>{% endif %}
+                  </div>
+                  <div class="highlight-quote" :class="{ 'is-open': open }">{{ hl.text|linebreaksbr }}</div>
+                  {% if hl.text|length > 80 %}
+                    <button type="button" class="note-more" @click="open = !open">
+                      <span x-text="open ? '收起' : '展开全文'"></span>
+                    </button>
+                  {% endif %}
+                  <div class="note-card-foot">
+                    <span>微信读书划线{% if hl.page %} · 第 {{ hl.page }} 页{% endif %}</span>
+                    <button type="button" class="copy-btn"
+                            title="复制这段划线"
+                            @click="copyText(($el.closest('.note-card').querySelector('.highlight-quote') || $el.closest('.note-card').querySelector('.thought-comment') || $el.closest('.note-card')).innerText)">
+                      {% include "app/icons/copy.svg" with classes="ic" %}
+                      <span>复制</span>
+                    </button>
+                  </div>
+                </article>
+              {% endfor %}
+
+              {% for note in book_notes %}
+                <article class="note-card note-card--thought"
+                         data-bk-kind="thought"
+                         x-data="{ open: false }"
+                         x-show="(noteFilter === 'all' || noteFilter === 'thought') && (notesExpanded || {{ forloop.counter0 }} < 6)"
+                         x-cloak>
+                  <div class="note-card-head">
+                    <span class="note-badge note-badge--thought">💡 我的想法</span>
+                    {% if note.chapter %}<span class="note-chapter" title="{{ note.chapter }}">{{ note.chapter }}</span>{% endif %}
+                  </div>
+                  {% if note.content %}
+                    <div class="thought-comment" :class="{ 'is-open': open }">{{ note.content|linebreaksbr }}</div>
+                  {% endif %}
+                  {% if note.abstract %}
+                    <div class="thought-source-quote" :class="{ 'is-open': open }">{{ note.abstract|linebreaksbr }}</div>
+                  {% endif %}
+                  {% if note.content|length > 80 or note.abstract|length > 80 %}
+                    <button type="button" class="note-more" @click="open = !open">
+                      <span x-text="open ? '收起' : '展开全文'"></span>
+                    </button>
+                  {% endif %}
+                  <div class="note-card-foot">
+                    <span>微信读书想法批注</span>
+                    <button type="button" class="copy-btn"
+                            title="复制这条想法"
+                            @click="copyText(($el.closest('.note-card').querySelector('.highlight-quote') || $el.closest('.note-card').querySelector('.thought-comment') || $el.closest('.note-card')).innerText)">
+                      {% include "app/icons/copy.svg" with classes="ic" %}
+                      <span>复制</span>
+                    </button>
+                  </div>
+                </article>
+              {% endfor %}
+            </div>
+
+            <div class="gallery-footer">
+              <span>
+                {% if not highlights %}
+                  这本书还没有划线，想法有 {{ nt_count }} 条。
+                {% elif not book_notes %}
+                  这本书只有划线（{{ hl_count }} 条），还没有写下想法。
+                {% else %}
+                  共 {{ hl_count|add:nt_count }} 条，来自微信读书同步。
+                {% endif %}
+              </span>
+              {% if hl_count|add:nt_count > 12 %}
+                <button type="button" class="expand-btn" @click="notesExpanded = !notesExpanded">
+                  <span x-text="notesExpanded ? '收起至首屏精选 12 条' : '展开全部 {{ hl_count|add:nt_count }} 条'"></span>
+                  {% include "app/icons/chevron-down.svg" with classes="ic" %}
+                </button>
+              {% endif %}
+            </div>
+          {% else %}
+            <div class="bk-empty">
+              {% include "app/icons/page-empty.svg" with classes="ic" %}
+              <p class="bk-empty-title">这本书还没有划线和想法</p>
+              <p class="bk-empty-sub">在微信读书里划线、写想法，再同步一次元数据，它们就会出现在这里。</p>
+            </div>
+          {% endif %}
+        </div>
+
+        {# ===== 右栏 ===== #}
+        <aside class="side-col">
+
+          {# 阅读手札 & 记录 #}
+          <div class="section-card">
+            <div class="sec-header sec-header--tight">
+              <div class="sec-title-wrap">
+                <h2 class="sec-title sec-title--sm">阅读手札 &amp; 记录</h2>
+              </div>
+            </div>
+
+            {% if current_instance.notes and current_instance.notes != "Imported from Steam" and current_instance.notes != "Imported from Steam（家庭共享）" and current_instance.notes != "Imported from WeRead" %}
+              <div class="note-box">
+                <span class="note-box-quote" aria-hidden="true">“</span>
+                <div class="note-box-body">{{ current_instance.notes|linebreaksbr }}</div>
+              </div>
+            {% else %}
+              <div class="note-box note-box--muted">还没有写下读书感想。</div>
+            {% endif %}
+
+            <div class="kv-list">
+              <div class="kv-row">
+                <span class="kv-k">阅读状态</span>
+                <span class="kv-v {% if user_medias and current_instance.status == Status.COMPLETED.value %}kv-v--ok{% endif %}">
+                  {% if user_medias %}{% if current_instance.status == Status.COMPLETED.value %}✓ {% endif %}{{ current_instance|media_status_readable }}{% else %}未追踪{% endif %}
+                </span>
+              </div>
+              <div class="kv-row">
+                <span class="kv-k">阅读进度</span>
+                <span class="kv-v">{% if current_instance %}已读 {{ current_instance.formatted_progress }}{% if not current_instance.item.total_pages %}%{% endif %}{% else %}—{% endif %}</span>
+              </div>
+              <div class="kv-row">
+                <span class="kv-k">阅读时长</span>
+                <span class="kv-v">{% if current_instance.reading_seconds %}{{ current_instance.reading_seconds|seconds_to_duration }}{% else %}—{% endif %}</span>
+              </div>
+              <div class="kv-row">
+                <span class="kv-k">开始时间</span>
+                <span class="kv-v">{% if current_instance.start_date %}{{ current_instance.start_date|date:"Y-m-d" }}{% else %}—{% endif %}</span>
+              </div>
+              <div class="kv-row">
+                <span class="kv-k">读完时间</span>
+                <span class="kv-v">{% if current_instance.end_date %}{{ current_instance.end_date|date:"Y-m-d H:i" }}{% if current_instance.completion_estimated %}（推算）{% endif %}{% else %}—{% endif %}</span>
+              </div>
+              <div class="kv-row">
+                <span class="kv-k">划线 / 想法</span>
+                <span class="kv-v">{{ hl_count }} 处 · {{ nt_count }} 条</span>
+              </div>
+            </div>
+          </div>
+
+          {# 书目档案 & 操作 #}
+          <div class="section-card">
+            <div class="sec-header sec-header--tight">
+              <div class="sec-title-wrap">
+                <h2 class="sec-title sec-title--sm">书目档案 &amp; 操作</h2>
+              </div>
+            </div>
+
+            <div class="kv-list">
+              <div class="kv-row">
+                <span class="kv-k">数据来源</span>
+                <span class="kv-v">
+                  <a href="{{ media.source_url }}" target="_blank" rel="noopener noreferrer">
+                    <span>{{ media.source|source_readable }}</span>
+                    {% include "app/icons/external-link.svg" with classes="ic" %}
+                  </a>
+                </span>
+              </div>
+              <div class="kv-row">
+                <span class="kv-k">{{ media.source|source_readable }} ID</span>
+                <span class="kv-v" style="font-family: var(--font-mono)">{{ media.media_id }}</span>
+              </div>
+              <div class="kv-row">
+                <span class="kv-k">平台评分</span>
+                <span class="kv-v">{% if media.score %}{{ media.score }} / 10{% else %}没有评分{% endif %}</span>
+              </div>
+              <div class="kv-row">
+                <span class="kv-k">进度口径</span>
+                <span class="kv-v">{% if current_instance.item.total_pages %}按页数{% else %}按百分比{% endif %}</span>
+              </div>
+              {% if media.details.publishers %}
+                <div class="kv-row">
+                  <span class="kv-k">出版社</span>
+                  <span class="kv-v">{{ media.details.publishers|join:"、" }}</span>
+                </div>
+              {% endif %}
+            </div>
+
+            <div class="side-actions">
+              <div x-data="{ listsOpen: false }" style="display:contents">
+                <button type="button" class="side-btn"
+                        title="Add to custom lists"
+                        hx-get="{% media_view_url 'lists_modal' media %}"
+                        hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}"}'
+                        hx-target="#{% component_id 'lists' media %}"
+                        hx-trigger="click once"
+                        @click="listsOpen = true">
+                  {% include "app/icons/list-add.svg" with classes="ic" %}
+                  <span>加入书单</span>
+                </button>
+                <div x-show="listsOpen" x-cloak class="bk-modal"
+                     role="dialog" aria-modal="true"
+                     @keydown.escape.window="listsOpen = false">
+                  <div class="bk-modal-box">
+                    <div id="{% component_id 'lists' media %}"></div>
+                  </div>
+                </div>
+              </div>
+
+              <div x-data="{ historyOpen: false }" style="display:contents">
+                <button type="button" class="side-btn"
+                        title="View your activity history"
+                        hx-get="{% media_view_url 'history_modal' media %}"
+                        hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}"}'
+                        hx-target="#{% component_id 'history' media %}"
+                        hx-trigger="click once"
+                        @click="historyOpen = true">
+                  {% include "app/icons/history.svg" with classes="ic" %}
+                  <span>活动历史</span>
+                </button>
+                <div x-show="historyOpen" x-cloak class="bk-modal"
+                     role="dialog" aria-modal="true"
+                     @keydown.escape.window="historyOpen = false">
+                  <div class="bk-modal-box">
+                    <div id="{% component_id 'history' media %}"></div>
+                  </div>
+                </div>
+              </div>
+
+              <button type="button" class="side-btn"
+                      title="Sync metadata with provider"
+                      hx-post="{% media_view_url 'sync_metadata' media %}"
+                      hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                      hx-vals='{"next": "{{ request.get_full_path|urlencode }}"}'
+                      hx-target="body"
+                      hx-swap="none"
+                      x-data="{ loading: false }"
+                      @click="loading = true"
+                      :disabled="loading">
+                <span style="display: flex" :class="{ 'animate-spin': loading }">
+                  {% include "app/icons/circle-spinning-clockwise.svg" with classes="ic" %}
+                </span>
+                <span>同步元数据</span>
+              </button>
+
+              <button type="button" class="side-btn" title="复制本页链接" @click="shareLink()">
+                {% include "app/icons/link.svg" with classes="ic" %}
+                <span>复制链接</span>
+              </button>
+            </div>
+          </div>
+        </aside>
+      </section>
+    {% endwith %}
+
+  </div>
+
+  {# ---------- toast ---------- #}
+  <div class="toast" :class="{ 'show': shareToast }" role="status" aria-live="polite">
+    {% include "app/icons/checkmark.svg" with classes="ic" %}
+    <span x-text="shareMsg"></span>
+  </div>
+
+  {% comment %}
+    下面这块是原模板里 game / tv 专用的「来源卡 + tab 内容」区。
+    图书页 section_total 恒为 0、media_type 恒为 book，所以这里永远不会渲染；
+    原样保留是为了不丢内层的 htmx 属性，保证本文件的 hx 属性总数与改写前完全一致。
+  {% endcomment %}
+
+      {# Store facts: the only real Steam metadata we hold, shown where the dead tab column used to be #}
+      {# Exact complement of the tab-content gate below: show these facts only when that column is absent, #}
+      {# so a page can never render both the store facts card and the tab column. #}
+      {% if section_total < 1 and media_type == MediaTypes.GAME.value %}
+        {# 右侧栏固定 21rem，跟左边只隔 1.5rem，两张卡片不再被甩到屏幕两端 #}
+        <div class="w-full shrink-0"
+             style="max-width:21rem">
+          <h2 class="text-xl font-bold mb-4">来源</h2>
+          <div class="bg-[#2a2f35] rounded-lg divide-y divide-white/5">
+            <div class="flex justify-between gap-x-4 px-4 py-3">
+              <h3 class="text-xs font-semibold text-gray-400 uppercase shrink-0 mt-0.5">平台</h3>
+              <a href="{{ media.source_url }}"
+                 class="inline-flex items-center min-h-11 min-w-11 text-sm text-gray-200 text-right hover:text-indigo-400 transition-colors duration-200"
+                 target="_blank">{{ media.source|source_readable }}</a>
+            </div>
+            <div class="flex justify-between gap-x-4 px-4 py-3">
+              <h3 class="text-xs font-semibold text-gray-400 uppercase shrink-0 mt-0.5">AppID</h3>
+              <span class="text-sm text-gray-200 text-right">{{ media.media_id }}</span>
+            </div>
+            {% comment %}
+              下面两条是导入 / 成就同步动作留下的系统记录时间，不是通关年份。
+              原来显示成「2026-10-21 09:54」，紧挨着「结束于 2024 年（推算）」，
+              用户会先看到 2026 误以为是通关年份。所以加一行说明，并把日期改成
+              中文年月日、去掉时分。
+            {% endcomment %}
+            <div class="px-4 py-2 bg-black/10">
+              <p class="text-[11px] leading-snug text-gray-500">以下为系统记录时间，不是通关年份</p>
+            </div>
+            <div class="flex justify-between gap-x-4 px-4 py-3">
+              <h3 class="text-xs font-semibold text-gray-400 uppercase shrink-0 mt-0.5">入库时间</h3>
+              <span class="text-sm text-gray-400 text-right">{{ current_instance.created_at|date:"Y 年 n 月 j 日" }}</span>
+            </div>
+            <div class="flex justify-between gap-x-4 px-4 py-3">
+              <h3 class="text-xs font-semibold text-gray-400 uppercase shrink-0 mt-0.5">成就同步</h3>
+              <span class="text-sm text-gray-400 text-right">
+                {% if current_instance.achievements_synced_at %}
+                  {{ current_instance.achievements_synced_at|date:"Y 年 n 月 j 日" }}
+                {% else %}
+                  未同步
+                {% endif %}
+              </span>
+            </div>
+            {% if media.external_links %}
+              <div class="flex justify-between gap-x-4 px-4 py-2.5">
+                <h3 class="text-xs font-semibold text-gray-400 uppercase shrink-0 mt-0.5">{% trans "Links" %}</h3>
+                <div class="text-right">
+                  {% for name, url in media.external_links.items %}
+                    <a href="{{ url }}"
+                       class="block text-sm text-gray-200 hover:text-indigo-400 transition-colors duration-200"
+                       target="_blank">{{ name }}</a>
+                  {% endfor %}
+                </div>
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      {% endif %}
+
+      {# Tab content #}
+      {# Cast / DLCs / Repeats / Episodes / Streaming / Time to Beat never render for Steam games, so drop the column #}
+      {# Two separate questions: "is there any content at all?" decides whether this column renders, #}
+      {# "is there more than one section?" decides only whether it takes the narrow 3/4 width. #}
+      {# Conflating them hid a page whose single section is its whole point (a season's episode list). #}
+      {% if section_total >= 1 %}
+        <div class="{% if section_total > 1 %}w-full md:w-3/4{% else %}w-full{% endif %}">
+          {# Section filter links (mobile: directly above the tab content) #}
+          {% include "app/components/media_section_tabs.html" with extra_classes="md:hidden mb-6" %}
+
+        {% if media.cast %}
+          <section class="mb-8" x-show="tab === 'overview' || tab === 'cast'">
+            <h2 class="text-xl font-bold mb-4">{% trans "Cast" %}</h2>
+            <div class="flex overflow-x-auto gap-x-4 pb-5">
+              {% for cast in media.cast %}
+                {% include "app/components/cast_card.html" with cast=cast %}
+              {% endfor %}
+              {% if media.total_cast_count > 30 %}
+                <a href="{{ media.source_url }}/cast"
+                   target="_blank"
+                   class="bg-[#2a2f35] rounded-lg shadow-lg flex flex-col items-center justify-center hover:bg-[#343a40] transition-colors duration-200 min-w-44">
+                  <div class="p-2.5 bg-indigo-600 text-white rounded-full mb-3">
+                    {% include "app/icons/external-link.svg" with classes="w-6 h-6" %}
+                  </div>
+                  <span class="text-sm font-semibold text-white">{% trans "View all" %}</span>
+                  <span class="text-xs text-gray-400 mt-1">{{ media.total_cast_count }} {% trans "cast members" %}</span>
+                </a>
+              {% endif %}
+            </div>
+          </section>
+        {% endif %}
+
+        {# Related Media #}
+        {% if media.related %}
+          {% for name, related_items in media.related.items %}
+            {% if related_items %}
+              <section class="mb-8"
+                       x-show="tab === 'overview' || tab === 'related-{{ forloop.counter }}'">
+                <h2 class="text-xl font-bold mb-4">
+                  {% if name == "dlcs" %}
+                    {% trans "DLCs" %}
+                  {% else %}
+                    {{ name|no_underscore|title }}
+                  {% endif %}
+                </h2>
+                <div class="media-grid lib-grid lj-showcase lib-grid--tight">
+                  {% for result in related_items %}
+                    {# Set active to highlight the current movie in a collection. Avoid TV media, since seasons have same ID as the parent show #}
+                    {% if media_type == MediaTypes.MOVIE.value %}
+                      {% include "app/components/media_card.html" with item=result.item title=result.item.season_title|default:result.item.title media=result.media active=media.media_id|str_equals:result.item.media_id info_card=True %}
+                    {% else %}
+                      {% include "app/components/media_card.html" with item=result.item title=result.item.season_title|default:result.item.title media=result.media info_card=True %}
+                    {% endif %}
+                  {% endfor %}
+                </div>
+              </section>
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+
+        {# Repeats #}
+        {% if user_medias|length > 1 %}
+          <section class="mb-8" x-show="tab === 'overview' || tab === 'repeats'">
+            <h2 class="text-xl font-bold mb-4">{% trans "Repeats (" %}{{ user_medias|length|add:"-1" }})</h2>
+            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              {% for user_media in user_medias|slice:"1:" %}
+                <div class="bg-[#2a2f35] rounded-lg px-4 py-3">
+                  <div class="flex items-center justify-between gap-x-2">
+                    <div class="flex items-center gap-x-1.5 min-w-0 text-sm">
+                      {% if user_media.score %}
+                        {% include "app/icons/star.svg" with classes="w-4 h-4 text-yellow-400 fill-yellow-400 shrink-0" %}
+                        <span class="font-medium text-gray-200">{{ user_media.score }}</span>
+                      {% else %}
+                        {% include "app/icons/star.svg" with classes="w-4 h-4 text-gray-500 fill-gray-500 shrink-0" %}
+                        <span class="text-gray-400">–</span>
+                      {% endif %}
+                      <span class="text-gray-500">·</span>
+                      <span class="text-gray-300 truncate">{{ user_media|media_status_readable }}</span>
+                    </div>
+
+                    <div x-data="{ trackOpen: false }" class="shrink-0">
+                      <button class="p-1 text-gray-400 hover:text-white transition-colors cursor-pointer"
+                              title="Edit entry"
+                              hx-get="{% media_view_url 'track_modal' media %}"
+                              hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "instance_id": "{{ user_media.id }}"}'
+                              hx-target="#{% component_id 'track' media user_media.id %}"
+                              hx-trigger="click once"
+                              @click="trackOpen = true">
+                        {% include "app/icons/edit-flat.svg" with classes="w-4 h-4" %}
+                      </button>
+
+                      <div x-show="trackOpen"
+                           @keydown.escape.window="trackOpen = false"
+                           role="dialog"
+                           aria-modal="true"
+                           class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                        <div class="w-152 max-h-[90vh] px-4 md:px-0 relative z-60">
+                          <div id="{% component_id 'track' media user_media.id %}"></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {% if media.media_type != MediaTypes.MOVIE.value %}
+                    <p class="text-xs text-gray-400 mt-1">
+                      {{ user_media.formatted_progress }}
+                      {% if media.media_type != MediaTypes.GAME.value %}
+                        {{ media_type|long_unit|lower }}
+                      {% endif %}
+                    </p>
+                  {% endif %}
+
+                  {% if user_media.start_date or user_media.end_date %}
+                    {% comment %}
+                      重玩记录里的日期同理：推算值只显示年份 +（推算），真实时间照旧显示到分钟。
+                    {% endcomment %}
+                    <p class="text-xs text-gray-400 mt-0.5">
+                      {% if user_media.start_date and user_media.end_date %}
+                        {{ user_media.start_date|datetime_format:user }} –
+                        {% if user_media.completion_estimated %}
+                          <span title="这是推算的，不是精确时间：记录里只写了 {{ user_media.end_date|date:'Y' }} 年完成。">{{ user_media.end_date|date:"Y" }} 年（推算）</span>
+                        {% else %}
+                          {{ user_media.end_date|datetime_format:user }}
+                        {% endif %}
+                      {% elif user_media.start_date %}
+                        {% trans "Started" %} {{ user_media.start_date|datetime_format:user }}
+                      {% else %}
+                        {% trans "Finished" %}
+                        {% if user_media.completion_estimated %}
+                          <span title="这是推算的，不是精确时间：记录里只写了 {{ user_media.end_date|date:'Y' }} 年完成。">{{ user_media.end_date|date:"Y" }} 年（推算）</span>
+                        {% else %}
+                          {{ user_media.end_date|datetime_format:user }}
+                        {% endif %}
+                      {% endif %}
+                    </p>
+                  {% endif %}
+
+                  {% if user_media.notes %}
+                    <div class="flex items-start mt-2"
+                         x-data="{ isExpanded: false, isClamped: false, checkClamp() { const element = this.$refs.notesText; this.isClamped = element.scrollHeight > element.clientHeight; } }"
+                         x-init="$nextTick(() => checkClamp())">
+                      {% include "app/icons/page-empty.svg" with classes="w-3 h-3 mr-1 text-yellow-400 shrink-0 mt-0.5" %}
+                      <div class="flex-1">
+                        <p x-ref="notesText"
+                           :class="isExpanded ? '' : 'line-clamp-2'"
+                           class="text-xs text-gray-300 italic">"{{ user_media.notes|linebreaksbr }}"</p>
+                        <button x-show="isClamped"
+                                @click="isExpanded = !isExpanded"
+                                class="text-indigo-400 hover:text-indigo-300 text-xs mt-1 focus:outline-none transition-colors cursor-pointer">
+                          <span x-text="isExpanded ? 'Show less' : 'Read more'"></span>
+                        </button>
+                      </div>
+                    </div>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
+          </section>
+        {% endif %}
+
+        {# Episodes List #}
+        {% if media.episodes %}
+          <div class="w-full" x-show="tab === 'overview' || tab === 'episodes'">
+            <h2 class="text-xl font-bold mb-4">{% trans "Episodes" %}</h2>
+            <div class="space-y-6">
+              {% for episode in media.episodes %}
+                <div class="bg-[#2a2f35] rounded-lg overflow-hidden shadow-lg">
+                  <div class="flex flex-col md:flex-row"
+                       x-data="{ obfuscated: {% if user.obfuscate_unseen_episodes and not episode.history %} true {% else %} false {% endif %} , hasImage: {% if episode.image != IMG_NONE %} true {% else %} false {% endif %} }">
+                    <img src="{{ IMG_NONE }}"
+                         alt="E{{ episode.episode_number }}"
+                         data-src="{{ episode.image }}"
+                         class="lazyload md:w-64 md:h-40 shrink-0 {% if episode.image != IMG_NONE %}object-cover{% endif %} {% if user.obfuscate_unseen_episodes and not episode.history and episode.image != IMG_NONE %}blur cursor-pointer{% else %}cursor-default{% endif %}"
+                         :class="{ 'blur': obfuscated && hasImage, 'cursor-pointer': obfuscated && hasImage, 'cursor-default': !obfuscated || !hasImage }"
+                         @click="obfuscated = false">
+                    <div class="py-3 flex-1 flex flex-col">
+                      <div class="flex-1">
+                        <div class="flex justify-between items-start mb-2 space-x-2 px-4">
+                          <div>
+                            <h2 class="text-xl font-semibold mb-1 line-clamp-1 {% if user.obfuscate_unseen_episodes and not episode.history %}blur cursor-pointer{% else %}cursor-text{% endif %}"
+                                :class="{ 'blur': obfuscated, 'cursor-pointer': obfuscated, 'cursor-text': !obfuscated }"
+                                @click="obfuscated = false">{{ episode.title }}</h2>
+                            <p class="text-sm text-gray-400">
+                              {% trans "Episode" %} {{ episode.episode_number }} • {{ episode.air_date|iso_date_format:request.user|default_if_none:"Unknown air date" }}
+                              {% if episode.runtime %}• {{ episode.runtime }}{% endif %}
+                            </p>
+                          </div>
+                          <div class="flex space-x-2">
+                            {# Track Episode #}
+                            <div x-data="{ trackOpen: false }">
+                              <button @click="trackOpen = true"
+                                      title="{% trans "Track Episode" %}"
+                                      class="p-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full transition duration-300 cursor-pointer">
+                                {% if episode.history %}
+                                  {% include "app/icons/eye.svg" with classes="w-4 h-4" %}
+                                {% else %}
+                                  {% include "app/icons/eye-closed.svg" with classes="w-4 h-4" %}
+                                {% endif %}
+                              </button>
+
+                              {% include "app/components/fill_track_episode.html" with request=request media=media episode=episode episode_title=episode.title csrf_token=csrf_token TRACK_TIME=TRACK_TIME only %}
+
+                            </div>
+
+                            {# Lists #}
+                            <div x-data="{ listsOpen: false }">
+                              <button class="p-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-full transition duration-300 cursor-pointer"
+                                      title="Add to custom lists"
+                                      hx-get="{% media_view_url 'lists_modal' episode %}"
+                                      hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}"}'
+                                      hx-target="#{% component_id 'lists' episode %}"
+                                      hx-trigger="click once"
+                                      @click="listsOpen = true">
+                                {% include "app/icons/list-add.svg" with classes="w-4 h-4" %}
+                              </button>
+
+                              <div x-show="listsOpen"
+                                   @keydown.escape.window="listsOpen = false"
+                                   role="dialog"
+                                   aria-modal="true"
+                                   class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                                <div class="w-96 max-h-[90vh] px-4 md:px-0 relative z-60">
+                                  <div id="{% component_id 'lists' episode %}"></div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {# History #}
+                            <div x-data="{ historyOpen: false }">
+                              <button class="p-2 bg-amber-600 hover:bg-amber-700 text-white rounded-full transition duration-300 cursor-pointer"
+                                      title="View your activity history"
+                                      hx-get="{% media_view_url 'history_modal' episode %}"
+                                      hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}"}'
+                                      hx-target="#{% component_id 'history' episode %}"
+                                      hx-trigger="click once"
+                                      @click="historyOpen = true">
+                                {% include "app/icons/history.svg" with classes="w-4 h-4" %}
+                              </button>
+                              <div x-show="historyOpen"
+                                   @keydown.escape.window="historyOpen = false"
+                                   role="dialog"
+                                   aria-modal="true"
+                                   class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                                <div class="w-96 max-h-[90vh] px-4 md:px-0 relative z-60">
+                                  <div id="{% component_id 'history' episode %}"></div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div class="{% if episode.history %}md:h-[calc(2*1.5rem)]{% else %}md:h-[calc(3*1.5rem)]{% endif %} md:overflow-y-auto px-4">
+                          <p class="text-sm text-gray-300 leading-relaxed text-pretty {% if user.obfuscate_unseen_episodes and not episode.history %}blur cursor-pointer{% else %}cursor-text{% endif %}"
+                             :class="{ 'blur': obfuscated, 'cursor-pointer': obfuscated, 'cursor-text': !obfuscated }"
+                             @click="obfuscated = false">{{ episode.overview }}</p>
+                        </div>
+                      </div>
+                      {% if episode.history %}
+                        <p class="text-xs text-gray-400 mt-2 px-4">
+                          {% trans "Last watched:" %}
+                          {% if episode.history.0.end_date %}
+                            {{ episode.history.0.end_date|datetime_format:user }}
+                          {% else %}
+                            {% trans "No date provided" %}
+                          {% endif %}
+                          {% if episode.history|length > 1 %}{% trans "• Watched" %} {{ episode.history|length }} {% trans "times" %}{% endif %}
+                        </p>
+                      {% endif %}
+                    </div>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+
+        {# Streaming providers #}
+        {% if media_type == MediaTypes.MOVIE.value or media_type == MediaTypes.TV.value %}
+          {% if watch_provider_region == "UNSET" or watch_providers %}
+            <section class="mb-8" x-show="tab === 'overview' || tab === 'streaming'">
+              <h2 class="text-xl font-bold mb-4">{% trans "Streaming" %}</h2>
+              {% if watch_provider_region == "UNSET" %}
+                {% url 'preferences' as preferences_url %}
+                <p class="text-sm text-gray-300">
+                  {% trans "Watch provider region is not configured. Set a region or disable this feature in the" %}
+                  <a href="{{ preferences_url }}"
+                     class="text-indigo-400 hover:text-indigo-300 hover:underline">{% trans "preferences" %}</a>.
+                </p>
+              {% else %}
+                <div class="flex flex-wrap gap-3">
+                  {% for provider in watch_providers %}
+                    <div class="flex items-center gap-x-3 bg-[#2a2f35] rounded-lg p-2 pr-4">
+                      <img class="w-10 rounded-lg"
+                           src="{{ provider.image }}"
+                           alt="{{ provider.provider_name }}" />
+                      <span class="text-sm font-medium text-gray-200">{{ provider.provider_name }}</span>
+                    </div>
+                  {% endfor %}
+                </div>
+              {% endif %}
+            </section>
+          {% endif %}
+        {% endif %}
+
+        {# Time to Beat #}
+        {% if media.time_to_beat %}
+          <section class="mb-8" x-show="tab === 'overview' || tab === 'ttb'">
+            <h2 class="text-xl font-bold mb-4">{% trans "Time to Beat" %}</h2>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
+              {% if media.time_to_beat.hastily %}
+                <div class="bg-[#2a2f35] rounded-lg p-4 flex items-center gap-x-4">
+                  <span class="flex items-center justify-center w-10 h-10 rounded-full bg-sky-600/15 text-sky-400 shrink-0">
+                    {% include "app/icons/gamepad-directional.svg" with classes="w-5 h-5" %}
+                  </span>
+                  <div>
+                    <div class="text-xl font-bold text-white">{{ media.time_to_beat.hastily|seconds_to_duration }}</div>
+                    <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">{% trans "Main Story" %}</p>
+                  </div>
+                </div>
+              {% endif %}
+              {% if media.time_to_beat.normally %}
+                <div class="bg-[#2a2f35] rounded-lg p-4 flex items-center gap-x-4">
+                  <span class="flex items-center justify-center w-10 h-10 rounded-full bg-green-600/15 text-green-400 shrink-0">
+                    {% include "app/icons/award.svg" with classes="w-5 h-5" %}
+                  </span>
+                  <div>
+                    <div class="text-xl font-bold text-white">{{ media.time_to_beat.normally|seconds_to_duration }}</div>
+                    <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">{% trans "Main + Extra" %}</p>
+                  </div>
+                </div>
+              {% endif %}
+              {% if media.time_to_beat.completely %}
+                <div class="bg-[#2a2f35] rounded-lg p-4 flex items-center gap-x-4">
+                  <span class="flex items-center justify-center w-10 h-10 rounded-full bg-yellow-600/15 text-yellow-400 shrink-0">
+                    {% include "app/icons/trophy.svg" with classes="w-5 h-5" %}
+                  </span>
+                  <div>
+                    <div class="text-xl font-bold text-white">{{ media.time_to_beat.completely|seconds_to_duration }}</div>
+                    <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">{% trans "Completionist" %}</p>
+                  </div>
+                </div>
+              {% endif %}
+            </div>
+          </section>
+        {% endif %}
+        </div>
+      {% endif %}
+
+</div>

@@ -19,9 +19,15 @@ django.setup()
 
 from app.models import AICopy  # noqa: E402
 
+# 素材目录在 ...\Downloads\ui-redesign\quotes（从 src 往上数三级）
+REPO_ROOT = os.path.dirname(SRC_DIR)                       # ...\yamtrack
+PROJECT_ROOT = os.path.dirname(REPO_ROOT)                  # ...\life joy
+_DOWNLOADS = os.path.dirname(PROJECT_ROOT)                 # ...\Downloads
+_QUOTES = os.path.join(_DOWNLOADS, "ui-redesign", "quotes")
+
 SOURCES = [
-    (r"C:\Users\USERNAME\Downloads\ui-redesign\quotes\pilot-batch.json", "pilot"),
-    (r"C:\Users\USERNAME\Downloads\ui-redesign\quotes\batch-002.json", "002"),
+    (os.path.join(_QUOTES, "pilot-batch.json"), "pilot"),
+    (os.path.join(_QUOTES, "batch-002.json"), "002"),
 ]
 
 source = {}

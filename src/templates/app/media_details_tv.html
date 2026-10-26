@@ -1,0 +1,2452 @@
+{% load app_tags humanize i18n %}
+{% comment %}
+剧集详情页（TV）。样式全部写在本片段内，因为 extra_head 走的是
+app/media_details_heads/tv.html（不许改）。作用域前缀 .lj-tv，避免和 game 页的
+.lj-gd 互相污染；任何元素级重置都包在 @layer base 里，否则会压掉 Tailwind 的
+unlayered 工具类（bg-indigo-600 会变成透明）。
+{% endcomment %}
+<style>
+@layer base {
+  .lj-tv, .lj-tv *, .lj-tv *::before, .lj-tv *::after { box-sizing: border-box; }
+  .lj-tv [hidden] { display: none !important; }
+  .lj-tv button, .lj-tv input, .lj-tv textarea { font-family: inherit; color: inherit; }
+  .lj-tv button { background: none; border: 0; padding: 0; margin: 0; cursor: pointer; }
+  .lj-tv h1, .lj-tv h2, .lj-tv h3, .lj-tv p { margin: 0; }
+  .lj-tv a { color: inherit; text-decoration: none; }
+  .lj-tv img { display: block; max-width: 100%; }
+}
+.lj-tv {
+--radius: 14px;
+  --radius-sm: 10px;
+  --ease: cubic-bezier(.22, .8, .24, 1);
+  --pad: clamp(20px, 3vw, 40px);
+  --font-ui: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  --font-serif: "Noto Serif SC", "Source Han Serif SC", "Source Han Serif CN", "Songti SC", "STSong", serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", "Consolas", ui-monospace, monospace;
+}
+html[data-theme="dark"] .lj-tv {
+--bg: #14171b;
+  --bg-elev: #1b1f25;
+  --panel: #1d2229;
+  --panel-2: #232932;
+  --card: rgba(29, 34, 41, 0.84);
+  --card-solid: #1e232a;
+  --card-hover: rgba(38, 45, 54, 0.94);
+  --ink: #f4f1ea;
+  --ink2: rgba(244, 241, 234, 0.76);
+  --ink3: rgba(244, 241, 234, 0.48);
+  --line: rgba(255, 255, 255, 0.09);
+  --line2: rgba(255, 255, 255, 0.055);
+  --warm-line: rgba(232, 201, 130, 0.38);
+  --gold: #e8c982;
+  --gold-soft: rgba(232, 201, 130, 0.14);
+  --gold-line: rgba(232, 201, 130, 0.30);
+  --violet: #9d8df7;
+  --violet-soft: rgba(139, 122, 245, 0.15);
+  --violet-line: rgba(157, 141, 247, 0.30);
+  --emerald: #34d399;
+  --emerald-bg: #10b981;
+  --emerald-soft: rgba(16, 185, 129, 0.16);
+  --emerald-line: rgba(52, 211, 153, 0.32);
+  --verm: #e0675a;
+  --accent: #e8c982;
+  --skylight: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --shadow: 0 22px 54px -14px rgba(0, 0, 0, 0.62);
+  --shadow-s: 0 8px 24px -6px rgba(0, 0, 0, 0.42);
+  --hover: rgba(255, 255, 255, 0.06);
+  --scrim: 20, 23, 27;
+  --topbar-bg: rgba(20, 23, 27, 0.82);
+  --hero-alpha: 0.34;
+  --tag-bg: rgba(255, 255, 255, 0.055);
+  --tag-ink: rgba(244, 241, 234, 0.84);
+}
+html[data-theme="light"] .lj-tv {
+--bg: #f4efe5;
+  --bg-elev: #ebe4d6;
+  --panel: #fffcf6;
+  --panel-2: #f9f3e8;
+  --card: rgba(255, 252, 246, 0.82);
+  --card-solid: #fffcf6;
+  --card-hover: #ffffff;
+  --ink: #221d17;
+  --ink2: rgba(34, 29, 23, 0.78);
+  --ink3: rgba(34, 29, 23, 0.52);
+  --line: rgba(48, 34, 18, 0.12);
+  --line2: rgba(48, 34, 18, 0.07);
+  --warm-line: rgba(154, 107, 31, 0.36);
+  --gold: #9a6b1f;
+  --gold-soft: rgba(154, 107, 31, 0.11);
+  --gold-line: rgba(154, 107, 31, 0.26);
+  --violet: #5f4bc4;
+  --violet-soft: rgba(95, 75, 196, 0.10);
+  --violet-line: rgba(95, 75, 196, 0.22);
+  --emerald: #0d9468;
+  --emerald-bg: #0f9f6e;
+  --emerald-soft: rgba(15, 159, 110, 0.12);
+  --emerald-line: rgba(13, 148, 104, 0.28);
+  --verm: #b4362c;
+  --accent: #b4362c;
+  --skylight: inset 0 1px 0 rgba(255, 255, 255, 0.94);
+  --shadow: 0 4px 12px rgba(48, 34, 18, 0.06), 0 24px 52px -16px rgba(48, 34, 18, 0.16);
+  --shadow-s: 0 2px 5px rgba(48, 34, 18, 0.05), 0 14px 32px -12px rgba(48, 34, 18, 0.11);
+  --hover: rgba(48, 34, 18, 0.05);
+  --scrim: 244, 239, 229;
+  --topbar-bg: rgba(244, 239, 229, 0.86);
+  --hero-alpha: 0.24;
+  --tag-bg: rgba(48, 34, 18, 0.055);
+  --tag-ink: rgba(34, 29, 23, 0.82);
+}
+.lj-tv [hidden] {
+display: none !important; }
+.lj-tv button,
+.lj-tv input,
+.lj-tv textarea {
+font-family: inherit; color: inherit; }
+.lj-tv button {
+background: none; border: 0; padding: 0; margin: 0; cursor: pointer; }
+.lj-tv a {
+color: inherit; text-decoration: none; }
+.lj-tv h1,
+.lj-tv h2,
+.lj-tv h3,
+.lj-tv p {
+margin: 0; }
+.lj-tv .ic {
+width: 17px; height: 17px;
+  fill: none; stroke: currentColor;
+  stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round;
+  display: block; flex: 0 0 auto;
+}
+.lj-tv .ic-fill {
+fill: currentColor; stroke: none; }
+.lj-tv ::view-transition-old(root),
+.lj-tv ::view-transition-new(root) {
+animation: none;
+  mix-blend-mode: normal;
+}
+.lj-tv .ambient {
+position: fixed;
+  inset: 0 0 auto 0;
+  height: 540px;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.lj-tv .ambient-art {
+position: absolute;
+  inset: 0;
+  opacity: var(--hero-alpha);
+  transition: opacity .6s var(--ease);
+}
+.lj-tv .ambient-art img {
+width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 28%;
+  filter: blur(28px) saturate(1.15);
+  transform: scale(1.18);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0,0,0,0.72) 48%, rgba(0,0,0,0.22) 78%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, rgba(0,0,0,0.72) 48%, rgba(0,0,0,0.22) 78%, transparent 100%);
+}
+.lj-tv .ambient-glow {
+position: absolute;
+  inset: -20% -10% 0 -10%;
+  background:
+    radial-gradient(46% 52% at 24% 26%, rgba(232, 175, 92, 0.24) 0%, transparent 72%),
+    radial-gradient(40% 48% at 76% 20%, rgba(52, 211, 153, 0.16) 0%, transparent 70%);
+  filter: blur(48px);
+}
+.lj-tv .ambient-fade {
+position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(var(--scrim), 0.18) 0%,
+    rgba(var(--scrim), 0.46) 45%,
+    rgba(var(--scrim), 0.85) 78%,
+    var(--bg) 100%
+  );
+}
+.lj-tv .brand-mark {
+width: 26px; height: 26px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--skylight);
+  color: var(--gold);
+}
+.lj-tv .brand-mark .ic {
+width: 10px; height: 10px; }
+.lj-tv .brand-name {
+font-family: var(--font-serif);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .22em;
+  white-space: nowrap;
+}
+.lj-tv .brand-sub {
+font-family: var(--font-serif);
+  font-size: 10.5px;
+  letter-spacing: .16em;
+  color: var(--ink3);
+  padding-left: 9px;
+  border-left: 1px solid var(--line);
+  white-space: nowrap;
+}
+.lj-tv .nv-group {
+display: flex;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+}
+.lj-tv .nv-group + .nv-group {
+margin-left: 14px;
+}
+.lj-tv .nv-group + .nv-group::before {
+content: '';
+  position: absolute;
+  left: -7px; top: 50%;
+  transform: translateY(-50%);
+  width: 1px; height: 14px;
+  background: var(--line);
+}
+.lj-tv .nv-item {
+width: 44px; height: 34px;
+  border-radius: 8px;
+  display: grid; place-items: center;
+  color: var(--ink2);
+  position: relative;
+  transition: background .2s var(--ease), color .2s var(--ease);
+}
+.lj-tv .nv-item:hover {
+background: var(--hover); color: var(--ink); }
+.lj-tv .nv-item.is-on {
+color: var(--accent); background: var(--hover); }
+.lj-tv .nv-item.is-on::after {
+content: '';
+  position: absolute;
+  left: 50%; bottom: 4px;
+  transform: translateX(-50%);
+  width: 14px; height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.lj-tv .pill-btn {
+display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--skylight);
+  font-size: 11.5px;
+  color: var(--ink2);
+  transition: all .2s var(--ease);
+}
+.lj-tv .pill-btn:hover {
+color: var(--ink);
+  border-color: var(--warm-line);
+  background: var(--card-hover);
+}
+.lj-tv .pill-btn .ic {
+width: 13px; height: 13px; color: var(--gold); }
+.lj-tv .page-shell {
+position: relative;
+  z-index: 1;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 10px var(--pad) 56px;
+}
+.lj-tv .crumb-bar {
+display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--ink3);
+}
+.lj-tv .crumb-links {
+display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.lj-tv .crumb-links a {
+display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink2);
+  padding: 3px 8px 3px 4px;
+  border-radius: 6px;
+  transition: background .2s, color .2s;
+}
+.lj-tv .crumb-links a:hover {
+background: var(--hover);
+  color: var(--ink);
+}
+.lj-tv .crumb-sep {
+opacity: 0.45; }
+.lj-tv .crumb-cur {
+color: var(--ink2); font-weight: 500; }
+.lj-tv .hero-compact {
+display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+  margin-bottom: 18px;
+}
+.lj-tv .poster-col {
+display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 200px;
+}
+.lj-tv .poster-frame {
+position: relative;
+  width: 200px;
+  aspect-ratio: 2 / 3 !important;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--skylight), var(--shadow);
+}
+.lj-tv .poster-frame img {
+width: 100%;
+  height: 100%;
+  aspect-ratio: 2 / 3 !important;
+  object-fit: cover !important;
+  display: block;
+  transition: transform .5s var(--ease);
+}
+.lj-tv .poster-frame:hover img {
+transform: scale(1.025);
+}
+.lj-tv .poster-badge {
+position: absolute;
+  top: 8px; left: 8px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  background: rgba(15, 18, 24, 0.78);
+  color: #f4f1ea;
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+.lj-tv .poster-season-tag {
+position: absolute;
+  bottom: 8px; right: 8px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(16, 185, 129, 0.88);
+  color: #fff;
+  backdrop-filter: blur(6px);
+}
+.lj-tv .status-split {
+position: relative;
+  display: grid;
+  grid-template-columns: 1fr 34px;
+  height: 34px;
+  border-radius: 9px;
+  overflow: visible;
+  background: var(--emerald-bg);
+  color: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 12px rgba(16, 185, 129, 0.24);
+}
+.lj-tv .status-main-btn {
+display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  color: #fff;
+  border-radius: 9px 0 0 9px;
+  transition: background .2s;
+}
+.lj-tv .status-main-btn:hover {
+background: rgba(0, 0, 0, 0.08); }
+.lj-tv .status-dot {
+width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.26);
+}
+.lj-tv .status-trigger {
+display: grid;
+  place-items: center;
+  border-left: 1px solid rgba(255, 255, 255, 0.22);
+  color: #fff;
+  border-radius: 0 9px 9px 0;
+  transition: background .2s;
+}
+.lj-tv .status-trigger:hover {
+background: rgba(0, 0, 0, 0.12); }
+.lj-tv .status-trigger .ic {
+width: 13px; height: 13px; }
+.lj-tv .status-menu {
+position: absolute;
+  top: calc(100% + 6px);
+  left: 0; right: 0;
+  z-index: 50;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 5px;
+  box-shadow: var(--shadow), var(--skylight);
+}
+.lj-tv .status-menu button {
+width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: var(--ink2);
+  transition: background .15s, color .15s;
+}
+.lj-tv .status-menu button:hover {
+background: var(--hover);
+  color: var(--ink);
+}
+.lj-tv .status-menu button.active {
+color: var(--emerald);
+  font-weight: 600;
+  background: var(--emerald-soft);
+}
+.lj-tv .status-menu .menu-div {
+height: 1px;
+  background: var(--line2);
+  margin: 4px 2px;
+}
+.lj-tv .hero-main {
+display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 342px;
+  gap: 11px;
+}
+.lj-tv .hero-head {
+display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lj-tv .title-line {
+display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+}
+.lj-tv .game-title {
+font-family: var(--font-serif);
+  font-size: clamp(24px, 2.2vw, 31px);
+  font-weight: 700;
+  letter-spacing: .01em;
+  line-height: 1.18;
+  color: var(--ink);
+}
+.lj-tv .game-cn-sub {
+font-size: 12.5px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  color: var(--gold);
+  padding: 2px 9px;
+  border-radius: 6px;
+  background: var(--gold-soft);
+  border: 1px solid var(--gold-line);
+}
+.lj-tv .steam-pill {
+margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--ink2);
+  background: var(--tag-bg);
+  border: 1px solid var(--line);
+  transition: border-color .2s, color .2s;
+}
+.lj-tv .steam-pill:hover {
+color: var(--ink);
+  border-color: var(--warm-line);
+}
+.lj-tv .meta-row {
+display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.lj-tv .meta-chip {
+display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  background: var(--tag-bg);
+  color: var(--tag-ink);
+  border: 1px solid var(--line2);
+}
+.lj-tv .meta-chip--genre {
+background: var(--violet-soft);
+  color: var(--violet);
+  border-color: var(--violet-line);
+  font-weight: 500;
+}
+.lj-tv .meta-chip--gold {
+background: var(--gold-soft);
+  color: var(--gold);
+  border-color: var(--gold-line);
+  font-weight: 600;
+}
+.lj-tv .meta-chip .ic {
+width: 12px; height: 12px; opacity: 0.78; }
+.lj-tv .synopsis-box {
+padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--card);
+  border: 1px solid var(--line2);
+  box-shadow: var(--skylight);
+  font-size: 12.8px;
+  line-height: 1.58;
+  color: var(--ink2);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lj-tv .synopsis-quote-bar {
+width: 3px;
+  align-self: stretch;
+  border-radius: 3px;
+  background: linear-gradient(to bottom, var(--gold), var(--emerald));
+  flex: 0 0 auto;
+}
+.lj-tv .metrics-ribbon {
+display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.lj-tv .m-card {
+position: relative;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: var(--skylight), var(--shadow-s);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 114px;
+  transition: transform .22s var(--ease), border-color .22s var(--ease), background .22s var(--ease);
+}
+.lj-tv .m-card:hover {
+transform: translateY(-1px);
+  border-color: var(--warm-line);
+  background: var(--card-solid);
+}
+.lj-tv .m-head {
+display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.lj-tv .m-label {
+display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink3);
+  letter-spacing: .04em;
+}
+.lj-tv .m-label .ic {
+width: 14px; height: 14px;
+  color: var(--gold);
+}
+.lj-tv .m-mini-btn {
+padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--gold-soft);
+  color: var(--gold);
+  border: 1px solid var(--gold-line);
+  transition: all .18s;
+}
+.lj-tv .m-mini-btn:hover {
+background: var(--gold);
+  color: var(--bg);
+}
+.lj-tv .stepper-pair {
+display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.lj-tv .m-value-row {
+display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 4px 0 2px;
+}
+.lj-tv .m-val {
+font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.lj-tv .m-unit {
+font-size: 11.5px;
+  color: var(--ink3);
+  font-weight: 500;
+}
+.lj-tv .m-foot {
+font-size: 11px;
+  color: var(--ink3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.lj-tv .prog-track {
+width: 100%;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+  margin: 5px 0 4px;
+}
+.lj-tv .prog-fill {
+height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--emerald-bg), var(--gold));
+  transition: width .35s var(--ease);
+}
+.lj-tv .prog-fill--gold {
+background: linear-gradient(90deg, var(--gold), #f59e0b);
+}
+.lj-tv .star-strip {
+display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--gold);
+}
+.lj-tv .star-strip button {
+padding: 1px;
+  color: var(--gold);
+  transition: transform .15s;
+}
+.lj-tv .star-strip button:hover {
+transform: scale(1.2); }
+.lj-tv .star-strip .ic {
+width: 13px; height: 13px; }
+.lj-tv .star-strip .is-dim {
+opacity: 0.26; }
+.lj-tv .quick-actions-grid {
+display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 4px;
+}
+.lj-tv .qa-btn {
+display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 27px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--tag-bg);
+  color: var(--ink2);
+  border: 1px solid var(--line);
+  transition: all .18s;
+}
+.lj-tv .qa-btn:hover {
+color: var(--ink);
+  border-color: var(--warm-line);
+  background: var(--hover);
+}
+.lj-tv .qa-btn--primary {
+background: var(--gold-soft);
+  color: var(--gold);
+  border-color: var(--gold-line);
+  font-weight: 600;
+}
+.lj-tv .qa-btn--primary:hover {
+background: var(--gold);
+  color: var(--bg);
+}
+.lj-tv .qa-btn .ic {
+width: 12px; height: 12px; }
+.lj-tv .content-split {
+display: grid;
+  grid-template-columns: minmax(0, 1fr) 308px;
+  gap: 20px;
+  align-items: start;
+}
+.lj-tv .main-col {
+display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.lj-tv .section-card {
+background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--skylight), var(--shadow-s);
+  padding: 15px 18px 17px;
+}
+.lj-tv .sec-header {
+display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line2);
+}
+.lj-tv .sec-title-wrap {
+display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.lj-tv .sec-title {
+font-family: var(--font-serif);
+  font-size: 15.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.lj-tv .sec-title::before {
+content: '';
+  width: 3px; height: 15px;
+  border-radius: 2px;
+  background: var(--gold);
+}
+.lj-tv .sec-count {
+font-size: 11px;
+  color: var(--emerald);
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--emerald-soft);
+  border: 1px solid var(--emerald-line);
+}
+.lj-tv .sec-count--neutral {
+color: var(--ink3);
+  font-weight: 500;
+  background: var(--tag-bg);
+  border-color: var(--line2);
+}
+.lj-tv .season-strip {
+display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 7px 10px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line2);
+}
+.lj-tv .season-pills {
+display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.lj-tv .s-pill {
+height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--ink3);
+  border: 1px solid transparent;
+  transition: all .16s;
+}
+.lj-tv .s-pill:hover {
+color: var(--ink);
+  background: var(--hover);
+}
+.lj-tv .s-pill.is-active {
+font-family: var(--font-ui);
+  font-weight: 600;
+  color: var(--gold);
+  background: var(--gold-soft);
+  border-color: var(--gold-line);
+  padding: 0 10px;
+}
+.lj-tv .season-jump-link {
+display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--gold);
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: var(--gold-soft);
+  border: 1px solid var(--gold-line);
+  transition: all .18s;
+}
+.lj-tv .season-jump-link:hover {
+background: var(--gold);
+  color: var(--bg);
+}
+.lj-tv .gallery-tools {
+display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lj-tv .layout-seg {
+display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+.lj-tv .layout-seg button {
+padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--ink3);
+  transition: all .18s;
+}
+.lj-tv .layout-seg button:hover {
+color: var(--ink); }
+.lj-tv .layout-seg button.on {
+background: var(--gold-soft);
+  color: var(--gold);
+  font-weight: 600;
+  border: 1px solid var(--gold-line);
+}
+.lj-tv .ep-matrix {
+display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+.lj-tv .ep-matrix[data-mode="list"] {
+grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.lj-tv .ep-cell {
+position: relative;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  cursor: pointer;
+  transition: transform .18s var(--ease), border-color .18s var(--ease), background .18s var(--ease), box-shadow .18s var(--ease);
+}
+.lj-tv .ep-cell:hover {
+transform: translateY(-1px);
+  border-color: var(--warm-line);
+  background: var(--card-hover);
+}
+.lj-tv .ep-cell.is-watched {
+border-color: var(--emerald-line);
+  background: linear-gradient(155deg, var(--emerald-soft) 0%, var(--panel) 85%);
+}
+.lj-tv .ep-cell.is-selected {
+border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold), var(--shadow-s);
+}
+.lj-tv .ep-cell.is-finale {
+border-color: var(--gold-line);
+  background: linear-gradient(145deg, var(--gold-soft) 0%, var(--emerald-soft) 100%);
+}
+.lj-tv .ep-top {
+display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+.lj-tv .ep-num {
+font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--gold);
+  letter-spacing: .02em;
+}
+.lj-tv .ep-meta-right {
+display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.lj-tv .ep-dur {
+font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink3);
+}
+.lj-tv .ep-check {
+width: 15px; height: 15px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 9.5px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink3);
+  border: 1px solid var(--line);
+  transition: all .18s;
+}
+.lj-tv .ep-cell.is-watched .ep-check {
+background: var(--emerald-bg);
+  color: #fff;
+  border-color: transparent;
+}
+.lj-tv .ep-cell.is-finale.is-watched .ep-check {
+background: var(--gold);
+  color: #14171b;
+}
+.lj-tv .ep-name {
+font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lj-tv .ep-en {
+font-size: 10px;
+  color: var(--ink3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lj-tv .ep-plot-inline {
+display: none;
+  font-size: 11px;
+  color: var(--ink2);
+  line-height: 1.45;
+  margin-top: 2px;
+}
+.lj-tv .ep-matrix[data-mode="list"] .ep-plot-inline {
+display: block;
+}
+.lj-tv .ep-spotlight {
+margin-top: 11px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.lj-tv .ep-spot-main {
+display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 420px;
+  min-width: 0;
+}
+.lj-tv .ep-spot-title-row {
+display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.lj-tv .ep-spot-badge {
+padding: 2px 8px;
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--gold-soft);
+  color: var(--gold);
+  border: 1px solid var(--gold-line);
+}
+.lj-tv .ep-spot-title {
+font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.lj-tv .ep-spot-en {
+font-size: 11.5px;
+  color: var(--ink3);
+  font-family: var(--font-mono);
+}
+.lj-tv .ep-spot-desc {
+font-size: 12px;
+  color: var(--ink2);
+  line-height: 1.5;
+}
+.lj-tv .ep-spot-actions {
+display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.lj-tv .cast-grid {
+display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.lj-tv .cast-card {
+height: 62px;
+  padding: 0 12px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  transition: transform .18s var(--ease), border-color .18s var(--ease), background .18s var(--ease);
+}
+.lj-tv .cast-card:hover {
+transform: translateY(-1px);
+  border-color: var(--warm-line);
+  background: var(--card-hover);
+}
+.lj-tv .cast-avatar {
+width: 40px; height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-serif);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #f4f1ea;
+  flex: 0 0 40px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 10px rgba(0,0,0,0.22);
+  border: 1px solid rgba(255,255,255,0.18);
+  position: relative;
+}
+.lj-tv .cast-info {
+min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lj-tv .cast-name-row {
+display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.lj-tv .cast-name {
+font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lj-tv .cast-tag {
+font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--tag-bg);
+  color: var(--ink3);
+  border: 1px solid var(--line2);
+  flex: 0 0 auto;
+}
+.lj-tv .cast-tag--dir {
+background: var(--gold-soft);
+  color: var(--gold);
+  border-color: var(--gold-line);
+}
+.lj-tv .cast-role {
+font-size: 11.5px;
+  color: var(--ink3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lj-tv .side-col {
+display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.lj-tv .note-box {
+position: relative;
+  padding: 12px 13px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line2);
+  font-size: 12.5px;
+  line-height: 1.68;
+  color: var(--ink2);
+  margin-bottom: 12px;
+}
+.lj-tv .note-textarea {
+width: 100%;
+  min-height: 76px;
+  border: 1px solid var(--warm-line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  padding: 8px 10px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  resize: vertical;
+}
+.lj-tv .kv-list {
+display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lj-tv .kv-row {
+display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--line2);
+}
+.lj-tv .kv-row:last-child {
+border-bottom: 0; padding-bottom: 0; }
+.lj-tv .kv-k {
+color: var(--ink3); }
+.lj-tv .kv-v {
+color: var(--ink2);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.lj-tv .kv-v a {
+color: var(--gold);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.lj-tv .kv-v a:hover {
+text-decoration: underline; }
+.lj-tv .side-actions {
+display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line2);
+}
+.lj-tv .side-btn {
+display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 31px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink2);
+  transition: all .18s;
+}
+.lj-tv .side-btn:hover {
+color: var(--ink);
+  border-color: var(--warm-line);
+  background: var(--hover);
+}
+.lj-tv .side-btn .ic {
+width: 13px; height: 13px; color: var(--gold); }
+.lj-tv .toast {
+position: fixed;
+  bottom: 24px;
+  right: 28px;
+  z-index: 250;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--gold-line);
+  box-shadow: var(--shadow);
+  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+  transition: opacity .25s var(--ease), transform .25s var(--ease);
+}
+.lj-tv .toast.show {
+opacity: 1;
+  transform: translateY(0);
+}
+@media (max-width: 1180px) {
+.lj-tv .metrics-ribbon {
+grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.lj-tv .content-split {
+grid-template-columns: minmax(0, 1fr); }
+.lj-tv .ep-matrix {
+grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.lj-tv .side-col {
+display: grid; grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 760px) {
+.lj-tv .hero-compact {
+grid-template-columns: 1fr; }
+.lj-tv .poster-col {
+margin: 0 auto; }
+.lj-tv .ep-matrix {
+grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.lj-tv .cast-grid {
+grid-template-columns: 1fr; }
+.lj-tv .side-col {
+grid-template-columns: 1fr; }
+}
+
+/* ===== 本站补充样式（设计稿里没有、但真实数据需要的类） ===== */
+
+.lj-tv .page-shell {
+  position: relative;
+  z-index: 1;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 10px var(--pad) 56px;
+}
+
+/* --- 卡片里可点的指标值 --- */
+.lj-tv .m-clickable { cursor: pointer; }
+.lj-tv .m-clickable:hover .m-val { opacity: .82; }
+.lj-tv .m-val--sm { font-size: 15px; }
+.lj-tv .m-link {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gold);
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: var(--gold-soft);
+  border: 1px solid var(--gold-line);
+  white-space: nowrap;
+}
+.lj-tv .m-link:hover { background: var(--gold); color: var(--bg); }
+.lj-tv .m-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: var(--emerald);
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: var(--emerald-soft);
+  border: 1px solid var(--emerald-line);
+  white-space: nowrap;
+}
+
+/* --- 五星展示条 --- */
+.lj-tv .star-slot { display: inline-flex; }
+.lj-tv .star-slot .ic { width: 13px; height: 13px; }
+.lj-tv .star-slot.is-dim { opacity: .26; }
+
+/* --- 10 星评分弹层 --- */
+.lj-tv .rating-popup {
+  position: absolute;
+  left: 12px;
+  top: calc(100% - 4px);
+  z-index: 40;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--warm-line);
+  box-shadow: var(--shadow), var(--skylight);
+}
+.lj-tv .rating-row { display: flex; align-items: flex-start; gap: 2px; }
+.lj-tv .rating-star {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 2px 3px;
+  border-radius: 5px;
+  color: var(--ink3);
+}
+.lj-tv .rating-star:hover { background: var(--gold-soft); }
+.lj-tv .rating-glyph { display: inline-flex; color: var(--ink3); }
+.lj-tv .rating-glyph .ic { width: 15px; height: 15px; }
+.lj-tv .rating-glyph.is-on { color: var(--gold); }
+.lj-tv .rating-num { font-size: 9.5px; font-family: var(--font-mono); }
+.lj-tv .rating-glyph.is-on + .rating-num { color: var(--gold); }
+
+.lj-tv .score-toast {
+  position: absolute;
+  left: 12px;
+  bottom: calc(100% + 6px);
+  z-index: 40;
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  white-space: nowrap;
+  box-shadow: var(--shadow);
+}
+.lj-tv .score-toast.is-ok {
+  background: var(--emerald-soft);
+  color: var(--emerald);
+  border: 1px solid var(--emerald-line);
+}
+.lj-tv .score-toast.is-bad {
+  background: rgba(224, 103, 90, .16);
+  color: var(--verm);
+  border: 1px solid rgba(224, 103, 90, .34);
+}
+
+/* --- 分季胶囊里的计数 --- */
+.lj-tv .s-pill-count {
+  margin-left: 5px;
+  font-size: 9.5px;
+  opacity: .66;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- 分集矩阵容器 / 空状态 --- */
+.lj-tv .ep-view { min-width: 0; }
+.lj-tv .ep-matrix { min-width: 0; }
+.lj-tv .ep-cell { min-width: 0; }
+.lj-tv .ep-top { min-width: 0; }
+.lj-tv .ep-name, .lj-tv .ep-en { min-width: 0; display: block; }
+.lj-tv .ep-empty {
+  padding: 20px 4px;
+  font-size: 12.5px;
+  color: var(--ink3);
+  text-align: center;
+}
+.lj-tv .ep-quick {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line2);
+}
+.lj-tv .ep-quick > div > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 0 !important;
+}
+.lj-tv .ep-quick span,
+.lj-tv .ep-quick p {
+  font-size: 12px !important;
+  color: var(--ink2) !important;
+}
+.lj-tv .ep-quick button,
+.lj-tv .ep-quick a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 27px;
+  padding: 0 9px !important;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--tag-bg);
+  color: var(--ink2);
+  border: 1px solid var(--line);
+}
+.lj-tv .ep-quick button:hover {
+  background: var(--gold-soft);
+  color: var(--gold);
+  border-color: var(--gold-line);
+}
+
+/* --- 分集列表模式（保留原有每集三个操作按钮） --- */
+.lj-tv .ep-legacy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.lj-tv .ep-legacy-row {
+  display: flex;
+  gap: 11px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+.lj-tv .ep-legacy-thumb {
+  width: 112px;
+  flex: 0 0 112px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 7px;
+  background: var(--panel-2);
+  cursor: pointer;
+}
+.lj-tv .ep-legacy-body { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 4px; }
+.lj-tv .ep-legacy-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.lj-tv .ep-legacy-titles { min-width: 0; }
+.lj-tv .ep-legacy-title { font-size: 12.8px; font-weight: 600; color: var(--ink); }
+.lj-tv .ep-legacy-meta { font-size: 10.5px; color: var(--ink3); font-family: var(--font-mono); }
+.lj-tv .ep-legacy-btns { display: flex; gap: 4px; flex: 0 0 auto; }
+.lj-tv .ep-legacy-plot { font-size: 11.5px; color: var(--ink2); line-height: 1.5; }
+.lj-tv .ep-legacy-seen { font-size: 10.5px; color: var(--emerald); }
+.lj-tv .is-blur { filter: blur(5px); cursor: pointer; }
+
+/* --- 区块右上说明文字 --- */
+.lj-tv .sec-note { font-size: 11.5px; color: var(--ink3); }
+.lj-tv .gallery-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line2);
+}
+
+/* --- 手札引号 / 占位文字 --- */
+.lj-tv .note-quote {
+  font-family: var(--font-serif);
+  font-size: 26px;
+  line-height: 1;
+  color: var(--gold);
+  opacity: .5;
+  display: block;
+  margin-bottom: 2px;
+}
+.lj-tv .note-box p { font-size: 12.5px; line-height: 1.68; }
+.lj-tv .note-box .is-muted { color: var(--ink3); font-style: italic; }
+
+/* --- 同步按钮里的旋转图标 --- */
+.lj-tv .side-btn-spin { display: inline-flex; }
+.lj-tv .side-btn-spin.animate-spin { animation: lj-tv-spin 1s linear infinite; }
+.lj-tv .side-btn:disabled { opacity: .6; cursor: progress; }
+@keyframes lj-tv-spin { to { transform: rotate(360deg); } }
+
+/* --- 重温记录卡 --- */
+.lj-tv .repeat-list { display: flex; flex-direction: column; gap: 8px; }
+.lj-tv .repeat-card {
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lj-tv .repeat-head { display: flex; align-items: center; gap: 7px; }
+.lj-tv .repeat-score { font-size: 12px; font-weight: 700; color: var(--gold); font-variant-numeric: tabular-nums; }
+.lj-tv .repeat-status {
+  font-size: 10.5px;
+  color: var(--ink3);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--tag-bg);
+  border: 1px solid var(--line2);
+}
+.lj-tv .repeat-edit { margin-left: auto; }
+.lj-tv .repeat-meta { font-size: 11px; color: var(--ink2); font-variant-numeric: tabular-nums; }
+.lj-tv .repeat-notes { font-size: 11.5px; color: var(--ink3); font-style: italic; line-height: 1.5; }
+
+/* --- 主题色文字在亮色下加深 --- */
+html[data-theme="light"] .lj-tv .cast-tag--dir,
+html[data-theme="light"] .lj-tv .m-link,
+html[data-theme="light"] .lj-tv .rating-glyph.is-on { color: #7d5416; }
+</style>
+
+{% comment %} 集数总量：episodes 是全部季的合集，用它的长度做总集数；已看集数直接取 current_instance.progress（TV 的 progress 就是已看集数）。百分比与总时长用 widthratio 现算，避免后端没有这两个变量。 {% endcomment %}
+{% with episode_total=episodes|length %}
+{% with watched_total=current_instance.progress|default:0 cast_total=media.total_cast_count|default:0 %}
+{% if episode_total %}{% widthratio watched_total episode_total 100 as watched_percent %}{% else %}{% widthratio 0 1 100 as watched_percent %}{% endif %}
+{% if runtime_minutes %}{% widthratio watched_total 1 runtime_minutes as watch_minutes_total %}{% widthratio watch_minutes_total 60 1 as watch_hours_total %}{% else %}{% widthratio 0 1 1 as watch_minutes_total %}{% endif %}
+<div class="lj-tv"
+     x-data="{
+       epView: 'grid',
+       season: {{ seasons.0.number|default:1 }},
+       epSpot: 0,
+       eps: [{% for ep in episodes %}{ s: {{ ep.season_number }}, n: {{ ep.number }}, t: '{{ ep.title|default:"未命名"|escapejs }}', d: '{% if ep.end_date %}{{ ep.end_date|date:"Y-m-d" }}{% endif %}', w: {% if ep.watched %}true{% else %}false{% endif %}, note: '{{ ep.notes|default:""|escapejs }}' }{% if not forloop.last %}, {% endif %}{% endfor %}],
+       firstIn(s) { const i = this.eps.findIndex(e => e.s === s); return i < 0 ? 0 : i; },
+       pick(s) { this.season = s; this.epSpot = this.firstIn(s); },
+       cur() { return this.eps[this.epSpot] || null; },
+       rating: {% if current_instance.score is not None %}{{ current_instance.score }}{% else %}null{% endif %},
+       lastRating: {% if current_instance.score is not None %}{{ current_instance.score }}{% else %}null{% endif %},
+       hoverRating: null,
+       isHovering: false,
+       showRatingPopup: false,
+       scoreToast: null,
+       toast: '',
+       onScoreDone(ok) {
+         if (ok) {
+           this.lastRating = this.rating;
+           this.scoreToast = { ok: true, text: '评分已保存' };
+         } else {
+           this.rating = this.lastRating;
+           this.scoreToast = { ok: false, text: '评分保存失败，已还原' };
+         }
+         setTimeout(() => { this.scoreToast = null; }, ok ? 2000 : 4000);
+       },
+       say(text) { this.toast = text; setTimeout(() => { this.toast = ''; }, 2600); }
+     }"
+     @keydown.escape.window="showRatingPopup = false">
+
+  {# 背景氛围层：封面放大模糊 + 双径向光 + 四段渐隐，pointer-events:none，不挡点击 #}
+  <div class="ambient" aria-hidden="true">
+    {% if media.image %}
+      <div class="ambient-art"><img src="{{ media.image }}" alt=""></div>
+    {% endif %}
+    <div class="ambient-glow"></div>
+    <div class="ambient-fade"></div>
+  </div>
+
+  <main class="page-shell">
+
+    {# ---------- 面包屑 ---------- #}
+    <div class="crumb-bar">
+      <div class="crumb-links">
+        <a href="{% url 'medialist' username=request.user.username media_type=media_type %}">
+          {% include "app/icons/right-arrow.svg" with classes="ic rotate-180" %}
+          <span>{{ media_type|media_type_readable_plural }}</span>
+        </a>
+        <span class="crumb-sep" aria-hidden="true">/</span>
+        <span class="crumb-cur">{{ media.title }}</span>
+      </div>
+    </div>
+
+    {# ---------- Hero：左海报 + 状态条 / 右标题 + 规格 + 引言 + 四宫格指标 ---------- #}
+    <section class="hero-compact" aria-label="剧集核心信息">
+      <div class="poster-col">
+        <div class="poster-frame">
+          {% if episode_total %}
+            <span class="poster-season-tag">
+              {% if watched_total == episode_total %}
+                全 {{ episode_total }} 集已看
+              {% elif watched_total %}
+                已看 {{ watched_total }}/{{ episode_total }} 集
+              {% else %}
+                未开始
+              {% endif %}
+            </span>
+          {% endif %}
+          <img src="{{ media.image }}" alt="{{ media.title }} 海报">
+        </div>
+
+        {# 状态按钮 + Track 模态；按钮上的 htmx 属性和原来完全一致，只换外壳样式 #}
+        <div class="status-split"
+             x-data="{ trackOpen: false, createOpen: false, menuOpen: false }"
+             @click.away="menuOpen = false"
+             @keydown.escape.window="trackOpen = false; createOpen = false; menuOpen = false">
+          <button type="button"
+                  class="status-main-btn"
+                  hx-get="{% media_view_url 'track_modal' media %}"
+                  hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "instance_id": "{{ current_instance.id }}"}'
+                  hx-target="#{% component_id 'track' media current_instance.id %}"
+                  hx-trigger="click"
+                  @click="trackOpen = true">
+            <span class="status-dot"></span>
+            <span>{% if user_medias %}{{ current_instance|media_status_readable }}{% else %}{% trans "Add to tracker" %}{% endif %}</span>
+          </button>
+
+          <button type="button"
+                  class="status-trigger"
+                  title="{% trans "More tracking options" %}"
+                  aria-label="{% trans "More tracking options" %}"
+                  @click="menuOpen = !menuOpen">
+            {% include "app/icons/chevron-down.svg" with classes="ic" %}
+          </button>
+
+          {% if user_medias and media_type != MediaTypes.TV.value and media_type != MediaTypes.SEASON.value %}
+            <div class="status-menu" x-show="menuOpen" x-cloak>
+              <button type="button"
+                      hx-get="{% media_view_url 'track_modal' media %}"
+                      hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "is_create": true}'
+                      hx-target="#{% component_id 'track' media %}"
+                      hx-trigger="click once"
+                      @click="menuOpen = false; createOpen = true">
+                <span>{% trans "Add new entry" %}</span>
+                <span>{% include "app/icons/plus.svg" with classes="ic" %}</span>
+              </button>
+            </div>
+          {% endif %}
+
+          <div x-show="createOpen"
+               role="dialog"
+               aria-modal="true"
+               class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div class="w-152 max-h-[90vh] px-4 md:px-0 relative z-60">
+              <div id="{% component_id 'track' media %}"></div>
+            </div>
+          </div>
+
+          <div x-show="trackOpen"
+               role="dialog"
+               aria-modal="true"
+               class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div class="w-152 max-h-[90vh] px-4 md:px-0 relative z-60" @click.stop>
+              <div id="{% component_id 'track' media current_instance.id %}"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hero-main">
+        <div class="hero-head">
+          <div class="title-line">
+            {% if media.media_type == MediaTypes.SEASON.value %}
+              <h1 class="game-title">
+                <a href="{% url 'media_details' source=media.source media_type=MediaTypes.TV.value media_id=media.media_id title=media.title|slug %}">{{ media.title }}</a>
+              </h1>
+              <span class="game-cn-sub">{{ media.season_title }}</span>
+            {% else %}
+              <h1 class="game-title">{{ media.title }}</h1>
+              {% if media.title_en and media.title_en != media.title %}
+                <span class="game-cn-sub">{{ media.title_en }}</span>
+              {% elif media.title_zh and media.title_zh != media.title %}
+                <span class="game-cn-sub">{{ media.title_zh }}</span>
+              {% endif %}
+            {% endif %}
+
+            {% if media.source_url %}
+              <a class="steam-pill" href="{{ media.source_url }}" target="_blank" rel="noopener">
+                <span>{{ media.source|source_readable }} · {{ media.media_id }}</span>
+                {% include "app/icons/external-link.svg" with classes="ic" %}
+              </a>
+            {% endif %}
+          </div>
+
+          {% with specs=media.details %}
+            <div class="meta-row">
+              {% if media.release_date %}
+                <span class="meta-chip">
+                  {% include "app/icons/calendar.svg" with classes="ic" %}
+                  <span>{{ media.release_date|iso_date_format:request.user }} 发行</span>
+                </span>
+              {% endif %}
+
+              {% for genre in media.genres|slice:":5" %}
+                <span class="meta-chip meta-chip--genre">{{ genre }}</span>
+              {% empty %}
+                {% for genre in current_instance.item.genres|slice:":5" %}
+                  <span class="meta-chip meta-chip--genre">{{ genre }}</span>
+                {% endfor %}
+              {% endfor %}
+
+              {% if specs.first_air_date %}
+                <span class="meta-chip">
+                  {% include "app/icons/calendar.svg" with classes="ic" %}
+                  <span>{{ specs.first_air_date|iso_date_format:request.user }} 首播</span>
+                </span>
+              {% elif specs.release_date %}
+                <span class="meta-chip">
+                  {% include "app/icons/calendar.svg" with classes="ic" %}
+                  <span>{{ specs.release_date|iso_date_format:request.user }} 首播</span>
+                </span>
+              {% endif %}
+
+              {% if specs.seasons %}
+                <span class="meta-chip">
+                  {% include "app/icons/grid.svg" with classes="ic" %}
+                  <span>{{ specs.seasons }} 季{% if specs.episodes %} · 共 {{ specs.episodes }} 集{% endif %}</span>
+                </span>
+              {% elif episode_total %}
+                <span class="meta-chip">
+                  {% include "app/icons/grid.svg" with classes="ic" %}
+                  <span>全 {{ episode_total }} 集</span>
+                </span>
+              {% endif %}
+
+              {% if runtime_minutes %}
+                <span class="meta-chip">
+                  {% include "app/icons/clock.svg" with classes="ic" %}
+                  <span>单集 {{ runtime_minutes }} 分钟</span>
+                </span>
+              {% elif specs.runtime %}
+                <span class="meta-chip">
+                  {% include "app/icons/clock.svg" with classes="ic" %}
+                  <span>单集 {{ specs.runtime }}</span>
+                </span>
+              {% endif %}
+
+              {% if specs.country or specs.languages %}
+                <span class="meta-chip">
+                  <span>{{ specs.country }}{% if specs.country and specs.languages %} · {% endif %}{{ specs.languages|join:"、" }}</span>
+                </span>
+              {% endif %}
+
+              {% if specs.last_air_date %}
+                <span class="meta-chip">
+                  <span>{{ specs.last_air_date|iso_date_format:request.user }} 完结</span>
+                </span>
+              {% endif %}
+
+              {% if current_instance.start_date %}
+                <span class="meta-chip meta-chip--gold">
+                  <span>{{ current_instance.start_date|date:"Y-m-d" }} 开追</span>
+                </span>
+              {% elif specs.status %}
+                <span class="meta-chip meta-chip--gold">
+                  <span>{{ specs.status }}</span>
+                </span>
+              {% endif %}
+            </div>
+          {% endwith %}
+        </div>
+
+        {% if media.synopsis and media.synopsis != "No synopsis available." %}
+          <div class="synopsis-box"
+               x-data="{ isExpanded: false, isClamped: false, checkClamp() { const el = this.$refs.synopsisText; this.isClamped = el.scrollHeight > el.clientHeight; } }"
+               x-init="$nextTick(() => checkClamp())">
+            <span class="synopsis-quote-bar" aria-hidden="true"></span>
+            <p x-ref="synopsisText"
+               :class="isExpanded ? '' : 'line-clamp-2'"
+               class="min-w-0">{{ media.synopsis|linebreaksbr|safe }}</p>
+            <button type="button"
+                    class="m-mini-btn"
+                    x-show="isClamped"
+                    x-cloak
+                    @click="isExpanded = !isExpanded">
+              <span x-text="isExpanded ? '收起' : '全文'"></span>
+            </button>
+          </div>
+        {% endif %}
+
+        <div class="metrics-ribbon">
+          {# 卡 1：追剧进度 #}
+          <div class="m-card">
+            <div class="m-head">
+              <span class="m-label">
+                {% include "app/icons/four-square.svg" with classes="ic" %}
+                <span>追剧进度</span>
+              </span>
+              <span class="m-unit">共 {{ episode_total|default:"0" }} 集</span>
+            </div>
+            <div class="m-value-row">
+              <span class="m-val">{{ watched_total|default:"0" }} / {{ episode_total|default:"0" }} 集</span>
+              <span class="m-unit" style="color:var(--emerald);font-weight:600">{{ watched_percent }}%</span>
+            </div>
+            <div>
+              <div class="prog-track" role="progressbar"
+                   aria-valuenow="{{ watched_percent }}" aria-valuemin="0" aria-valuemax="100">
+                <div class="prog-fill" style="width: {{ watched_percent }}%"></div>
+              </div>
+              <div class="m-foot">
+                <span>
+                  {% if episode_total and watched_total == episode_total %}
+                    全部打卡完成
+                  {% elif watched_total %}
+                    已点亮 {{ watched_total }} 集
+                  {% else %}
+                    还没有打卡
+                  {% endif %}
+                </span>
+                <span>{% if user_medias %}{{ current_instance|media_status_readable }}{% else %}未追{% endif %}</span>
+              </div>
+            </div>
+          </div>
+
+          {# 卡 2：你的评分（弹层里 10 个星按钮保留原 hx-post 五件套） #}
+          <div class="m-card">
+            <div class="m-head">
+              <span class="m-label">
+                {% include "app/icons/star.svg" with classes="ic ic-fill" %}
+                <span>你的评分</span>
+              </span>
+              <div class="star-strip" title="点击修改评分"
+                   @click="showRatingPopup = !showRatingPopup">
+                <template x-for="i in 5" :key="i">
+                  <span class="star-slot" :class="{ 'is-dim': i > Math.round((rating || 0) / 2) }">
+                    {% include "app/icons/star.svg" with classes="ic" %}
+                  </span>
+                </template>
+              </div>
+            </div>
+            <div class="m-value-row m-clickable" @click="showRatingPopup = !showRatingPopup">
+              <span class="m-val" style="color:var(--gold)">
+                {% if user_medias %}★ <span x-text="rating !== null ? rating : '—'"></span>{% else %}★ —{% endif %}
+              </span>
+              <span class="m-unit">/ 10</span>
+            </div>
+            <div class="m-foot">
+              <span>{% if user_medias %}{% trans "Click to edit" %}{% else %}还没有追这部剧{% endif %}</span>
+            </div>
+
+            {% if user_medias %}
+              <div class="rating-popup"
+                   x-show="showRatingPopup"
+                   x-cloak
+                   @click.outside="showRatingPopup = false; isHovering = false"
+                   @mouseenter="isHovering = true"
+                   @mouseleave="isHovering = false; hoverRating = null">
+                <div class="rating-row">
+                  {% with rating_range=10|get_range %}
+                    {% for rating_value in rating_range %}
+                      <button type="button"
+                              class="rating-star"
+                              @click="rating = {{ rating_value }}; showRatingPopup = false; isHovering = false"
+                              @mouseenter="hoverRating = {{ rating_value }}"
+                              hx-post="{% url 'update_media_score' media_type current_instance.id %}"
+                              hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                              hx-vals='{"score": {{ rating_value }} }'
+                              hx-trigger="click"
+                              hx-swap="none">
+                        <span class="rating-glyph" :class="{ 'is-on': {{ rating_value }} <= (isHovering ? hoverRating : rating) }">
+                          {% include "app/icons/star.svg" with classes="ic" %}
+                        </span>
+                        <span class="rating-num">{{ rating_value }}</span>
+                      </button>
+                    {% endfor %}
+                  {% endwith %}
+                </div>
+              </div>
+
+              <div class="score-toast"
+                   x-show="scoreToast"
+                   x-cloak
+                   :class="scoreToast && scoreToast.ok ? 'is-ok' : 'is-bad'">
+                <span x-text="scoreToast ? scoreToast.text : ''"></span>
+              </div>
+            {% endif %}
+          </div>
+
+          {# 卡 3：来源评分 #}
+          <div class="m-card">
+            <div class="m-head">
+              <span class="m-label">
+                {% include "app/icons/trophy.svg" with classes="ic" %}
+                <span>{{ media.source|upper }} 评分</span>
+              </span>
+              {% if media.source_url %}
+                <a class="m-link" href="{{ media.source_url }}" target="_blank" rel="noopener">来源页 ↗</a>
+              {% endif %}
+            </div>
+            <div class="m-value-row">
+              <span class="m-val">{% if media.score is not None %}★ {{ media.score }}{% else %}★ —{% endif %}</span>
+              <span class="m-unit">/ 10</span>
+            </div>
+            <div>
+              <div class="prog-track">
+                <div class="prog-fill prog-fill--gold"
+                     style="width: {% if media.score is not None %}{{ media.score|floatformat:0 }}0{% else %}0{% endif %}%"></div>
+              </div>
+              <div class="m-foot">
+                <span>
+                  {% if media.score_count is not None %}
+                    {{ media.score_count|intcomma }} 人评价
+                  {% else %}
+                    暂无评分数据
+                  {% endif %}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {# 卡 4：完结归档 #}
+          <div class="m-card">
+            <div class="m-head">
+              <span class="m-label">
+                {% include "app/icons/clock.svg" with classes="ic" %}
+                <span>完结归档</span>
+              </span>
+              {% if current_instance.end_date %}
+                <span class="m-badge">● 已归档</span>
+              {% endif %}
+            </div>
+            <div class="m-value-row">
+              <span class="m-val m-val--sm">
+                {% if current_instance.end_date %}
+                  {{ current_instance.end_date|date:"Y-m-d" }} 看完
+                {% elif current_instance %}
+                  还没有看完
+                {% else %}
+                  —
+                {% endif %}
+              </span>
+            </div>
+            <div class="m-foot">
+              <span>
+                {% if watch_minutes_total %}
+                  总时长约 {{ watch_hours_total }} 小时 ({{ watch_minutes_total }}m)
+                {% elif runtime_minutes %}
+                  单集约 {{ runtime_minutes }} 分钟
+                {% elif current_instance.completion_estimated %}
+                  推算日期，不是精确时间
+                {% else %}
+                  —
+                {% endif %}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {# ---------- 主内容：左「分集矩阵 + 阵容」，右「手札 + 档案」 ---------- #}
+    <section class="content-split">
+
+      <div class="main-col">
+        {# 模块 1：分集打卡矩阵 #}
+        <div class="section-card">
+          <div class="sec-header">
+            <div class="sec-title-wrap">
+              <h2 class="sec-title">分集打卡矩阵</h2>
+              <span class="sec-count">{{ watched_total|default:"0" }} / {{ episode_total|default:"0" }} 集</span>
+              <span class="sec-count sec-count--neutral">EPISODE MATRIX</span>
+            </div>
+            <div class="gallery-tools">
+              {% if media.episodes %}
+                <div class="layout-seg" role="group" aria-label="分集视图切换">
+                  <button type="button" :class="{ 'on': epView === 'grid' }" @click="epView = 'grid'">⊞ 胶囊矩阵</button>
+                  <button type="button" :class="{ 'on': epView === 'list' }" @click="epView = 'list'">☰ 分集列表</button>
+                </div>
+              {% else %}
+                {% comment %} 没有 provider 分集数据时只保留矩阵，避免切到空列表 {% endcomment %}
+                <div class="layout-seg" role="group" aria-label="分集视图">
+                  <button type="button" class="on" @click="epView = 'grid'">⊞ 胶囊矩阵</button>
+                </div>
+              {% endif %}
+            </div>
+          </div>
+
+          {% if seasons %}
+            <div class="season-strip">
+              <div class="season-pills" aria-label="分季快速切换">
+                {% for s in seasons %}
+                  <button type="button"
+                          class="s-pill"
+                          :class="{ 'is-active': season === {{ s.number }} }"
+                          @click="pick({{ s.number }})">
+                    S{{ s.number|stringformat:"02d" }}
+                    <span class="s-pill-count">{{ s.watched_count }}/{{ s.episode_count }}</span>
+                  </button>
+                {% endfor %}
+              </div>
+              <a class="season-jump-link"
+                 href="{% url 'medialist' username=request.user.username media_type=media_type %}">
+                <span>全部剧集</span>
+                {% include "app/icons/external-link.svg" with classes="ic" %}
+              </a>
+            </div>
+          {% endif %}
+
+          {% if episodes %}
+            <div class="ep-view" x-show="epView === 'grid'">
+              <div class="ep-matrix" data-mode="grid">
+                {% for ep in episodes %}
+                  <button type="button"
+                          class="ep-cell{% if ep.watched %} is-watched{% endif %}"
+                          x-show="season === {{ ep.season_number }}"
+                          :class="{ 'is-selected': season === {{ ep.season_number }} && epSpot === {{ forloop.counter0 }} }"
+                          @click="season = {{ ep.season_number }}; epSpot = {{ forloop.counter0 }}"
+                          title="S{{ ep.season_number }} · EP {{ ep.number }}{% if ep.end_date %} · {{ ep.end_date|date:"Y-m-d" }} 已看{% endif %}">
+                    <span class="ep-top">
+                      <span class="ep-num">EP {{ ep.number|stringformat:"02d" }}</span>
+                      <span class="ep-meta-right">
+                        {% if runtime_minutes %}<span class="ep-dur">{{ runtime_minutes }}m</span>{% endif %}
+                        <span class="ep-check">{% if ep.watched %}✓{% endif %}</span>
+                      </span>
+                    </span>
+                    <span class="ep-name">{{ ep.title|default:"未命名" }}</span>
+                    <span class="ep-en">
+                      {% if ep.end_date %}{{ ep.end_date|date:"Y-m-d" }}{% elif ep.notes %}{{ ep.notes|truncatechars:16 }}{% else %}未打卡{% endif %}
+                    </span>
+                  </button>
+                {% endfor %}
+              </div>
+
+              {# 选中单集速览：纯展示，点格子换内容，不发请求 #}
+              <div class="ep-spotlight">
+                <div class="ep-spot-main">
+                  <div class="ep-spot-title-row">
+                    <span class="ep-spot-badge" x-text="cur() ? ('S' + String(cur().s).padStart(2, '0') + ' · EP ' + String(cur().n).padStart(2, '0')) : '—'"></span>
+                    <span class="ep-spot-title" x-text="cur() ? cur().t : '暂无分集记录'"></span>
+                    <span class="ep-spot-en"
+                          x-text="cur() ? ((cur().w ? (cur().d ? cur().d + ' 已看' : '已打卡') : '未打卡') + ({{ runtime_minutes|default:"0" }} ? ' · {{ runtime_minutes|default:"0" }}m' : '')) : ''"></span>
+                  </div>
+                  <p class="ep-spot-desc"
+                     x-text="cur() ? (cur().note || (cur().w ? '这一集已经打卡，可以在「活动历史」里查看完整记录。' : '这一集还没有打卡，点下面的「+1 集」或「标记看完」开始记录。')) : '先用下面的按钮把进度往上加，或者到追剧弹层里补历史。'"></p>
+                </div>
+                <div class="ep-spot-actions">
+                  <span class="qa-btn" :class="{ 'qa-btn--primary': cur() && cur().w }">
+                    {% include "app/icons/checkmark.svg" with classes="ic" %}
+                    <span x-text="cur() && cur().w ? '已打卡' : '未打卡'"></span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          {% else %}
+            <p class="ep-empty">还没有分集记录。先用下面的按钮把进度往上加，或者到追剧弹层里补历史。</p>
+          {% endif %}
+
+          {# 真实的快捷打卡：锚点 id 一个字没动，只在外面套了一层 .ep-quick 外壳 #}
+          {% if current_instance %}
+            <div class="ep-quick">
+              <div id="detail-progress-{{ media_type }}-{{ current_instance.id }}">
+                {% include "app/components/detail_progress_actions.html" with media=current_instance media_type=media_type csrf_token=csrf_token Status=Status only %}
+              </div>
+            </div>
+          {% endif %}
+
+          {# 分集列表模式：保留原有的每集三个操作按钮（追这集 / 清单 / 历史），hx 属性原样 #}
+          {% if media.episodes %}
+            <div class="ep-legacy" x-show="epView === 'list'" x-cloak>
+              {% for episode in media.episodes %}
+                <div class="ep-legacy-row"
+                     x-data="{ obfuscated: {% if user.obfuscate_unseen_episodes and not episode.history %}true{% else %}false{% endif %}, hasImage: {% if episode.image != IMG_NONE %}true{% else %}false{% endif %} }">
+                  <img src="{{ IMG_NONE }}"
+                       alt="E{{ episode.episode_number }}"
+                       data-src="{{ episode.image }}"
+                       class="lazyload ep-legacy-thumb"
+                       :class="{ 'is-blur': obfuscated && hasImage }"
+                       @click="obfuscated = false">
+                  <div class="ep-legacy-body">
+                    <div class="ep-legacy-head">
+                      <div class="ep-legacy-titles">
+                        <div class="ep-legacy-title"
+                             :class="{ 'is-blur': obfuscated }"
+                             @click="obfuscated = false">{{ episode.title }}</div>
+                        <div class="ep-legacy-meta">
+                          第 {{ episode.episode_number }} 集 · {{ episode.air_date|iso_date_format:request.user|default_if_none:"未定档" }}
+                          {% if episode.runtime %}· {{ episode.runtime }}{% endif %}
+                        </div>
+                      </div>
+                      <div class="ep-legacy-btns">
+                        <div x-data="{ trackOpen: false }">
+                          <button type="button"
+                                  class="qa-btn qa-btn--primary"
+                                  title="{% trans "Track Episode" %}"
+                                  @click="trackOpen = true">
+                            {% if episode.history %}
+                              {% include "app/icons/eye.svg" with classes="ic" %}
+                            {% else %}
+                              {% include "app/icons/eye-closed.svg" with classes="ic" %}
+                            {% endif %}
+                          </button>
+                          {% include "app/components/fill_track_episode.html" with request=request media=media episode=episode episode_title=episode.title csrf_token=csrf_token TRACK_TIME=TRACK_TIME only %}
+                        </div>
+
+                        <div x-data="{ listsOpen: false }">
+                          <button type="button"
+                                  class="qa-btn"
+                                  title="Add to custom lists"
+                                  hx-get="{% media_view_url 'lists_modal' episode %}"
+                                  hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}"}'
+                                  hx-target="#{% component_id 'lists' episode %}"
+                                  hx-trigger="click once"
+                                  @click="listsOpen = true">
+                            {% include "app/icons/list-add.svg" with classes="ic" %}
+                          </button>
+                          <div x-show="listsOpen"
+                               @keydown.escape.window="listsOpen = false"
+                               role="dialog"
+                               aria-modal="true"
+                               class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                            <div class="w-96 max-h-[90vh] px-4 md:px-0 relative z-60">
+                              <div id="{% component_id 'lists' episode %}"></div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div x-data="{ historyOpen: false }">
+                          <button type="button"
+                                  class="qa-btn"
+                                  title="View your activity history"
+                                  hx-get="{% media_view_url 'history_modal' episode %}"
+                                  hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}"}'
+                                  hx-target="#{% component_id 'history' episode %}"
+                                  hx-trigger="click once"
+                                  @click="historyOpen = true">
+                            {% include "app/icons/history.svg" with classes="ic" %}
+                          </button>
+                          <div x-show="historyOpen"
+                               @keydown.escape.window="historyOpen = false"
+                               role="dialog"
+                               aria-modal="true"
+                               class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                            <div class="w-96 max-h-[90vh] px-4 md:px-0 relative z-60">
+                              <div id="{% component_id 'history' episode %}"></div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <p class="ep-legacy-plot"
+                       :class="{ 'is-blur': obfuscated }"
+                       @click="obfuscated = false">{{ episode.overview }}</p>
+                    {% if episode.history %}
+                      <p class="ep-legacy-seen">
+                        {% trans "Last watched:" %}
+                        {% if episode.history.0.end_date %}
+                          {{ episode.history.0.end_date|datetime_format:user }}
+                        {% else %}
+                          {% trans "No date provided" %}
+                        {% endif %}
+                        {% if episode.history|length > 1 %}· {% trans "Watched" %} {{ episode.history|length }} {% trans "times" %}{% endif %}
+                      </p>
+                    {% endif %}
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+
+        {# 模块 2：主演与主创阵容 #}
+        {% if media.cast or media.directors %}
+          <div class="section-card">
+            <div class="sec-header">
+              <div class="sec-title-wrap">
+                <h2 class="sec-title">主演与主创阵容</h2>
+                <span class="sec-count sec-count--neutral">CAST &amp; CREW{% if cast_total %} · 共 {{ cast_total }} 位{% endif %}</span>
+              </div>
+              <span class="sec-note">首字母勋章卡 · 缺头像也认得出人</span>
+            </div>
+
+            <div class="cast-grid">
+              {% for director in media.directors|slice:":3" %}
+                <div class="cast-card">
+                  <div class="cast-avatar" style="background:{% cycle 'linear-gradient(135deg,#9a6b1f,#543810)' 'linear-gradient(135deg,#0f766e,#115e59)' 'linear-gradient(135deg,#3b5998,#1e3a8a)' %}">
+                    {% firstof director.name|slice:":2" director|slice:":2" %}
+                  </div>
+                  <div class="cast-info">
+                    <div class="cast-name-row">
+                      <span class="cast-name">{% firstof director.name director %}</span>
+                      <span class="cast-tag cast-tag--dir">导演</span>
+                    </div>
+                    <div class="cast-role">主创 / Director</div>
+                  </div>
+                </div>
+              {% endfor %}
+
+              {% for cast in media.cast %}
+                <div class="cast-card">
+                  <div class="cast-avatar" style="background:{% cycle 'linear-gradient(135deg,#be185d,#831843)' 'linear-gradient(135deg,#b45309,#78350f)' 'linear-gradient(135deg,#6d28d9,#4c1d95)' 'linear-gradient(135deg,#047857,#064e3b)' 'linear-gradient(135deg,#4338ca,#312e81)' 'linear-gradient(135deg,#4b5563,#1f2937)' 'linear-gradient(135deg,#0369a1,#0c4a6e)' 'linear-gradient(135deg,#9d174d,#500724)' %}">
+                    {{ cast.name|slice:":2" }}
+                  </div>
+                  <div class="cast-info">
+                    <div class="cast-name-row">
+                      <span class="cast-name">{{ cast.name }}</span>
+                      {% if forloop.counter <= 3 %}
+                        <span class="cast-tag">领衔主演</span>
+                      {% else %}
+                        <span class="cast-tag">主演</span>
+                      {% endif %}
+                    </div>
+                    <div class="cast-role">{% if cast.character %}饰 {{ cast.character }}{% else %}演员{% endif %}</div>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+
+            {% if media.total_cast_count > 30 or media.cast|length > 9 %}
+              <div class="gallery-footer">
+                <span class="sec-note">共 {{ cast_total }} 位演职人员</span>
+                {% if media.source_url %}
+                  <a class="qa-btn" href="{{ media.source_url }}" target="_blank" rel="noopener">
+                    <span>在来源站看全部</span>
+                    {% include "app/icons/external-link.svg" with classes="ic" %}
+                  </a>
+                {% endif %}
+              </div>
+            {% endif %}
+          </div>
+        {% endif %}
+      </div>
+
+      {# ---------- 右栏 ---------- #}
+      <aside class="side-col">
+        <div class="section-card">
+          <div class="sec-header">
+            <div class="sec-title-wrap">
+              <h2 class="sec-title">追剧手札 &amp; 记录</h2>
+            </div>
+          </div>
+
+          <div class="note-box">
+            <span class="note-quote" aria-hidden="true">“</span>
+            {% if current_instance.notes and current_instance.notes != "Imported from Steam" and current_instance.notes != "Imported from Steam（家庭共享）" %}
+              <p>{{ current_instance.notes|linebreaksbr }}</p>
+            {% else %}
+              <p class="is-muted">还没有写手札。点海报下面的状态条，在弹层里补一句。</p>
+            {% endif %}
+          </div>
+
+          <div class="kv-list">
+            <div class="kv-row">
+              <span class="kv-k">观看状态</span>
+              <span class="kv-v">{% if user_medias %}{{ current_instance|media_status_readable }}{% else %}未追{% endif %}</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-k">当前进度</span>
+              <span class="kv-v">{{ watched_total|default:"0" }} / {{ episode_total|default:"0" }} 集 ({{ watched_percent }}%)</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-k">开始时间</span>
+              <span class="kv-v">{% if current_instance.start_date %}{{ current_instance.start_date|datetime_format:user }}{% else %}—{% endif %}</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-k">完结时间</span>
+              <span class="kv-v">
+                {% if current_instance.end_date %}
+                  {% if current_instance.completion_estimated %}
+                    {{ current_instance.end_date|date:"Y" }} 年（推算）
+                  {% else %}
+                    {{ current_instance.end_date|datetime_format:user }}
+                  {% endif %}
+                {% else %}
+                  —
+                {% endif %}
+              </span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-k">入库时间</span>
+              <span class="kv-v">{% if current_instance.created_at %}{{ current_instance.created_at|date:"Y-m-d" }}{% else %}—{% endif %}</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-k">你的评分</span>
+              <span class="kv-v">{% if current_instance.score is not None %}{{ current_instance.score }} / 10{% else %}未评分{% endif %}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div class="sec-header">
+            <div class="sec-title-wrap">
+              <h2 class="sec-title">剧集档案 &amp; 操作</h2>
+            </div>
+          </div>
+
+          {% with specs=media.details %}
+            <div class="kv-list">
+              <div class="kv-row">
+                <span class="kv-k">提供方</span>
+                <span class="kv-v">
+                  {% if media.source_url %}
+                    <a href="{{ media.source_url }}" target="_blank" rel="noopener">{{ media.source|source_readable }}</a>
+                  {% else %}
+                    {{ media.source|source_readable }}
+                  {% endif %}
+                </span>
+              </div>
+              <div class="kv-row">
+                <span class="kv-k">编号</span>
+                <span class="kv-v">{{ media.media_id }}</span>
+              </div>
+              {% if specs.seasons %}
+                <div class="kv-row">
+                  <span class="kv-k">季数</span>
+                  <span class="kv-v">{{ specs.seasons }}</span>
+                </div>
+              {% endif %}
+              {% if specs.episodes %}
+                <div class="kv-row">
+                  <span class="kv-k">总集数</span>
+                  <span class="kv-v">{{ specs.episodes }}</span>
+                </div>
+              {% endif %}
+              {% if runtime_minutes %}
+                <div class="kv-row">
+                  <span class="kv-k">单集规格</span>
+                  <span class="kv-v">{{ runtime_minutes }} 分钟</span>
+                </div>
+              {% elif specs.runtime %}
+                <div class="kv-row">
+                  <span class="kv-k">单集规格</span>
+                  <span class="kv-v">{{ specs.runtime }}</span>
+                </div>
+              {% endif %}
+              {% if specs.status %}
+                <div class="kv-row">
+                  <span class="kv-k">播出状态</span>
+                  <span class="kv-v">{{ specs.status }}</span>
+                </div>
+              {% elif specs.last_air_date %}
+                <div class="kv-row">
+                  <span class="kv-k">播出状态</span>
+                  <span class="kv-v">{{ specs.last_air_date|iso_date_format:request.user }} 完结</span>
+                </div>
+              {% endif %}
+              {% if specs.studios %}
+                <div class="kv-row">
+                  <span class="kv-k">出品</span>
+                  <span class="kv-v">{{ specs.studios|join:"、" }}</span>
+                </div>
+              {% endif %}
+              {% if watch_provider_region == "UNSET" %}
+                <div class="kv-row">
+                  <span class="kv-k">观看平台</span>
+                  <span class="kv-v"><a href="{% url 'preferences' %}">去设置地区</a></span>
+                </div>
+              {% elif watch_providers %}
+                <div class="kv-row">
+                  <span class="kv-k">观看平台</span>
+                  <span class="kv-v">
+                    {% for provider in watch_providers %}{{ provider.provider_name }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                  </span>
+                </div>
+              {% endif %}
+              {% for name, url in media.external_links.items %}
+                <div class="kv-row">
+                  <span class="kv-k">{{ name }}</span>
+                  <span class="kv-v"><a href="{{ url }}" target="_blank" rel="noopener">打开 ↗</a></span>
+                </div>
+              {% endfor %}
+            </div>
+          {% endwith %}
+
+          <div class="side-actions">
+            {# 加入清单 #}
+            <div x-data="{ listsOpen: false }">
+              <button type="button"
+                      class="side-btn"
+                      title="Add to custom lists"
+                      hx-get="{% media_view_url 'lists_modal' media %}"
+                      hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}"}'
+                      hx-target="#{% component_id 'lists' media %}"
+                      hx-trigger="click once"
+                      @click="listsOpen = true">
+                {% include "app/icons/list-add.svg" with classes="ic" %}
+                <span>加入清单</span>
+              </button>
+              <div x-show="listsOpen"
+                   @keydown.escape.window="listsOpen = false"
+                   role="dialog"
+                   aria-modal="true"
+                   class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                <div class="w-96 max-h-[90vh] px-4 md:px-0 relative z-60">
+                  <div id="{% component_id 'lists' media %}"></div>
+                </div>
+              </div>
+            </div>
+
+            {# 活动历史 #}
+            <div x-data="{ historyOpen: false }">
+              <button type="button"
+                      class="side-btn"
+                      title="View your activity history"
+                      hx-get="{% media_view_url 'history_modal' media %}"
+                      hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}"}'
+                      hx-target="#{% component_id 'history' media %}"
+                      hx-trigger="click once"
+                      @click="historyOpen = true">
+                {% include "app/icons/history.svg" with classes="ic" %}
+                <span>活动历史</span>
+              </button>
+              <div x-show="historyOpen"
+                   @keydown.escape.window="historyOpen = false"
+                   role="dialog"
+                   aria-modal="true"
+                   class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                <div class="w-96 max-h-[90vh] px-4 md:px-0 relative z-60">
+                  <div id="{% component_id 'history' media %}"></div>
+                </div>
+              </div>
+            </div>
+
+            {# 同步元数据 #}
+            <button type="button"
+                    class="side-btn"
+                    title="Sync metadata with provider"
+                    hx-post="{% media_view_url 'sync_metadata' media %}"
+                    hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                    hx-vals='{"next": "{{ request.get_full_path|urlencode }}"}'
+                    hx-target="body"
+                    hx-swap="none"
+                    x-data="{ loading: false }"
+                    @click="loading = true"
+                    :disabled="loading">
+              <span class="side-btn-spin" :class="{ 'animate-spin': loading }">
+                {% include "app/icons/circle-spinning-clockwise.svg" with classes="ic" %}
+              </span>
+              <span>同步元数据</span>
+            </button>
+
+            {% if media.source_url %}
+              <a class="side-btn" href="{{ media.source_url }}" target="_blank" rel="noopener">
+                {% include "app/icons/external-link.svg" with classes="ic" %}
+                <span>来源页</span>
+              </a>
+            {% endif %}
+          </div>
+        </div>
+
+        {# 重温记录：刷过第二遍才出现 #}
+        {% if user_medias|length > 1 %}
+          <div class="section-card">
+            <div class="sec-header">
+              <div class="sec-title-wrap">
+                <h2 class="sec-title">重温记录</h2>
+                <span class="sec-count sec-count--neutral">{{ user_medias|length|add:"-1" }} 条</span>
+              </div>
+            </div>
+            <div class="repeat-list">
+              {% for user_media in user_medias|slice:"1:" %}
+                <div class="repeat-card">
+                  <div class="repeat-head">
+                    <span class="repeat-score">{% if user_media.score %}{{ user_media.score }} / 10{% else %}未评分{% endif %}</span>
+                    <span class="repeat-status">{{ user_media|media_status_readable }}</span>
+                    <div class="repeat-edit" x-data="{ trackOpen: false }">
+                      <button type="button"
+                              class="qa-btn"
+                              title="Edit entry"
+                              hx-get="{% media_view_url 'track_modal' media %}"
+                              hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "instance_id": "{{ user_media.id }}"}'
+                              hx-target="#{% component_id 'track' media user_media.id %}"
+                              hx-trigger="click once"
+                              @click="trackOpen = true">
+                        {% include "app/icons/edit-flat.svg" with classes="ic" %}
+                      </button>
+                      <div x-show="trackOpen"
+                           @keydown.escape.window="trackOpen = false"
+                           role="dialog"
+                           aria-modal="true"
+                           class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                        <div class="w-152 max-h-[90vh] px-4 md:px-0 relative z-60">
+                          <div id="{% component_id 'track' media user_media.id %}"></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="repeat-meta">
+                    {{ user_media.formatted_progress }}{% if user_media.max_progress %} / {{ user_media.max_progress }}{% endif %}
+                    {% if user_media.start_date or user_media.end_date %}
+                      ·
+                      {% if user_media.start_date %}{{ user_media.start_date|datetime_format:user }}{% endif %}
+                      {% if user_media.start_date and user_media.end_date %} – {% endif %}
+                      {% if user_media.end_date %}
+                        {% if user_media.completion_estimated %}
+                          {{ user_media.end_date|date:"Y" }} 年（推算）
+                        {% else %}
+                          {{ user_media.end_date|datetime_format:user }}
+                        {% endif %}
+                      {% endif %}
+                    {% endif %}
+                  </div>
+                  {% if user_media.notes %}
+                    <p class="repeat-notes">"{{ user_media.notes|linebreaksbr }}"</p>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+      </aside>
+    </section>
+  </main>
+
+  <div class="toast" :class="{ 'show': toast }" role="status">
+    <span x-text="toast"></span>
+  </div>
+</div>
+{% endwith %}
+{% endwith %}

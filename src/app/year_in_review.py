@@ -54,7 +54,12 @@ CACHE_TTL = 600
 # 也不依赖部署时机 —— 线上正在跑的进程下次请求就落到新 key 上。
 #   v1：end_date 或 achievements_synced_at（错误口径，2026 年虚高 8400 小时）
 #   v2：end_date 或 start_date（只认用户真实行为日期）
-CACHE_VERSION = 2
+#   v3：口径没变，只是 payload 多了一个 top_share 字段（Top 5 占这批游戏累计
+#       时长的百分比，年度报告页的榜单角标用）。加一档让老缓存自然失效，
+#       否则页面上那个角标会先空 10 分钟。
+#   v4：年份胶囊把当前请求的年份也包含进来（否则 ?year=2022 这类没数据的年份
+#       不会高亮）
+CACHE_VERSION = 4
 
 # 各区块的展示上限，改这里即可，模板只按长度循环。
 TOP_GAMES = 5
@@ -156,7 +161,7 @@ def build_year_in_review(user_id: int, year: int) -> dict:
 
     return {
         "year": year,
-        "years": available_years(user_id),
+        "years": _year_options(user_id, year),
         "has_data": bool(total_minutes),
         # 开场大字：这批游戏的累计时长（不是年度增量）
         "total_hours": round(total_hours, 1),
@@ -167,12 +172,31 @@ def build_year_in_review(user_id: int, year: int) -> dict:
         # 整库对照，用来把「这批游戏的累计」放回正确的分母里讲清楚
         "library": library,
         "top_games": top_games,
+        # Top 5 合计占这批游戏累计时长的百分比（年度报告页榜单角标）。
+        # 纯派生值，不进数据库、不进统计口径，只是把 top_games 的 percent 加起来。
+        "top_share": top_share(top_games),
         "completed": completed,
         "genres": genres,
         "achievements": achievements,
         "age": age,
         "favorite": favorite,
     }
+
+
+def top_share(top_games: list[dict]) -> float:
+    """Return how much of the cohort's cumulative time the top list covers.
+
+    Top 5 这几款游戏加起来，占这批游戏累计总时长的百分之多少。
+
+    这是个纯加法的派生展示值，不查库、不改任何既有口径：``top_games``
+    每条的 ``percent`` 本来就已经是「占这批游戏累计总时长」的比例，
+    这里只是把它们加起来，给年度报告页榜单右上角那个角标用。
+
+    不能直接写 100 再减：``percent`` 逐条四舍五入过，加总常有 ±0.1 的漂移，
+    页面上写死反而对不上，所以让模板显示这个算出来的数。
+    """
+    total = sum(float(item.get("percent") or 0) for item in top_games or [])
+    return round(total, 1)
 
 
 def _library(user_id: int, cohort_minutes: int) -> dict:
@@ -223,6 +247,26 @@ def available_years(user_id: int) -> list[int]:
                 found.add(int(value))
     found.add(timezone.localdate().year)
     return sorted(found, reverse=True)
+
+
+def _year_options(user_id: int, year: int) -> list[int]:
+    """Return the year pills to render, including the year being viewed.
+
+    年份胶囊列表 = 「有真实日期的年份」+ 当前页正在看的这一年。
+
+    为什么要把当前年份并进来：``available_years`` 只认有真实日期的年份，
+    所以手动访问 ``?year=2022`` 这种没数据的年份时，页面上那颗 2022 的胶囊
+    根本不存在，模板里 ``option_year == year`` 永远为假，**没有任何一颗会高亮**，
+    用户看不出来自己在看哪一年。并进去之后，哪怕这年是空态，胶囊也在、
+    也是亮的，点击行为和其他年份一致。
+
+    已经在这个列表里就原样返回（不能重复，也不能把自己再插一遍）。
+    结果保持倒序（新的年份在前），和 ``available_years`` 的顺序一致。
+    """
+    years = available_years(user_id)
+    if year in years:
+        return years
+    return sorted([*years, year], reverse=True)
 
 
 def _cohort(user_id: int, year: int):
@@ -492,4 +536,5 @@ __all__ = [
     "cache_key",
     "get_year_in_review",
     "resolve_year",
+    "top_share",
 ]

@@ -373,11 +373,11 @@ def process_season(response):
             "episodes": count,
             "runtime": readable_duration(runtime),
         },
-        "episodes": build_episodes(count, date),
+        "episodes": build_episodes(count, date, media_id),
     }
 
 
-def build_episodes(count, date):
+def build_episodes(count, date, media_id=None):
     """Return the episode list of a season, generated from the episode count.
 
     Douban does not list the episodes of a show on this endpoint, so each entry
@@ -386,11 +386,20 @@ def build_episodes(count, date):
     keeps the "released" check on the season page working — without a date the
     episode is treated as not aired yet, and a finished season would be shown as
     still in progress.
+
+    ``media_id`` / ``source`` / ``media_type`` / ``season_number`` are carried on
+    every episode too: the season template builds a per-episode link from them,
+    and a TMDB episode has all four. Leaving them out is what made a Douban
+    season page raise a ``KeyError`` instead of rendering.
     """
     episodes = []
     for number in range(1, count + 1):
         episodes.append(
             {
+                "media_id": media_id,
+                "source": Sources.DOUBAN.value,
+                "media_type": MediaTypes.EPISODE.value,
+                "season_number": DEFAULT_SEASON,
                 "episode_number": number,
                 "name": "",
                 "overview": "",
@@ -632,7 +641,7 @@ def stored_season(media_id):
             "last_air_date": None,
             "episodes": count,
         },
-        "episodes": build_episodes(count, stored["release_date"]),
+        "episodes": build_episodes(count, stored["release_date"], media_id),
     }
 
 

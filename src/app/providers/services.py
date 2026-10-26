@@ -675,6 +675,128 @@ def api_request(  # noqa: PLR0913 - the signature is part of the public API
     return response.json()
 
 
+def _season_numbers_from_library(media_id):
+    """Return the season numbers already stored for a show, or an empty list.
+
+    The detail views never pass ``season_numbers``, so a season page used to
+    blow up on ``season_numbers[0]``. Everything needed to rebuild the number
+    is already in the database, so read it from there instead of the network.
+
+    ``Item.media_id`` is a CharField, but a URL or a form still hands over an
+    int now and then; both spellings are tried before giving up.
+    """
+    from app.models import Season  # noqa: PLC0415
+
+    ids = [media_id]
+    if not isinstance(media_id, str):
+        ids.append(str(media_id))
+
+    for candidate in ids:
+        numbers = list(
+            Season.objects.filter(item__media_id=candidate)
+            .order_by("item__season_number")
+            .values_list("item__season_number", flat=True)
+        )
+        # A show without a season row that still has a number is useless here.
+        numbers = [number for number in numbers if number is not None]
+
+        if numbers:
+            return numbers
+
+    return []
+
+
+def _local_metadata(media_id, media_type, source):
+    """Return a detail-page metadata dict built only from the local database.
+
+    Used when the provider is unreachable or answers with something the season
+    retriever cannot index. Every key a detail template reads is present, so a
+    missing one never turns into a template ``Undefined``; unknown values get
+    the empty value of their type. ``None`` means "nothing local either".
+    """
+    from app.models import Item  # noqa: PLC0415
+
+    item = (
+        Item.objects.filter(
+            media_id=str(media_id),
+            media_type=media_type,
+            source=source,
+        )
+        .order_by("id")
+        .first()
+    )
+    if item is None:
+        return None
+
+    release_date = (
+        item.release_date.isoformat()
+        if getattr(item, "release_date", None) is not None
+        else ""
+    )
+
+    return {
+        "media_id": item.media_id,
+        "media_type": item.media_type,
+        "source": item.source,
+        "title": item.title or "",
+        "image": item.image or "",
+        "synopsis": item.synopsis or "",
+        "genres": list(item.genres or []),
+        "release_date": release_date,
+        "title_en": item.title_en or "",
+        "title_zh": item.title_zh or "",
+        "total_pages": item.total_pages,
+        "season_number": item.season_number,
+        "episode_number": item.episode_number,
+        "directors": list(item.directors or []),
+        "cast": list(item.cast or []),
+    }
+
+
+def _minimal_metadata(media_id, media_type, source):
+    """Return the smallest metadata dict a detail page can still render."""
+    return {
+        "media_id": media_id,
+        "media_type": media_type,
+        "source": source,
+        "title": str(media_id),
+        "image": "",
+        "synopsis": "",
+        "genres": [],
+        "release_date": "",
+        "title_en": "",
+        "title_zh": "",
+        "total_pages": None,
+        "season_number": None,
+        "episode_number": None,
+        "directors": [],
+        "cast": [],
+    }
+
+
+def _manual_metadata(media_id, media_type, season_numbers, episode_number):
+    """Return the metadata of a hand-entered item, without a season number."""
+    if media_type == MediaTypes.SEASON.value:
+        if not season_numbers:
+            return _local_metadata(
+                media_id,
+                media_type,
+                Sources.MANUAL.value,
+            ) or _minimal_metadata(media_id, media_type, Sources.MANUAL.value)
+        return manual.season(media_id, season_numbers[0])
+    if media_type == MediaTypes.EPISODE.value:
+        if not season_numbers:
+            return _local_metadata(
+                media_id,
+                media_type,
+                Sources.MANUAL.value,
+            ) or _minimal_metadata(media_id, media_type, Sources.MANUAL.value)
+        return manual.episode(media_id, season_numbers[0], episode_number)
+    if media_type == "tv_with_seasons":
+        media_type = MediaTypes.TV.value
+    return manual.metadata(media_id, media_type)
+
+
 def get_media_metadata(
     media_type,
     media_id,
@@ -682,15 +804,25 @@ def get_media_metadata(
     season_numbers=None,
     episode_number=None,
 ):
-    """Return the metadata for the selected media."""
+    """Return the metadata for the selected media.
+
+    A season or episode page needs its season number, which the detail views do
+    not pass. When it is missing it is read back from the library, and when the
+    provider still fails the page is served from local data instead of raising.
+    """
+    if (
+        media_type in {MediaTypes.SEASON.value, MediaTypes.EPISODE.value}
+        and not season_numbers
+    ):
+        season_numbers = _season_numbers_from_library(media_id)
+
     if source == Sources.MANUAL.value:
-        if media_type == MediaTypes.SEASON.value:
-            return manual.season(media_id, season_numbers[0])
-        if media_type == MediaTypes.EPISODE.value:
-            return manual.episode(media_id, season_numbers[0], episode_number)
-        if media_type == "tv_with_seasons":
-            media_type = MediaTypes.TV.value
-        return manual.metadata(media_id, media_type)
+        return _manual_metadata(
+            media_id,
+            media_type,
+            season_numbers,
+            episode_number,
+        )
 
     if source == Sources.STEAM.value:
         # Steam games carry their own title and cover, no API to ask
@@ -745,7 +877,20 @@ def get_media_metadata(
         MediaTypes.COMIC.value: lambda: comicvine.comic(media_id),
         MediaTypes.BOARDGAME.value: lambda: bgg.boardgame(media_id),
     }
-    return metadata_retrievers[media_type]()
+    # Nothing below may reach the view as an exception: a detail page is worth
+    # more than the provider that could not describe it.
+    try:
+        return metadata_retrievers[media_type]()
+    except Exception:
+        logger.warning(
+            "metadata fallback for %s/%s",
+            media_type,
+            media_id,
+            exc_info=True,
+        )
+        return _local_metadata(media_id, media_type, source) or (
+            _minimal_metadata(media_id, media_type, source)
+        )
 
 
 def search(media_type, query, page, source=None):

@@ -22,9 +22,10 @@ try:
 except Exception:  # noqa: BLE001
     pass
 
-ROOT = r"C:\Users\USERNAME\Downloads\life joy"
-DB = os.path.join(ROOT, r"yamtrack\src\db\db.sqlite3")
-OUT_DIR = os.path.join(ROOT, r"ui-redesign\shots\impl")
+ROOT = os.environ.get("YAMTRACK_ROOT") or str(Path(__file__).resolve().parent.parent)
+PROJECT = os.path.dirname(ROOT)  # 上一级：life joy
+DB = os.path.join(ROOT, "src", "db", "db.sqlite3")
+OUT_DIR = os.path.join(PROJECT, "ui-redesign", "shots", "impl")
 REPORT = os.path.join(OUT_DIR, "AC-report.txt")
 CSVPATH = os.path.join(OUT_DIR, "AC-completed-games.csv")
 

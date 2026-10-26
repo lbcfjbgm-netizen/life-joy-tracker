@@ -13,7 +13,7 @@
   /* 左侧让开侧栏（展开 256px / 折叠 72px），右侧留安全边距 */
   --lj-hero-pad-l: calc(256px + clamp(16px, 2vw, 32px));
   --lj-hero-pad-r: clamp(16px, 2vw, 32px);
-  --lj-hero-pad-t: calc(64px + clamp(6px, 1vh, 14px));
+  --lj-hero-pad-t: calc(54px + clamp(6px, 1vh, 14px));
   --lj-hero-pad-b: clamp(14px, 2.2vh, 26px);
   --lj-hero-scrim: 33, 37, 41;
   --lj-hero-ease: cubic-bezier(.22, .8, .24, 1);

@@ -322,10 +322,16 @@
       var self = this;
       this._settle = function () { window.setTimeout(function () { self.syncCards(); }, 0); };
       document.addEventListener('htmx:afterSettle', this._settle);
+      /* 软导航收尾时 base.html 会先按新页面把顶栏「筛选」按钮露出来/收起来，
+         动作区宽度随之改变，胶囊的右偏移必须在那之后再量一次（init 跑得比它早）。
+         base.html 在 htmx:afterSettle 里派发 lj:navigate 就是干这个的。 */
+      this._navSync = function () { self.syncPillOffset(); };
+      document.addEventListener('lj:navigate', this._navSync);
       window.setTimeout(function () { self.syncCards(); }, 0);
     },
     destroy() {
       if (this._settle) document.removeEventListener('htmx:afterSettle', this._settle);
+      if (this._navSync) document.removeEventListener('lj:navigate', this._navSync);
       this.unmountDensityPill();
     } }"
      @keydown.window="onKey($event)">

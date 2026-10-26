@@ -926,7 +926,9 @@ def calculate_streaks(date_counts, end_date):
 # ---------------------------------------------------------------------------
 
 EXTRA_CHARTS_CACHE_TTL = 600
-EXTRA_CHARTS_CACHE_VERSION = "v1"
+# v2：账本 / 状态小计 / 年代行一起塞进这份缓存，结构变了必须换版本号，
+# 否则旧缓存里没有这些键，页面上那几块会一直空着。
+EXTRA_CHARTS_CACHE_VERSION = "v2"
 
 
 def _empty_extra_chart():
@@ -1134,8 +1136,392 @@ def _get_extra_release_years(user_media):
     }
 
 
+# KPI 丝带 / 全库时长账本用的四种媒体：顺序固定（游戏 → 电影 → 书籍 → 剧集 → 季），
+# 颜色取设计稿的语义色，模板里用 var(--st-<tone>) 取值，跟着主题自动换色。
+_OVERVIEW_MEDIA_ROWS = (
+    (MediaTypes.GAME.value, "violet", "款"),
+    (MediaTypes.MOVIE.value, "sky", "部"),
+    (MediaTypes.BOOK.value, "emerald", "本"),
+    (MediaTypes.TV.value, "amber", "部"),
+    (MediaTypes.SEASON.value, "gold", "季"),
+)
+
+
+def _format_int(value):
+    """整数加千分位；None / 非法值一律当 0。"""
+    try:
+        return f"{int(value or 0):,}"
+    except (TypeError, ValueError):
+        return "0"
+
+
+def _format_hours(value):
+    """小时数展示：整数不带小数点，其余保留 1 位，都加千分位。"""
+    try:
+        hours = round(float(value or 0), 1)
+    except (TypeError, ValueError):
+        return "0"
+    if abs(hours - round(hours)) < 1e-9:
+        return f"{int(round(hours)):,}"
+    return f"{hours:,.1f}"
+
+
+def _percent(part, whole):
+    """算百分比，保留 1 位小数；总量为 0 时直接给 0.0。"""
+    if not whole:
+        return 0.0
+    return round(part / whole * 100, 1)
+
+
+def _get_time_ledger(user, user_media, start_date, end_date):
+    """全库时长账本：游戏 / 电影 / 剧集 / 书籍四维小时数与占比。
+
+    ``views.py`` 里虽然已经算过 reading / watch，但那是视图自己注入 context 的字典，
+    这里拿不到，所以账本自己再调一次 :mod:`app.duration_stats` 的只读聚合。
+    两者都是纯聚合查询（几分钟的噪声），而且整份结果会进 ``get_extra_charts``
+    的缓存，不会每刷一次页面都重算。
+    """
+    from app import duration_stats
+
+    reading = duration_stats.get_reading_stats(user, start_date, end_date)
+    watch = duration_stats.get_watch_stats(user, start_date, end_date)
+
+    game_queryset = user_media.get(MediaTypes.GAME.value)
+    game_hours = 0.0
+    game_count = 0
+    game_completed = 0
+    if game_queryset is not None:
+        games = game_queryset.prefetch_related(None).exclude(
+            status=Status.DROPPED.value,
+        )
+        totals = games.aggregate(
+            minutes=models.Sum("progress"),
+            count=models.Count("id"),
+            completed=models.Count(
+                "id",
+                filter=models.Q(status=Status.COMPLETED.value),
+            ),
+        )
+        game_hours = round((totals["minutes"] or 0) / 60, 1)
+        game_count = totals["count"] or 0
+        game_completed = totals["completed"] or 0
+
+    tv_hours = round(watch.get("tv_hours") or 0, 1)
+    movie_hours = round(watch.get("movie_hours") or 0, 1)
+    book_hours = round(reading.get("total_hours") or 0, 1)
+    movie_count = watch.get("movie_count") or 0
+    tv_episodes = watch.get("tv_episodes") or 0
+    tv_count = (
+        user_media[MediaTypes.TV.value].count()
+        if MediaTypes.TV.value in user_media
+        else 0
+    )
+    book_count = reading.get("book_count") or 0
+
+    all_done = 0
+    achievement = user_media.get(MediaTypes.GAME.value)
+    if achievement is not None:
+        all_done = (
+            achievement.prefetch_related(None)
+            .filter(
+                achievements_total__gt=0,
+                achievements_unlocked__gte=models.F("achievements_total"),
+            )
+            .count()
+        )
+
+    rows = [
+        {
+            "key": "game",
+            "name": "🎮 游戏（已玩过）",
+            "short": "🎮 游戏",
+            "tone": "violet",
+            "hours": game_hours,
+            "hours_text": _format_hours(game_hours),
+            "unit": "小时",
+            "meta": (
+                f"{_format_int(game_count)} 款入库 · "
+                f"{_format_int(game_completed)} 款通关 · "
+                f"{_format_int(all_done)} 款全成就"
+            ),
+        },
+        {
+            "key": "movie",
+            "name": "🎬 电影（已看过）",
+            "short": "🎬 电影",
+            "tone": "sky",
+            "hours": movie_hours,
+            "hours_text": _format_hours(movie_hours),
+            "unit": "小时",
+            "meta": (
+                f"{_format_int(movie_count)} 部 · 按实际片长精算"
+            ),
+        },
+        {
+            "key": "tv",
+            "name": "📺 剧集（已看过）",
+            "short": "📺 剧集",
+            "tone": "amber",
+            "hours": tv_hours,
+            "hours_text": _format_hours(tv_hours),
+            "unit": "小时",
+            "meta": (
+                f"{_format_int(tv_count)} 部 · {_format_int(tv_episodes)} 集"
+                f" · 约 {_format_hours(tv_hours)} 小时"
+            ),
+        },
+        {
+            "key": "book",
+            "name": "📖 书籍（已读过）",
+            "short": "📖 书籍",
+            "tone": "emerald",
+            "hours": book_hours,
+            "hours_text": _format_hours(book_hours),
+            "unit": "小时",
+            "meta": f"{_format_int(book_count)} 本有微信读书记录",
+        },
+    ]
+
+    total_hours = round(sum(row["hours"] for row in rows), 1)
+    for row in rows:
+        row["percent"] = _percent(row["hours"], total_hours)
+        row["percent_text"] = f"{row['percent']:.1f}%"
+
+    peak_year = ""
+    peak_hours = 0.0
+    for row in reading.get("by_year") or []:
+        if (row.get("hours") or 0) > peak_hours:
+            peak_hours = row["hours"]
+            peak_year = row.get("year") or ""
+
+    return {
+        "total_hours": total_hours,
+        "total_text": _format_hours(total_hours),
+        "items": rows,
+        "reading_peak_year": peak_year,
+        "reading_peak_hours": _format_hours(peak_hours),
+        "has_data": any(row["hours"] > 0 for row in rows),
+    }
+
+
+def _get_overview_summary(user_media, achievement_buckets):
+    """KPI 丝带要用的分成、比例和小灰字。
+
+    模板里做不了除法，也不能把 queryset 直接丢给模板算百分比，所以这里一次性
+    把「四类媒体各自的条数 / 已完成 / 进行中 / 已评分」和几行小灰字拼好。
+    """
+    rows = []
+    for media_type, tone, unit in _OVERVIEW_MEDIA_ROWS:
+        queryset = user_media.get(media_type)
+        if queryset is None:
+            continue
+
+        base = queryset.prefetch_related(None)
+        if media_type not in (MediaTypes.TV.value, MediaTypes.SEASON.value):
+            # 和 get_user_media 的口径保持一致：放弃的条目不进总数。
+            base = base.exclude(status=Status.DROPPED.value)
+
+        stats = base.aggregate(
+            total=models.Count("id"),
+            completed=models.Count(
+                "id",
+                filter=models.Q(status=Status.COMPLETED.value),
+            ),
+            in_progress=models.Count(
+                "id",
+                filter=models.Q(status=Status.IN_PROGRESS.value),
+            ),
+        )
+        # 评分口径单独算：get_score_distribution 统计的是「所有打过分的条目」，
+        # 包括已放弃的，所以这里也不能排除 Dropped，否则卡片会和右侧直方图对不上。
+        scored_stats = queryset.prefetch_related(None).aggregate(
+            scored=models.Count("id", filter=models.Q(score__isnull=False)),
+            score_sum=models.Sum("score"),
+        )
+        rows.append(
+            {
+                "key": media_type,
+                "label": app_tags.media_type_readable(media_type),
+                "tone": tone,
+                "unit": unit,
+                "count": stats["total"] or 0,
+                "completed": stats["completed"] or 0,
+                "in_progress": stats["in_progress"] or 0,
+                "scored": scored_stats["scored"] or 0,
+                "score_sum": float(scored_stats["score_sum"] or 0),
+            }
+        )
+
+    media_total = sum(row["count"] for row in rows)
+    scored_total = sum(row["scored"] for row in rows)
+    score_sum = sum(row["score_sum"] for row in rows)
+    average_score = round(score_sum / scored_total, 2) if scored_total else 0.0
+
+    for row in rows:
+        row["percent"] = _percent(row["count"], media_total)
+        row["percent_text"] = f"{row['percent']:.1f}%"
+        row["count_text"] = _format_int(row["count"])
+
+    # 「季」和「剧集」在库里是两张表，但读起来是一回事：KPI 的总条目要算上它
+    # （4429 里含 170 季），比例条和「几类媒体」却只数四大类，否则会出现
+    # 「剧集 170 · 季 170」两条一模一样的 3.8%。
+    media_split = [row for row in rows if row["count"] > 0 and row["key"] != MediaTypes.SEASON.value]
+    split_total = sum(row["count"] for row in media_split)
+    for row in media_split:
+        row["split_percent"] = _percent(row["count"], split_total)
+        row["split_percent_text"] = f"{row['split_percent']:.1f}%"
+    completed_split = [
+        dict(row, percent=_percent(row["completed"], sum(r["completed"] for r in rows)))
+        for row in rows
+        if row["completed"] > 0
+    ]
+    in_progress_split = [
+        dict(
+            row,
+            percent=_percent(
+                row["in_progress"],
+                sum(r["in_progress"] for r in rows),
+            ),
+        )
+        for row in rows
+        if row["in_progress"] > 0
+    ]
+
+    def _subtext(items, field, unit_map):
+        return " · ".join(
+            f"{item['label']} {_format_int(item[field])} {unit_map(item)}"
+            for item in items
+        )
+
+    # 剧集和季在库里是两张表，展示时合并成一项，避免「剧集 170 · 季 170」这种重复。
+    tv_completed = sum(
+        row["completed"]
+        for row in rows
+        if row["key"] in (MediaTypes.TV.value, MediaTypes.SEASON.value)
+    )
+    completed_subtext = " · ".join(
+        part
+        for part in (
+            (
+                f"电影 {_format_int(next((r['completed'] for r in rows if r['key'] == MediaTypes.MOVIE.value), 0))}"
+            ),
+            (
+                f"游戏 {_format_int(next((r['completed'] for r in rows if r['key'] == MediaTypes.GAME.value), 0))}"
+            ),
+            f"剧集/季 {_format_int(tv_completed)}",
+            (
+                f"书籍 {_format_int(next((r['completed'] for r in rows if r['key'] == MediaTypes.BOOK.value), 0))}"
+            ),
+        )
+        if part
+    )
+
+    achievement_rows = []
+    achie_labels = (achievement_buckets or {}).get("labels") or []
+    achie_data = ((achievement_buckets or {}).get("datasets") or [{}])[0].get("data") or []
+    achie_total = sum(achie_data)
+    for index, label in enumerate(achie_labels):
+        count = achie_data[index] if index < len(achie_data) else 0
+        achievement_rows.append(
+            {
+                "label": label,
+                "count": count,
+                "count_text": _format_int(count),
+                "percent": _percent(count, achie_total),
+                "percent_text": f"{_percent(count, achie_total):.1f}%",
+                "tone": ("gold", "violet", "muted")[index]
+                if index < 3
+                else "muted",
+            }
+        )
+
+    return {
+        "media_total": media_total,
+        "media_total_text": _format_int(media_total),
+        "media_kinds": len(media_split),
+        "media_split": media_split,
+        "media_subtext": " · ".join(
+            f"{row['label']} {row['count_text']}"
+            for row in media_split
+            if row["key"] != MediaTypes.SEASON.value
+        ),
+        "completed_total": sum(row["completed"] for row in rows),
+        "completed_text": _format_int(sum(row["completed"] for row in rows)),
+        "completed_subtext": completed_subtext,
+        "completed_split": completed_split,
+        "in_progress_total": sum(row["in_progress"] for row in rows),
+        "in_progress_text": _format_int(sum(row["in_progress"] for row in rows)),
+        "in_progress_split": in_progress_split,
+        "in_progress_subtext": _subtext(
+            in_progress_split,
+            "in_progress",
+            lambda item: item["unit"],
+        ),
+        "scored_total": scored_total,
+        "scored_text": _format_int(scored_total),
+        "rated_percent": round(_percent(scored_total, media_total)),
+        "average_score": average_score,
+        "achievement_total": achie_total,
+        "achievement_total_text": _format_int(achie_total),
+        "achievement_rows": achievement_rows,
+        "has_data": media_total > 0,
+    }
+
+
+def _get_playtime_rows(chart_data):
+    """把 Top 10 的 {labels, datasets[0].data} 摊成带百分比的行，给 HTML 榜单用。"""
+    labels = (chart_data or {}).get("labels") or []
+    datasets = (chart_data or {}).get("datasets") or []
+    if not labels or not datasets:
+        return []
+    values = datasets[0].get("data") or []
+    peak = max(values) if values else 0
+    rows = []
+    for index, label in enumerate(labels):
+        hours = values[index] if index < len(values) else 0
+        rows.append(
+            {
+                "rank": index + 1,
+                "name": label,
+                "hours": hours,
+                "hours_text": _format_hours(hours),
+                "percent": _percent(hours, peak),
+            }
+        )
+    return rows
+
+
+def _get_release_year_rows(chart_data):
+    """发行年份 / 年代分布摊成行（横条 + 百分比）。"""
+    labels = (chart_data or {}).get("labels") or []
+    datasets = (chart_data or {}).get("datasets") or []
+    if not labels or not datasets:
+        return []
+    values = datasets[0].get("data") or []
+    peak = max(values) if values else 0
+    total = sum(values)
+    rows = []
+    for index, label in enumerate(labels):
+        count = values[index] if index < len(values) else 0
+        rows.append(
+            {
+                "label": label,
+                "count": count,
+                "count_text": _format_int(count),
+                "percent": _percent(count, peak),
+                "share_text": f"{_percent(count, total):.1f}%",
+            }
+        )
+    # 从近到远排：年代越新越靠上，和设计稿一致。
+    return list(reversed(rows))
+
+
 def get_extra_charts(user, user_media, start_date, end_date):
-    """返回 4 张新图的数据，键名固定为下面 4 个。"""
+    """返回四张图 + 概览 / 账本 / 榜单行的数据。
+
+    键名固定为 ``yearly_completed`` / ``playtime_top`` / ``achievement_buckets``
+    / ``release_years``，另外附带几个给新模板直接渲染用的纯数据键。
+    """
     from django.core.cache import cache
 
     cache_key = _extra_charts_cache_key(user, start_date, end_date)
@@ -1148,11 +1534,20 @@ def get_extra_charts(user, user_media, start_date, end_date):
     if cached is not None:
         return cached
 
+    playtime_top = _get_extra_playtime_top(user_media)
+    achievement_buckets = _get_extra_achievement_buckets(user_media)
+    release_years = _get_extra_release_years(user_media)
+
     charts = {
         "yearly_completed": _get_extra_yearly_completed(user_media),
-        "playtime_top": _get_extra_playtime_top(user_media),
-        "achievement_buckets": _get_extra_achievement_buckets(user_media),
-        "release_years": _get_extra_release_years(user_media),
+        "playtime_top": playtime_top,
+        "achievement_buckets": achievement_buckets,
+        "release_years": release_years,
+        # 下面几项不是 Chart.js 的数据，而是模板直接渲染 HTML 用的纯数据行。
+        "overview": _get_overview_summary(user_media, achievement_buckets),
+        "time_ledger": _get_time_ledger(user, user_media, start_date, end_date),
+        "playtime_rows": _get_playtime_rows(playtime_top),
+        "release_year_rows": _get_release_year_rows(release_years),
     }
 
     try:

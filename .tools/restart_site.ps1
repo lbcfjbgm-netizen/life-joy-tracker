@@ -8,7 +8,7 @@
 #   3. bash 里调 schtasks /run 会「假成功」（返回 0 但没真跑），必须用 pwsh。
 #
 # 用法（在 PowerShell 里）：
-#   pwsh -File "C:\Users\USERNAME\Downloads\life joy\yamtrack\.tools\restart_site.ps1"
+#   pwsh -File "<工作副本>\.tools\restart_site.ps1"
 
 $ErrorActionPreference = 'Stop'
 $Port = 8001

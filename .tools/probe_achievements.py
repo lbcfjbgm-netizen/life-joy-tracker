@@ -23,10 +23,14 @@ import requests
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-ROOT = r"C:\Users\USERNAME\Downloads\life joy\yamtrack"
+from pathlib import Path
+
+# 仓库根：可用 YAMTRACK_ROOT 环境变量覆盖，否则按脚本位置往上推两级。
+ROOT = os.environ.get("YAMTRACK_ROOT") or str(Path(__file__).resolve().parent.parent)
+PROJECT = os.path.dirname(ROOT)  # 上一级：life joy
 DB = os.path.join(ROOT, "src", "db", "db.sqlite3")
 ENV = os.path.join(ROOT, ".env")
-REPORT = r"C:\Users\USERNAME\Downloads\life joy\ui-redesign\shots\impl\M-report.txt"
+REPORT = os.path.join(PROJECT, "ui-redesign", "shots", "impl", "M-report.txt")
 RAW_OUT = os.path.join(ROOT, ".tools", "probe_results.json")
 
 STEAM_URL = "https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v1/"

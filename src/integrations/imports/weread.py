@@ -417,6 +417,44 @@ class WeReadImporter:
                     Sources.WEREAD.value
                 ].get(media_id)
                 if existing is not None:
+                    # Reading time is not settled when a book is imported: it
+                    # keeps growing for as long as the book is read, and this
+                    # shortcut is the only path a tracked book takes on every
+                    # later run. Without this the stored total stays frozen at
+                    # whatever the first import happened to see.
+                    #
+                    # Only the progress call is made, never the detail page: the
+                    # progress response carries the seconds read, while the
+                    # details carry the rating and the synopsis, which do not
+                    # move once a book is in the library.
+                    try:
+                        self._refresh_reading_time(
+                            existing,
+                            self._fetch_progress(media_id),
+                        )
+                    except WeReadAuthError as error:
+                        # A dead key fails the same way on every remaining book,
+                        # so the batch stops here exactly as it does on the
+                        # ``_process_book`` path instead of walking the rest of
+                        # the shelf on a key that cannot work
+                        logger.warning(
+                            "WeRead import stopped at %s: %s",
+                            media_id,
+                            error,
+                        )
+                        return imported, str(error)
+                    except Exception as error:  # noqa: BLE001
+                        # One odd book must not end the batch. It is not booked
+                        # as a failed import either: the book is already here,
+                        # only its reading time may be stale, and reporting it
+                        # as a missing book would be a lie. The next run asks
+                        # again and the number lands then.
+                        logger.warning(
+                            "WeRead reading time for %s unavailable: %s",
+                            media_id,
+                            error,
+                        )
+
                     self._import_notes(
                         existing.item,
                         counts.get(media_id, {}),
@@ -800,6 +838,19 @@ class WeReadImporter:
         if changed:
             self.to_update[MediaTypes.BOOK.value][existing.pk] = existing
 
+        self._refresh_reading_time(existing, progress)
+
+    def _refresh_reading_time(self, existing, progress):
+        """Queue a tracked book for a reading time write when WeRead moved on.
+
+        Shared by both paths that touch an already tracked book, so the rule
+        lives in one place: the import is the only writer of this field, and it
+        only ever replaces it with a larger, real number.
+
+        A gateway that answers without a ``readingTime`` reports zero, and a
+        zero must never wipe a total that is already stored: the book was read,
+        the answer was merely incomplete.
+        """
         seconds = progress["reading_seconds"]
         if seconds and seconds != existing.reading_seconds:
             existing.reading_seconds = seconds

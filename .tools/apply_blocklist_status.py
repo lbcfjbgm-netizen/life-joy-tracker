@@ -6,9 +6,12 @@ to their original status read from the pre-change backup.
 """
 
 import json
+import os
 import sqlite3
+from pathlib import Path
 
-ROOT = r"C:\Users\USERNAME\Downloads\life joy\yamtrack"
+# 仓库根：可用 YAMTRACK_ROOT 环境变量覆盖，否则按脚本位置往上推两级。
+ROOT = os.environ.get("YAMTRACK_ROOT") or str(Path(__file__).resolve().parent.parent)
 DB = ROOT + r"\src\db\db.sqlite3"
 BACKUP = ROOT + r"\.tools\backups\db_before_blocklist.sqlite3"
 BLOCK = ROOT + r"\.tools\raw\steam_blocklist.json"

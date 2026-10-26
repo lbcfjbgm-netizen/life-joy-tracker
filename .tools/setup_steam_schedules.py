@@ -9,7 +9,9 @@ duplicated, and the eight pre-existing tasks are never touched.
 """
 
 import json
+import sys
 
+from decouple import config
 from django.utils import timezone
 from django_celery_beat.models import (
     CrontabSchedule,
@@ -17,8 +19,15 @@ from django_celery_beat.models import (
     PeriodicTask,
 )
 
-STEAM_ID = "STEAM_ID64"
+# The Steam ID lives in .env (the same key the site itself reads in
+# src/config/settings.py), so nothing personal is hard-coded here.
+STEAM_ID = config("STEAM_ID", default="")
 USER_ID = 1
+
+if not STEAM_ID:
+    print("没在 .env 里找到 STEAM_ID，先去 .env 补一行 STEAM_ID=你的17位SteamID，再重新跑这个脚本。")
+    print("（脚本没做任何改动，直接退出了。）")
+    sys.exit(1)
 
 # Daily, half an hour after the full Steam import at 10:00, so the library is
 # already up to date when the recent games are looked at.

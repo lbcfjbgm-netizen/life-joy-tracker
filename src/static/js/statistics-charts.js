@@ -100,7 +100,22 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     if (plugins.datalabels) {
       plugins.datalabels.color = c.ink;
-      if (plugins.datalabels.formatter) {
+      // 这里绝对不能写成 if (plugins.datalabels.formatter)。
+      // chart.options 是 Chart.js 的「脚本化属性」代理：在上面读一个函数属性
+      // 不等于把它取回来，而是当场用当前上下文把它**执行一遍**。
+      // 饼图的 formatter 被这样调用时 ctx 不完整 → 抛
+      //   TypeError: Cannot convert object to primitive value
+      // 嵌套再解析一层 → 抛
+      //   Error: Recursion detected: formatter->formatter
+      // 这两条就是切主题时 console 冒出来的报错（本函数正好在重绘路径上）。
+      // 要判断「这张图到底配没配 formatter」，只能读 chart.config.options
+      // 这个原始对象（不是代理），读它不会触发执行。
+      const rawDatalabels =
+        chart.config &&
+        chart.config.options &&
+        chart.config.options.plugins &&
+        chart.config.options.plugins.datalabels;
+      if (rawDatalabels && typeof rawDatalabels.formatter === "function") {
         plugins.datalabels.textStrokeColor = c.labelStroke;
       }
     }
@@ -124,19 +139,19 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
-  // 顶栏的换主题按钮调用 window.__toggleTheme；包一层，换完把图重刷一遍。
-  const originalToggleTheme = window.__toggleTheme;
-  if (typeof originalToggleTheme === "function") {
-    window.__toggleTheme = function () {
-      const result = originalToggleTheme.apply(this, arguments);
-      charts.forEach(paintChart);
-      return result;
-    };
-  }
-
-  // 兜底：别的入口改 html[data-theme] 时（hx-boost 局部跳转后重设主题、
-  // 页面里其它脚本直接改属性），上面那个包装可能根本没被调到。直接盯属性，
-  // 属性一变就按新主题重刷一遍颜色。只监听 <html> 的 data-theme，开销极小。
+  // 换主题只走下面这一个入口：盯 html[data-theme] 属性。
+  //
+  // 以前这里还包了一层 window.__toggleTheme，在调用后立刻
+  // charts.forEach(paintChart)。两句都是错的：
+  //   1) 时机错 —— 现在 __toggleTheme 是异步的（document.startViewTransition
+  //      要等浏览器拍完旧画面快照才执行 apply()），包装层跑的时候主题压根还
+  //      没变，画出来仍是旧配色，纯属白跑一遍；
+  //   2) 重画两次 —— 属性真变了以后 MutationObserver 又要再画一遍，两次重绘
+  //      撞在 Chart.js 的 scriptable 解析上，叠加成报错。
+  // 所以包装层整个删掉，只留观察器：属性变了才画，一次主题切换只画一次。
+  //
+  // 兜底面没有变小：不管谁改的 data-theme（顶栏按钮、hx-boost 局部跳转后重设、
+  // 页面里别的脚本直接改属性），观察器都能看到。
   if (typeof MutationObserver === "function") {
     let lastTheme = currentTheme();
     new MutationObserver(function () {

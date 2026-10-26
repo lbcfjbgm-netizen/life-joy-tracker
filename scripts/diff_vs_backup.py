@@ -1,6 +1,12 @@
+import os
 import sqlite3
-cur = sqlite3.connect(r"C:\Users\USERNAME\Downloads\life joy\yamtrack\src\db\db.sqlite3", timeout=30)
-bak = sqlite3.connect(r"C:\Users\USERNAME\Downloads\life joy\yamtrack\.tools\backups\db-before-store-meta-20261022-080200.sqlite3", timeout=30)
+from pathlib import Path
+
+# 仓库根：可用 YAMTRACK_ROOT 环境变量覆盖，否则按脚本位置往上推两级。
+ROOT = os.environ.get("YAMTRACK_ROOT") or str(Path(__file__).resolve().parent.parent)
+
+cur = sqlite3.connect(os.path.join(ROOT, "src", "db", "db.sqlite3"), timeout=30)
+bak = sqlite3.connect(os.path.join(ROOT, ".tools", "backups", "db-before-store-meta-20261022-080200.sqlite3"), timeout=30)
 q = "select media_id, title, synopsis, image from app_item where source='steam'"
 b = {r[0]: r for r in bak.execute(q)}
 c = {r[0]: r for r in cur.execute(q)}

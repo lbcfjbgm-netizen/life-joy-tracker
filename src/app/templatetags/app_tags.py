@@ -2,7 +2,7 @@ from pathlib import Path
 
 from django import template
 from django.conf import settings
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils import formats, timezone
 from django.utils.dateparse import parse_date
 from django.utils.html import format_html
@@ -342,21 +342,29 @@ def media_url(media):
 
 @register.simple_tag
 def media_view_url(view_name, media):
-    """Return the modal URL for both metadata and model object cases."""
+    """Return the modal URL for both metadata and model object cases.
+
+    An episode dict built by a provider that does not list its episodes may lack
+    ``source`` / ``media_type`` / ``media_id``. A missing one yields an empty
+    URL instead of a ``KeyError``: ``hx-get=""`` does nothing, a 500 loses the
+    whole page.
+    """
     is_dict = isinstance(media, dict)
 
     # Build kwargs using either dict access or object attribute
     kwargs = {
-        "source": media["source"] if is_dict else media.source,
-        "media_type": media["media_type"] if is_dict else media.media_type,
-        "media_id": media["media_id"] if is_dict else media.media_id,
+        "source": media.get("source") if is_dict else media.source,
+        "media_type": media.get("media_type") if is_dict else media.media_type,
+        "media_id": media.get("media_id") if is_dict else media.media_id,
     }
+    if any(value is None for value in kwargs.values()):
+        return ""
 
     # Handle season/episode numbers if they exist
     if is_dict:
-        if "season_number" in media:
+        if media.get("season_number") is not None:
             kwargs["season_number"] = media["season_number"]
-        if "episode_number" in media:
+        if media.get("episode_number") is not None:
             kwargs["episode_number"] = media["episode_number"]
     else:
         if media.season_number is not None:
@@ -364,7 +372,12 @@ def media_view_url(view_name, media):
         if media.episode_number is not None:
             kwargs["episode_number"] = media.episode_number
 
-    return reverse(view_name, kwargs=kwargs)
+    try:
+        return reverse(view_name, kwargs=kwargs)
+    except NoReverseMatch:
+        # A provider-built dict can also lack the season number the route wants.
+        # Same rule as above: no URL at all is better than a dead page.
+        return ""
 
 
 @register.simple_tag

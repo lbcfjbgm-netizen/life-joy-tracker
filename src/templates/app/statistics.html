@@ -1,358 +1,1505 @@
 {% extends "base.html" %}
 {% load static %}
 {% load app_tags %}
+{% load humanize %}
 {% load i18n %}
 
 {% block title %}
-  统计 · Life Joy
+  统计总览 · Life Joy
 {% endblock title %}
 
 {% block extra_head %}
   {% comment %}
-    只作用于统计页：卡片表面、区块标题字距、大数字对齐。
-    不改 static/css（那会被别的页面共用），全部选择器挂在 .lj-stats 下。
-    亮色主题一律给「实心纸面 + 一道细线」，不用 backdrop-filter——
-    浅纸上做半透明模糊会泛灰发脏，这是之前踩过的坑。
+    统计总览页的视觉层：全部选择器挂在 .lj-stats 下，只作用于这一页。
+    不改 static/css（会被别的页面共用）。
+
+    两个必须守住的规矩：
+    1) 元素级重置（button / a / h1~h4 / p）必须包进 @layer base。
+       main.css 是 Tailwind 4 产物，声明了 @layer theme, base, components, utilities；
+       不在任何 layer 里的普通声明优先级高于所有 layer，裸写 .lj-stats button{}
+       会把 Tailwind 的 bg-indigo-600 / p-3 全部压死（详情页踩过，5 个按钮变透明）。
+       包进 @layer base 后，utilities 那一层仍然赢。
+    2) 变量前缀一律 --st-，沿用本页原有的 --st-line / --st-card / --st-ink 命名。
+       亮色主题走 html[data-theme="light"] .lj-stats 覆盖，不碰全局。
     Django 的 {# #} 不能跨行，多行注释必须用 comment 标签。
   {% endcomment %}
   <style>
+    /* ---------- 元素级重置：必须留在 base 层，chained 到 .lj-stats ---------- */
+    @layer base {
+      .lj-stats button {
+        background: none;
+        border: 0;
+        margin: 0;
+        padding: 0;
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+      }
+      .lj-stats a {
+        color: inherit;
+        text-decoration: none;
+      }
+      .lj-stats h1,
+      .lj-stats h2,
+      .lj-stats h3,
+      .lj-stats h4 {
+        margin: 0;
+        font-weight: inherit;
+        font-size: inherit;
+      }
+      .lj-stats p {
+        margin: 0;
+      }
+    }
+
+    /* ---------- 设计稿配色，改写成 .lj-stats 局部作用域 ---------- */
     .lj-stats {
-      --st-line: rgba(255, 255, 255, .07);
+      --st-bg: #14171b;
+      --st-panel: #1d2229;
+      --st-elev: #232932;
+      --st-card: #1f242b;
+      --st-inner: #262c34;
+      --st-line: rgba(255, 255, 255, .09);
+      --st-line2: rgba(255, 255, 255, .055);
       --st-line-strong: rgba(255, 255, 255, .12);
-      --st-card: #2a2f35;
+      --st-ink: #f4f1ea;
+      --st-ink2: rgba(244, 241, 234, .76);
+      --st-ink3: rgba(244, 241, 234, .48);
+      --st-gold: #e8c982;
+      --st-gold-soft: rgba(232, 201, 130, .14);
+      --st-gold-line: rgba(232, 201, 130, .30);
+      --st-violet: #9d8df7;
+      --st-violet-soft: rgba(139, 122, 245, .15);
+      --st-violet-line: rgba(157, 141, 247, .30);
+      --st-emerald: #34d399;
+      --st-emerald-soft: rgba(16, 185, 129, .16);
+      --st-emerald-line: rgba(52, 211, 153, .30);
+      --st-sky: #38bdf8;
+      --st-sky-soft: rgba(56, 189, 248, .15);
+      --st-sky-line: rgba(56, 189, 248, .30);
+      --st-amber: #fbbf24;
+      --st-amber-soft: rgba(251, 191, 36, .15);
+      --st-amber-line: rgba(251, 191, 36, .30);
+      --st-muted: rgba(244, 241, 234, .45);
+      --st-muted-soft: rgba(255, 255, 255, .07);
+      --st-muted-line: rgba(255, 255, 255, .12);
+      --st-track: rgba(255, 255, 255, .07);
       --st-inset: rgba(255, 255, 255, .05);
-      --st-inner: #39404b;
+      --st-shadow: 0 22px 54px -14px rgba(0, 0, 0, .62);
+      --st-shadow-s: 0 8px 24px -6px rgba(0, 0, 0, .42);
+      --st-skylight: inset 0 1px 0 rgba(255, 255, 255, .07);
+      --st-radius: 14px;
+      --st-radius-sm: 10px;
+      --st-ease: cubic-bezier(.22, .8, .24, 1);
+      --st-mono: "JetBrains Mono", "Cascadia Mono", "Consolas", ui-monospace, monospace;
+      --st-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", serif;
     }
     html[data-theme="light"] .lj-stats {
+      --st-bg: #f4efe5;
+      --st-panel: #fffcf6;
+      --st-elev: #f5efe4;
+      --st-card: #fffcf6;
+      --st-inner: #f7f1e6;
       --st-line: rgba(48, 34, 18, .12);
+      --st-line2: rgba(48, 34, 18, .07);
       --st-line-strong: rgba(48, 34, 18, .18);
-      --st-card: #fffdf8;
+      --st-ink: #221d17;
+      --st-ink2: rgba(34, 29, 23, .78);
+      --st-ink3: rgba(34, 29, 23, .52);
+      --st-gold: #9a6b1f;
+      --st-gold-soft: rgba(154, 107, 31, .11);
+      --st-gold-line: rgba(154, 107, 31, .26);
+      --st-violet: #5f4bc4;
+      --st-violet-soft: rgba(95, 75, 196, .10);
+      --st-violet-line: rgba(95, 75, 196, .26);
+      --st-emerald: #0d9468;
+      --st-emerald-soft: rgba(13, 148, 104, .10);
+      --st-emerald-line: rgba(13, 148, 104, .26);
+      --st-sky: #0284c7;
+      --st-sky-soft: rgba(2, 132, 199, .10);
+      --st-sky-line: rgba(2, 132, 199, .26);
+      --st-amber: #b45309;
+      --st-amber-soft: rgba(180, 83, 9, .10);
+      --st-amber-line: rgba(180, 83, 9, .26);
+      --st-muted: rgba(34, 29, 23, .45);
+      --st-muted-soft: rgba(48, 34, 18, .06);
+      --st-muted-line: rgba(48, 34, 18, .12);
+      --st-track: rgba(48, 34, 18, .08);
       --st-inset: rgba(255, 255, 255, .95);
-      --st-inner: #efe9dc;
+      --st-shadow: 0 18px 40px -18px rgba(60, 40, 10, .18);
+      --st-shadow-s: 0 6px 18px -8px rgba(60, 40, 10, .16);
+      --st-skylight: inset 0 1px 0 #fff;
     }
-    .lj-stats .st-sections > * + * { margin-top: 2.5rem; }
-    .lj-stats .st-card {
-      background-color: var(--st-card);
-      border-radius: .75rem;
-      padding: 1.5rem;
-      box-shadow: inset 0 1px 0 var(--st-inset);
+
+    /* ---------- 页面底盘 ---------- */
+    .lj-stats {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: clamp(16px, 1.8vw, 26px);
+      border-radius: 20px;
+      background: var(--st-bg);
+      color: var(--st-ink);
+      font-variant-numeric: tabular-nums;
+      box-shadow: var(--st-shadow-s);
+    }
+    html[data-theme="light"] .lj-stats {
       outline: 1px solid var(--st-line);
       outline-offset: -1px;
     }
-    .lj-stats .st-inner {
-      background-color: var(--st-inner);
-      border-radius: .5rem;
-      box-shadow: inset 0 1px 0 var(--st-inset);
+
+    /* 色调桶：给徽章 / 条形 / 标签复用一套色 */
+    .lj-stats .is-gold { --tone: var(--st-gold); --tone-soft: var(--st-gold-soft); --tone-line: var(--st-gold-line); }
+    .lj-stats .is-violet { --tone: var(--st-violet); --tone-soft: var(--st-violet-soft); --tone-line: var(--st-violet-line); }
+    .lj-stats .is-emerald { --tone: var(--st-emerald); --tone-soft: var(--st-emerald-soft); --tone-line: var(--st-emerald-line); }
+    .lj-stats .is-sky { --tone: var(--st-sky); --tone-soft: var(--st-sky-soft); --tone-line: var(--st-sky-line); }
+    .lj-stats .is-amber { --tone: var(--st-amber); --tone-soft: var(--st-amber-soft); --tone-line: var(--st-amber-line); }
+    .lj-stats .is-muted { --tone: var(--st-muted); --tone-soft: var(--st-muted-soft); --tone-line: var(--st-muted-line); }
+
+    /* ---------- 页头 ---------- */
+    .lj-stats .lj-hero {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      padding-bottom: 14px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid var(--st-line);
     }
-    .lj-stats .st-rule { height: 1px; background: var(--st-line); flex: 1 1 auto; }
-    .lj-stats .st-eyebrow {
-      font-size: 11px;
-      letter-spacing: .18em;
+    .lj-stats .lj-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .2em;
       text-transform: uppercase;
+      color: var(--st-gold);
     }
-    .lj-stats .st-num {
-      font-variant-numeric: tabular-nums;
+    .lj-stats .lj-eyebrow::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--st-gold);
+      box-shadow: 0 0 8px var(--st-gold);
+    }
+    .lj-stats .lj-hero-row {
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 6px;
+    }
+    .lj-stats .lj-h1 {
+      font-family: var(--st-serif);
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: .03em;
+      line-height: 1.2;
+    }
+    .lj-stats .lj-hero-sub {
+      font-size: 12px;
+      color: var(--st-ink3);
+      max-width: 560px;
+    }
+    .lj-stats .lj-hero-side {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* ---------- 三页签（stats_tabs.html 只改观感，不改结构/链接） ---------- */
+    .lj-stats .lj-tabs nav {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 3px;
+      margin: 0;
+      border: 1px solid var(--st-line);
+      border-bottom-width: 1px;
+      border-radius: var(--st-radius-sm);
+      background: var(--st-elev);
+      box-shadow: var(--st-skylight);
+      overflow-x: auto;
+      max-width: 100%;
+    }
+    .lj-stats .lj-tabs nav a {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 30px;
+      padding: 0 13px;
+      margin: 0;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--st-ink2);
+      white-space: nowrap;
+      transition: all .2s var(--st-ease);
+    }
+    .lj-stats .lj-tabs nav a:hover {
+      color: var(--st-ink);
+      background: var(--st-muted-soft);
+    }
+    .lj-stats .lj-tabs nav a[class*="border-indigo-500"] {
+      color: var(--st-gold);
+      font-weight: 600;
+      background: var(--st-panel);
+      border-color: var(--st-gold-line);
+      box-shadow: var(--st-skylight), var(--st-shadow-s);
+    }
+    /* 设计稿页签带 emoji，模板里没有：用伪元素补，不改组件文件 */
+    .lj-stats .lj-tabs nav a:nth-child(1)::before { content: "📊"; font-size: 12px; }
+    .lj-stats .lj-tabs nav a:nth-child(2)::before { content: "🏆"; font-size: 12px; }
+    .lj-stats .lj-tabs nav a:nth-child(3)::before { content: "🎯"; font-size: 12px; }
+
+    /* ---------- 时间范围：胶囊 + 下拉面板 ---------- */
+    .lj-stats .lj-datewrap { position: relative; }
+    .lj-stats .lj-datebtn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      height: 36px;
+      padding: 0 13px;
+      border-radius: var(--st-radius-sm);
+      border: 1px solid var(--st-line);
+      background: var(--st-panel);
+      color: var(--st-ink);
+      font-size: 12px;
+      font-weight: 500;
+      box-shadow: var(--st-skylight);
+      transition: border-color .2s var(--st-ease), background-color .2s var(--st-ease);
+    }
+    .lj-stats .lj-datebtn:hover { border-color: var(--st-gold-line); background: var(--st-elev); }
+    .lj-stats .lj-chev {
+      font-size: 10px;
+      color: var(--st-ink3);
+      transition: transform .2s var(--st-ease);
+    }
+    .lj-stats .lj-chev.is-open { transform: rotate(180deg); }
+    .lj-stats .lj-dp-note {
+      margin-top: 6px;
+      font-size: 10.5px;
+      color: var(--st-ink3);
+    }
+    .lj-stats .lj-datepanel {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 6px);
+      z-index: 90;
+      width: 300px;
+      max-width: calc(100vw - 48px);
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid var(--st-gold-line);
+      background: var(--st-panel);
+      box-shadow: var(--st-shadow), var(--st-skylight);
+    }
+    .lj-stats .lj-dp-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      color: var(--st-ink3);
+      margin-bottom: 8px;
+    }
+    .lj-stats .lj-dp-quick,
+    .lj-stats .lj-dp-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .lj-stats .lj-dp-grid { max-height: 168px; overflow-y: auto; }
+    .lj-stats .lj-dp-btn {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      height: 28px;
+      padding: 0 8px;
+      border-radius: 7px;
+      border: 1px solid var(--st-line2);
+      background: var(--st-elev);
+      color: var(--st-ink2);
+      font-size: 11.5px;
+      line-height: 1;
+      text-align: left;
+      transition: all .15s var(--st-ease);
+    }
+    .lj-stats .lj-dp-btn:hover { border-color: var(--st-gold-line); color: var(--st-ink); }
+    .lj-stats .lj-dp-btn.is-on {
+      background: var(--st-gold-soft);
+      border-color: var(--st-gold-line);
+      color: var(--st-gold);
+      font-weight: 600;
+    }
+    .lj-stats .lj-dp-btn small { font-size: 10px; color: var(--st-ink3); }
+    .lj-stats .lj-dp-sub {
+      margin: 10px 0 6px;
+      font-size: 10.5px;
+      letter-spacing: .06em;
+      color: var(--st-ink3);
+    }
+    .lj-stats .lj-dp-custom {
+      margin-top: 10px;
+      padding-top: 9px;
+      border-top: 1px dashed var(--st-line);
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      font-size: 11px;
+      color: var(--st-ink3);
+    }
+    .lj-stats .lj-dp-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .lj-stats .lj-dp-inputs input {
+      height: 28px;
+      padding: 0 7px;
+      border-radius: 6px;
+      border: 1px solid var(--st-line);
+      background: var(--st-bg);
+      color: var(--st-ink);
+      font-size: 11px;
+      font-family: inherit;
+    }
+    .lj-stats .lj-dp-apply {
+      height: 28px;
+      border-radius: 7px;
+      background: var(--st-gold);
+      color: #18140e;
+      font-size: 11.5px;
+      font-weight: 600;
+    }
+    .lj-stats .lj-dp-apply:hover { filter: brightness(1.06); }
+
+    /* ---------- 区块标题 ---------- */
+    .lj-stats .lj-sec { margin-bottom: 22px; }
+    .lj-stats .lj-sec:last-child { margin-bottom: 0; }
+    .lj-stats .lj-sec-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .lj-stats .lj-sec-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--st-serif);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      color: var(--st-ink);
+    }
+    .lj-stats .lj-sec-bar {
+      width: 3px;
+      height: 14px;
+      border-radius: 2px;
+      background: var(--st-gold);
+    }
+    .lj-stats .lj-sec-en {
+      font-family: var(--st-mono);
+      font-size: 10.5px;
+      font-weight: 500;
+      letter-spacing: .12em;
+      color: var(--st-ink3);
+    }
+    .lj-stats .lj-sec-note { font-size: 11px; color: var(--st-ink3); }
+
+    /* ---------- 卡片 ---------- */
+    .lj-stats .lj-card {
+      padding: 15px 17px;
+      border-radius: var(--st-radius);
+      border: 1px solid var(--st-line);
+      background: var(--st-card);
+      box-shadow: var(--st-skylight), var(--st-shadow-s);
+      transition: border-color .22s var(--st-ease);
+      min-width: 0;
+    }
+    .lj-stats .lj-card:hover { border-color: var(--st-gold-line); }
+    .lj-stats .lj-card-hd {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 12px;
+      padding-bottom: 9px;
+      border-bottom: 1px solid var(--st-line2);
+    }
+    .lj-stats .lj-card-title {
+      font-family: var(--st-serif);
+      font-size: 14.5px;
+      font-weight: 700;
+      color: var(--st-ink);
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .lj-stats .lj-card-sub {
+      margin-top: 3px;
+      font-size: 11px;
+      color: var(--st-ink3);
+    }
+    .lj-stats .lj-empty {
+      padding: 26px 8px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--st-ink3);
+    }
+    /* has_data=False 时的说明卡（不画假柱子，只说明数据从哪个月开始积累） */
+    .lj-stats .lj-inner-note {
+      padding: 12px 14px;
+      border-radius: var(--st-radius-sm);
+      border: 1px solid var(--st-line2);
+      background: var(--st-elev);
+    }
+    .lj-stats .lj-inner-note-title { font-size: 12px; font-weight: 600; color: var(--st-ink); }
+    .lj-stats .lj-inner-note-body { margin-top: 6px; font-size: 11.5px; color: var(--st-ink3); line-height: 1.5; }
+    .lj-stats .lj-inner-note-foot { margin-top: 4px; font-size: 11px; color: var(--st-ink3); }
+
+    /* 小尾巴徽章 */
+    .lj-stats .lj-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 10.5px;
+      font-weight: 600;
+      white-space: nowrap;
+      color: var(--tone, var(--st-ink2));
+      background: var(--tone-soft, var(--st-muted-soft));
+      border: 1px solid var(--tone-line, var(--st-line));
+    }
+
+    /* ---------- KPI 丝带 ---------- */
+    .lj-stats .lj-kpis {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .lj-stats .lj-kpi {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 6px;
+      min-height: 108px;
+      padding: 12px 15px;
+      border-radius: 12px;
+      border: 1px solid var(--st-line);
+      background: var(--st-card);
+      box-shadow: var(--st-skylight), var(--st-shadow-s);
+      transition: transform .2s var(--st-ease), border-color .2s var(--st-ease);
+    }
+    .lj-stats .lj-kpi:hover { transform: translateY(-1px); border-color: var(--st-gold-line); }
+    .lj-stats .lj-kpi-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .lj-stats .lj-kpi-name {
+      font-size: 11.5px;
+      font-weight: 600;
+      letter-spacing: .03em;
+      color: var(--st-ink2);
+      display: inline-flex;
+      align-items: baseline;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .lj-stats .lj-kpi-en {
+      font-family: var(--st-mono);
+      font-size: 9.5px;
+      font-weight: 500;
+      letter-spacing: .1em;
+      color: var(--st-ink3);
+    }
+    .lj-stats .lj-kpi-mid { display: flex; align-items: baseline; gap: 6px; }
+    .lj-stats .lj-kpi-num {
+      font-family: var(--st-mono);
+      font-size: 25px;
+      font-weight: 700;
+      line-height: 1.05;
       letter-spacing: -.02em;
-      font-size: 2.25rem;
-      line-height: 1.1;
-      font-weight: 700;
+      color: var(--st-ink);
     }
-    .lj-stats .st-num-sm {
-      font-variant-numeric: tabular-nums;
-      letter-spacing: -.01em;
-      font-size: 1.5rem;
-      line-height: 1.15;
+    .lj-stats .lj-kpi-unit { font-size: 11.5px; color: var(--st-ink3); }
+    .lj-stats .lj-kpi-foot { display: flex; flex-direction: column; gap: 5px; }
+    .lj-stats .lj-stack {
+      display: flex;
+      gap: 1px;
+      height: 5px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: var(--st-track);
+    }
+    .lj-stats .lj-stack > span { display: block; height: 100%; background: var(--tone, var(--st-ink3)); }
+    .lj-stats .lj-kpi-sub {
+      font-size: 11px;
+      color: var(--st-ink3);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ---------- 时长账本 ---------- */
+    .lj-stats .lj-ledger-split {
+      display: grid;
+      grid-template-columns: 5fr 7fr;
+      gap: 14px;
+      align-items: stretch;
+    }
+    .lj-stats .lj-domain-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .lj-stats .lj-dom {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      padding: 11px 13px;
+      border-radius: var(--st-radius-sm);
+      border: 1px solid var(--st-line2);
+      background: var(--st-elev);
+      transition: border-color .2s var(--st-ease);
+    }
+    .lj-stats .lj-dom:hover { border-color: var(--st-gold-line); }
+    .lj-stats .lj-dom-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--st-ink2);
+    }
+    .lj-stats .lj-dom-tag {
+      padding: 1px 6px;
+      border-radius: 5px;
+      font-family: var(--st-mono);
+      font-size: 10px;
+      color: var(--tone, var(--st-ink3));
+      background: var(--tone-soft, var(--st-muted-soft));
+      border: 1px solid var(--tone-line, transparent);
+    }
+    .lj-stats .lj-dom-valrow { display: flex; align-items: baseline; gap: 5px; }
+    .lj-stats .lj-dom-val {
+      font-family: var(--st-mono);
+      font-size: 21px;
       font-weight: 700;
+      color: var(--st-ink);
+    }
+    .lj-stats .lj-dom-unit { font-size: 11.5px; color: var(--st-ink3); }
+    .lj-stats .lj-dom-meta { font-size: 11px; line-height: 1.35; color: var(--st-ink3); }
+
+    .lj-stats .lj-total {
+      padding: 10px 12px;
+      border-radius: var(--st-radius-sm);
+      border: 1px solid var(--st-line2);
+      background: var(--st-elev);
+    }
+    .lj-stats .lj-total-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-size: 11.5px;
+      margin-bottom: 7px;
+    }
+    .lj-stats .lj-total-title { font-weight: 600; color: var(--st-ink2); }
+    .lj-stats .lj-total-val {
+      font-family: var(--st-mono);
+      font-weight: 700;
+      color: var(--st-gold);
+    }
+    .lj-stats .lj-total-bar {
+      display: flex;
+      gap: 2px;
+      height: 8px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: var(--st-track);
+      margin-bottom: 7px;
+    }
+    .lj-stats .lj-total-bar > span { display: block; height: 100%; background: var(--tone, var(--st-ink3)); }
+    .lj-stats .lj-total-legend {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--st-ink3);
+    }
+    .lj-stats .lj-leg-item { display: inline-flex; align-items: center; gap: 5px; }
+    .lj-stats .lj-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      display: inline-block;
+      background: var(--tone, var(--st-ink3));
+    }
+    .lj-stats .lj-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+    .lj-stats .lj-chip {
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--st-line2);
+      background: var(--st-panel);
+      font-size: 10.5px;
+      color: var(--st-ink2);
+    }
+    .lj-stats .lj-chip b { color: var(--st-ink); font-family: var(--st-mono); }
+
+    /* ---------- 读书 / 观影双账本 ---------- */
+    .lj-stats .lj-dual {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    .lj-stats .lj-dual[data-view="read"] { grid-template-columns: 1fr; }
+    .lj-stats .lj-dual[data-view="watch"] { grid-template-columns: 1fr; }
+    .lj-stats .lj-dual[data-view="read"] .lj-sl-watch { display: none; }
+    .lj-stats .lj-dual[data-view="watch"] .lj-sl-read { display: none; }
+    .lj-stats .lj-sl {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 11px 13px;
+      border-radius: 11px;
+      border: 1px solid var(--st-line2);
+      background: var(--st-elev);
+      min-width: 0;
+    }
+    .lj-stats .lj-sl-hd {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .lj-stats .lj-sl-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--st-ink);
+    }
+    .lj-stats .lj-sl-pills { display: flex; flex-wrap: wrap; gap: 5px; }
+    .lj-stats .lj-pill {
+      padding: 2px 7px;
+      border-radius: 6px;
+      border: 1px solid var(--st-line);
+      background: var(--st-panel);
+      font-size: 10.5px;
+      color: var(--st-ink2);
+      font-variant-numeric: tabular-nums;
+    }
+    .lj-stats .lj-yr-rows { display: flex; flex-direction: column; gap: 7px; }
+    .lj-stats .lj-yr-row {
+      display: grid;
+      grid-template-columns: 38px 1fr auto;
+      align-items: center;
+      gap: 8px;
+      font-size: 11.5px;
+    }
+    .lj-stats .lj-yr-label { font-family: var(--st-mono); font-weight: 600; color: var(--st-ink2); }
+    .lj-stats .lj-yr-track {
+      display: block;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--st-track);
+      overflow: hidden;
+    }
+    .lj-stats .lj-yr-fill {
+      display: block;
+      height: 100%;
+      border-radius: 999px;
+      background: var(--tone, var(--st-sky));
+      transition: width .4s var(--st-ease);
+    }
+    .lj-stats .lj-yr-stack {
+      display: flex;
+      gap: 1px;
+      height: 100%;
+      min-width: 0;
+    }
+    .lj-stats .lj-yr-stack > span { display: block; height: 100%; background: var(--tone, var(--st-sky)); }
+    .lj-stats .lj-yr-val {
+      font-family: var(--st-mono);
+      font-size: 11px;
+      color: var(--st-ink2);
+      text-align: right;
+      white-space: nowrap;
+    }
+    .lj-stats .lj-sl-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+      padding-top: 6px;
+      border-top: 1px dashed var(--st-line2);
+      font-size: 10.5px;
+      color: var(--st-ink3);
+    }
+
+    /* ---------- 三栏 ---------- */
+    .lj-stats .lj-tri {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+    .lj-stats .lj-sub-block + .lj-sub-block { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--st-line2); }
+    .lj-stats .lj-block-lbl {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--st-ink3);
+      margin-bottom: 6px;
+    }
+    .lj-stats .lj-chart-box { height: 190px; position: relative; }
+    .lj-stats .lj-chart-box.is-sm { height: 150px; }
+    .lj-stats .lj-chart-box.is-xs { height: 132px; }
+    .lj-stats .lj-chart-box > canvas { display: block; width: 100%; height: 100%; }
+
+    /* 分段小开关 */
+    .lj-stats .lj-seg {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 2px;
+      border-radius: 8px;
+      border: 1px solid var(--st-line);
+      background: var(--st-elev);
+    }
+    .lj-stats .lj-seg button {
+      height: 24px;
+      padding: 0 9px;
+      border-radius: 6px;
+      font-size: 11px;
+      color: var(--st-ink3);
+      transition: all .18s var(--st-ease);
+    }
+    .lj-stats .lj-seg button:hover { color: var(--st-ink); }
+    .lj-stats .lj-seg button.is-on {
+      background: var(--st-panel);
+      color: var(--st-gold);
+      font-weight: 600;
+      box-shadow: var(--st-skylight);
+      border: 1px solid var(--st-gold-line);
+    }
+
+    /* 年代横条 */
+    .lj-stats .lj-dec-list { display: flex; flex-direction: column; gap: 5.5px; }
+    .lj-stats .lj-dec-row {
+      display: grid;
+      grid-template-columns: 44px 1fr 84px;
+      align-items: center;
+      gap: 8px;
+      font-size: 11.5px;
+    }
+    .lj-stats .lj-dec-lbl { font-family: var(--st-mono); font-weight: 600; color: var(--st-ink2); }
+    .lj-stats .lj-dec-track {
+      display: block;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--st-track);
+      overflow: hidden;
+    }
+    .lj-stats .lj-dec-fill {
+      display: block;
+      height: 100%;
+      min-width: 2px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--st-violet), var(--st-gold));
+      transition: width .4s var(--st-ease);
+    }
+    .lj-stats .lj-dec-val {
+      font-family: var(--st-mono);
+      font-size: 11px;
+      color: var(--st-ink2);
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    /* ---------- 榜单双栏 ---------- */
+    .lj-stats .lj-deep-split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+    .lj-stats .lj-deep-split + .lj-deep-split { margin-top: 14px; }
+
+    .lj-stats .lj-t10-list { display: flex; flex-direction: column; gap: 7px; }
+    .lj-stats .lj-t10-row {
+      display: grid;
+      grid-template-columns: 24px minmax(110px, 1.1fr) 1.2fr 78px;
+      align-items: center;
+      gap: 9px;
+      padding: 5px 8px;
+      border-radius: 8px;
+      border: 1px solid var(--st-line2);
+      background: var(--st-elev);
+      font-size: 12px;
+      transition: border-color .18s var(--st-ease), transform .18s var(--st-ease);
+    }
+    .lj-stats .lj-t10-row:hover { border-color: var(--st-gold-line); transform: translateX(2px); }
+    .lj-stats .lj-t10-rank {
+      display: grid;
+      place-items: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      border: 1px solid var(--st-line);
+      background: var(--st-panel);
+      font-family: var(--st-mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--st-ink3);
+    }
+    .lj-stats .lj-t10-row.is-r1 .lj-t10-rank { background: var(--st-gold-soft); color: var(--st-gold); border-color: var(--st-gold-line); }
+    .lj-stats .lj-t10-row.is-r2 .lj-t10-rank { background: var(--st-violet-soft); color: var(--st-violet); border-color: var(--st-violet-line); }
+    .lj-stats .lj-t10-row.is-r3 .lj-t10-rank { background: var(--st-emerald-soft); color: var(--st-emerald); border-color: var(--st-emerald-line); }
+    .lj-stats .lj-t10-name {
+      font-weight: 600;
+      color: var(--st-ink);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .lj-stats .lj-t10-barwrap {
+      height: 7px;
+      border-radius: 999px;
+      background: var(--st-track);
+      overflow: hidden;
+    }
+    .lj-stats .lj-t10-bar {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--st-violet), var(--st-gold));
+    }
+    .lj-stats .lj-t10-hrs {
+      font-family: var(--st-mono);
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--st-gold);
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    /* 成就块 */
+    .lj-stats .lj-ach {
+      padding: 11px 13px;
+      border-radius: var(--st-radius-sm);
+      border: 1px solid var(--st-line2);
+      background: var(--st-elev);
+    }
+    .lj-stats .lj-ach-bar {
+      display: flex;
+      gap: 2px;
+      height: 9px;
+      margin: 8px 0 10px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: var(--st-track);
+    }
+    .lj-stats .lj-ach-bar > span { display: block; height: 100%; background: var(--tone, var(--st-violet)); }
+    .lj-stats .lj-ach-boxes {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .lj-stats .lj-ach-metric {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 7px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--st-line);
+      background: var(--st-panel);
+    }
+    .lj-stats .lj-am-lbl { font-size: 11px; color: var(--st-ink3); }
+    .lj-stats .lj-am-val {
+      font-family: var(--st-mono);
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--tone, var(--st-ink));
+    }
+
+    /* ---------- 高分殿堂 ---------- */
+    .lj-stats .lj-hof {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .lj-stats .lj-hof-card {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 0;
+      transition: transform .22s var(--st-ease);
+    }
+    .lj-stats .lj-hof-card:hover { transform: translateY(-3px); }
+    .lj-stats .lj-hof-poster {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 2 / 3;
+      border-radius: var(--st-radius-sm);
+      overflow: hidden;
+      background: var(--st-elev);
+      border: 1px solid var(--st-line);
+      box-shadow: var(--st-shadow-s);
+    }
+    .lj-stats .lj-hof-poster img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform .45s var(--st-ease);
+    }
+    .lj-stats .lj-hof-card:hover .lj-hof-poster img { transform: scale(1.04); }
+    .lj-stats .lj-hof-fallback {
+      display: grid;
+      place-items: center;
+      width: 100%;
+      height: 100%;
+      font-family: var(--st-mono);
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--st-ink3);
+      background: linear-gradient(160deg, var(--st-elev), var(--st-panel));
+    }
+    .lj-stats .lj-hof-type {
+      position: absolute;
+      top: 7px;
+      left: 7px;
+      padding: 2px 6px;
+      border-radius: 5px;
+      font-size: 10px;
+      font-weight: 600;
+      color: #f4f1ea;
+      background: rgba(15, 18, 24, .78);
+      border: 1px solid rgba(255, 255, 255, .14);
+    }
+    .lj-stats .lj-hof-score {
+      position: absolute;
+      top: 7px;
+      right: 7px;
+      padding: 2px 6px;
+      border-radius: 5px;
+      font-family: var(--st-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      color: #e8c982;
+      background: rgba(20, 16, 10, .84);
+      border: 1px solid rgba(232, 201, 130, .42);
+    }
+    .lj-stats .lj-hof-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--st-ink);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .lj-stats .lj-hof-meta {
+      font-size: 10.5px;
+      color: var(--st-ink3);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* 数据不全的提示卡（保留原有功能，只换皮） */
+    .lj-stats .lj-warn {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 20px;
+      border-color: var(--st-amber-line);
+    }
+    .lj-stats .lj-warn-ico {
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: var(--st-amber-soft);
+      color: var(--st-amber);
+      font-size: 16px;
+    }
+    .lj-stats .lj-warn h3 { font-size: 13px; font-weight: 700; color: var(--st-ink); }
+    .lj-stats .lj-warn p { margin-top: 4px; font-size: 12px; color: var(--st-ink3); line-height: 1.5; }
+    .lj-stats .lj-warn-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .lj-stats .lj-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 30px;
+      padding: 0 12px;
+      border-radius: 8px;
+      border: 1px solid var(--st-line);
+      background: var(--st-elev);
+      color: var(--st-ink);
+      font-size: 12px;
+      transition: border-color .18s var(--st-ease);
+    }
+    .lj-stats .lj-btn:hover { border-color: var(--st-gold-line); }
+    .lj-stats .lj-btn.is-primary {
+      background: var(--st-gold);
+      border-color: var(--st-gold);
+      color: #18140e;
+      font-weight: 600;
+    }
+
+    /* 空状态卡片（沿用项目里的 empty_state.html，只调间距） */
+    .lj-stats .lj-empty-wrap { padding: 8px 0 4px; }
+
+    /* ---------- 响应式 ---------- */
+    @media (max-width: 1240px) {
+      .lj-stats .lj-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .lj-stats .lj-ledger-split { grid-template-columns: 1fr; }
+      .lj-stats .lj-tri { grid-template-columns: 1fr; }
+      .lj-stats .lj-deep-split { grid-template-columns: 1fr; }
+      .lj-stats .lj-hof { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    }
+    @media (max-width: 760px) {
+      .lj-stats .lj-kpis { grid-template-columns: 1fr; }
+      .lj-stats .lj-domain-grid { grid-template-columns: 1fr; }
+      .lj-stats .lj-dual,
+      .lj-stats .lj-dual[data-view="read"],
+      .lj-stats .lj-dual[data-view="watch"] { grid-template-columns: 1fr; }
+      .lj-stats .lj-dual[data-view="read"] .lj-sl-watch { display: none; }
+      .lj-stats .lj-dual[data-view="watch"] .lj-sl-read { display: none; }
+      .lj-stats .lj-hof { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
   </style>
 {% endblock extra_head %}
 
 {% block content %}
-  <div class="lj-stats max-w-6xl mx-auto">
+  <div class="lj-stats">
 
-    <header class="mb-8">
-      <h1 class="text-3xl font-bold">统计</h1>
-      <p class="mt-2 text-sm text-gray-400">
-        把库里的记录摊开看：由什么构成、按什么趋势走，以及时间都花在了哪里。
-      </p>
+    {# ── 页头：眉标 + 标题 + 副标，右侧接三页签和日期筛选 ── #}
+    <header class="lj-hero">
+      <div>
+        <span class="lj-eyebrow">Life Joy Analytics · 全库数据中心</span>
+        <div class="lj-hero-row">
+          <h1 class="lj-h1">统计总览</h1>
+          <p class="lj-hero-sub">把库里的记录摊开看：由什么构成、按什么趋势走，以及时间都花在了哪里</p>
+        </div>
+      </div>
+      <div class="lj-hero-side">
+        <div class="lj-tabs">
+          {% include "app/components/stats_tabs.html" %}
+        </div>
+
+        {# 时间范围：外观是设计稿的胶囊 + 面板，逻辑仍然交给 date-range.js 的 Alpine 组件 #}
+        <div class="lj-datewrap"
+             x-data="dateRangePicker('all')"
+             x-init="init()"
+             data-range-start="{{ date_range_start }}"
+             data-range-end="{{ date_range_end }}">
+          <button type="button"
+                  class="lj-datebtn"
+                  @click="toggleDropdown()"
+                  aria-haspopup="true"
+                  :aria-expanded="isOpen ? 'true' : 'false'">
+            <span aria-hidden="true">📅</span>
+            <span x-text="selectedRange === '全部时间' ? '全部时间 (All Time)' : selectedRange">全部时间 (All Time)</span>
+            <span class="lj-chev" :class="{ 'is-open': isOpen }" aria-hidden="true">▾</span>
+          </button>
+          {% if date_range_from_memory and date_range_start != 'all' %}
+            <p class="lj-dp-note">上次选的范围</p>
+          {% endif %}
+
+          <div class="lj-datepanel"
+               x-cloak
+               x-show="isOpen"
+               x-transition.opacity.duration.150ms
+               @click.outside="isOpen = false">
+            <div class="lj-dp-title">时间范围筛选 · Date Range</div>
+
+            <div class="lj-dp-quick">
+              <button type="button" class="lj-dp-btn"
+                      :class="{ 'is-on': selectedRange === '全部时间' }"
+                      @click="selectPredefinedRange('全部时间')">全部时间</button>
+              <button type="button" class="lj-dp-btn"
+                      @click="startDate = (new Date()).getFullYear() + '-01-01'; endDate = (new Date()).toISOString().slice(0, 10); applyDateFilter()">今年</button>
+              <button type="button" class="lj-dp-btn"
+                      @click="startDate = ((new Date()).getFullYear() - 1) + '-01-01'; endDate = ((new Date()).getFullYear() - 1) + '-12-31'; applyDateFilter()">去年</button>
+              <button type="button" class="lj-dp-btn"
+                      @click="startDate = ((new Date()).getFullYear() - 2) + '-01-01'; endDate = ((new Date()).getFullYear() - 2) + '-12-31'; applyDateFilter()">前年</button>
+              <button type="button" class="lj-dp-btn"
+                      @click="selectPredefinedRange('最近 12 个月')">近 12 个月</button>
+              <button type="button" class="lj-dp-btn"
+                      @click="startDate = ((new Date()).getFullYear() - 4) + '-01-01'; endDate = ((new Date()).getFullYear() - 3) + '-12-31'; applyDateFilter()">更早两年</button>
+            </div>
+
+            <div class="lj-dp-sub">更多范围</div>
+            <div class="lj-dp-grid">
+              <template x-for="range in predefinedRanges" :key="range.name">
+                <button type="button" class="lj-dp-btn"
+                        :class="{ 'is-on': selectedRange === range.name }"
+                        @click="selectPredefinedRange(range.name)"
+                        x-text="range.name"></button>
+              </template>
+            </div>
+
+            <div class="lj-dp-custom">
+              <span>自定义日期范围</span>
+              <div class="lj-dp-inputs">
+                <input type="date" x-model="startDate" @change="updateDateRange()" aria-label="开始日期">
+                <input type="date" x-model="endDate" @change="updateDateRange()" aria-label="结束日期">
+              </div>
+              <button type="button" class="lj-dp-apply" @click="applyCustomRange()">应用自定义范围</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </header>
 
     {% if media_count.total and rated_percent == 0 %}
-      <div class="st-card mb-8 flex items-start gap-4">
-        <div class="bg-amber-600/20 p-2 rounded-full shrink-0">
-          {% include "app/icons/info.svg" with classes="w-6 h-6 text-amber-400" %}
-        </div>
+      <div class="lj-card lj-warn">
+        <div class="lj-warn-ico" aria-hidden="true">!</div>
         <div>
-          <h3 class="font-semibold mb-1">图表数据还不全，不是坏了</h3>
-          <p class="text-gray-400 text-sm mb-3">{{ media_count.total }} 个条目里只有 {{ score_distribution.total_scored }} 条有评分，所以评分相关的图基本是空的。补上评分或游玩时长，图就会自己长出来。</p>
-          <div class="flex flex-wrap gap-2">
-            <a href="{% url 'medialist' request.user.username 'game' %}?sort=progress"
-               class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 transition-colors">去给游戏补时长</a>
-            <a href="{% url 'import_data' %}"
-               class="px-3 py-1.5 st-inner text-gray-200 rounded-lg text-sm transition-colors">去同步 Steam 数据</a>
+          <h3>图表数据还不全，不是坏了</h3>
+          <p>{{ media_count.total }} 个条目里只有 {{ score_distribution.total_scored }} 条有评分，所以评分相关的图基本是空的。补上评分或游玩时长，图就会自己长出来。</p>
+          <div class="lj-warn-actions">
+            <a href="{% url 'medialist' request.user.username 'game' %}?sort=progress" class="lj-btn is-primary">去给游戏补时长</a>
+            <a href="{% url 'import_data' %}" class="lj-btn">去同步 Steam 数据</a>
           </div>
         </div>
       </div>
     {% endif %}
 
-    <div x-data="dateRangePicker('all')"
-         x-init="init()"
-         data-range-start="{{ date_range_start }}"
-         data-range-end="{{ date_range_end }}"
-         class="relative mb-8">
-      <!-- Trigger Button -->
-      <button @click="toggleDropdown()"
-              class="flex items-center gap-2 px-4 py-2.5 bg-[#2a2f35] hover:bg-[#343a40] rounded-lg transition-all duration-200 border border-gray-700 shadow-sm cursor-pointer">
-        {% include "app/icons/calendar.svg" with classes="w-5 h-5 text-indigo-400" %}
-        <span class="font-medium" x-text="selectedRange"></span>
-        <div class="w-4 h-4 ml-1 transition-transform duration-200"
-             :class="{'rotate-180': isOpen}">{% include "app/icons/chevron-down.svg" %}</div>
-      </button>
-      {% if date_range_from_memory %}
-        <p class="mt-1.5 text-xs text-gray-500">上次选的范围</p>
-      {% endif %}
-
-      <!-- Dropdown -->
-      <div x-cloak
-           x-show="isOpen"
-           x-transition
-           @click.outside="isOpen = false"
-           class="absolute z-20 mt-2 w-85 bg-[#2a2f35] rounded-lg shadow-lg border border-gray-700 overflow-hidden transition-all duration-200 animate-in fade-in-50 slide-in-from-top-5">
-
-        <!-- Tabs -->
-        <div class="flex border-b border-gray-700">
-          <button @click="activeTab = 'predefined'"
-                  :class="{'text-white border-b-2 border-indigo-500': activeTab === 'predefined', 'text-gray-400 hover:text-gray-200': activeTab !== 'predefined'}"
-                  class="flex-1 py-3 text-sm font-medium transition-colors cursor-pointer">{% trans "Predefined Ranges" %}</button>
-          <button @click="activeTab = 'custom'"
-                  :class="{'text-white border-b-2 border-indigo-500': activeTab === 'custom', 'text-gray-400 hover:text-gray-200': activeTab !== 'custom'}"
-                  class="flex-1 py-3 text-sm font-medium transition-colors cursor-pointer">{% trans "Custom Range" %}</button>
-        </div>
-
-        <!-- Predefined Ranges Tab -->
-        <div x-show="activeTab === 'predefined'"
-             class="p-2 max-h-80 overflow-y-auto">
-          <div class="grid grid-cols-2 gap-2">
-            <template x-for="range in predefinedRanges" :key="range.name">
-              <button @click="selectPredefinedRange(range.name)"
-                      :class="{'bg-indigo-600 text-white': selectedRange === range.name, 'hover:bg-[#39404b] text-gray-200': selectedRange !== range.name}"
-                      class="flex items-center justify-between p-3 rounded-lg text-left text-sm transition-all cursor-pointer">
-                <span x-text="range.name"></span>
-                <div x-show="selectedRange === range.name">{% include "app/icons/checkmark.svg" with classes="w-4 h-4" %}</div>
-              </button>
-            </template>
-          </div>
-        </div>
-
-        <!-- Custom Range Tab -->
-        <div x-show="activeTab === 'custom'" class="p-4">
-          <div class="space-y-4">
-            <div class="grid grid-cols-2 gap-4">
-              <div>
-                <label class="block text-sm font-medium mb-2 text-gray-300">{% trans "Start Date" %}</label>
-                <input x-model="startDate"
-                       @change="updateDateRange()"
-                       class="w-full p-2.5 bg-[#39404b] rounded-lg text-white border border-gray-600 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm scheme-dark"
-                       type="date">
-              </div>
-              <div>
-                <label class="block text-sm font-medium mb-2 text-gray-300">{% trans "End Date" %}</label>
-                <input x-model="endDate"
-                       @change="updateDateRange()"
-                       class="w-full p-2.5 bg-[#39404b] rounded-lg text-white border border-gray-600 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm scheme-dark"
-                       type="date">
-              </div>
-            </div>
-
-            <div class="flex justify-end gap-2 pt-2">
-              <button @click="isOpen = false"
-                      class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm rounded-lg transition-colors cursor-pointer">
-                {% trans "Cancel" %}
-              </button>
-              <button @click="applyCustomRange()"
-                      class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg transition-colors cursor-pointer flex items-center gap-2">
-                {% include "app/icons/checkmark.svg" with classes="w-4 h-4" %}
-                {% trans "Apply Range" %}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
     {% url 'import_data' as import_url %}
 
-    <div class="st-sections">
+    {# ═══════════ 一、核心概览与全库消费账本 ═══════════ #}
+    <section class="lj-sec">
+      <div class="lj-sec-head">
+        <h2 class="lj-sec-label"><span class="lj-sec-bar" aria-hidden="true"></span>核心概览与全库消费账本<span class="lj-sec-en">Core Overview</span></h2>
+        <span class="lj-sec-note">实时库容：游戏 · 电影 · 剧集 · 书籍 四维全量汇总</span>
+      </div>
 
-      {# ---------------- 概览 ---------------- #}
-      <section>
-        <div class="flex items-center gap-3 mb-4">
-          <h2 class="st-eyebrow text-gray-500">概览</h2>
-          <div class="st-rule"></div>
+      {% with ov=extra_charts.overview %}
+        <div class="lj-kpis">
+          {# 1 · 总条目 #}
+          <div class="lj-kpi">
+            <div class="lj-kpi-top">
+              <div class="lj-kpi-name">总条目<span class="lj-kpi-en">TOTAL ITEMS</span></div>
+              <span class="lj-badge is-violet">{{ ov.media_kinds|default:4 }} 类媒体</span>
+            </div>
+            <div class="lj-kpi-mid">
+              <span class="lj-kpi-num" data-value="{{ media_count.total|default:0 }}">{{ media_count.total|default:0|intcomma:False }}</span>
+              <span class="lj-kpi-unit">个</span>
+            </div>
+            <div class="lj-kpi-foot">
+              <div class="lj-stack">
+                {% for row in ov.media_split %}
+                  <span class="is-{{ row.tone }}" style="width: {{ row.split_percent }}%" title="{{ row.label }} {{ row.count }} 个"></span>
+                {% endfor %}
+              </div>
+              <div class="lj-kpi-sub">{{ ov.media_subtext|default:"游戏 · 电影 · 剧集 · 书籍" }}</div>
+            </div>
+          </div>
+
+          {# 2 · 进行中 #}
+          <div class="lj-kpi">
+            <div class="lj-kpi-top">
+              <div class="lj-kpi-name">进行中<span class="lj-kpi-en">IN PROGRESS</span></div>
+              <span class="lj-badge is-sky">正在推进</span>
+            </div>
+            <div class="lj-kpi-mid">
+              <span class="lj-kpi-num" data-value="{{ in_progress_count|default:0 }}">{{ in_progress_count|default:0|intcomma:False }}</span>
+              <span class="lj-kpi-unit">个</span>
+            </div>
+            <div class="lj-kpi-foot">
+              <div class="lj-stack">
+                {% for row in ov.in_progress_split %}
+                  <span class="is-{{ row.tone }}" style="width: {{ row.percent }}%" title="{{ row.label }} {{ row.in_progress }} 个"></span>
+                {% endfor %}
+              </div>
+              <div class="lj-kpi-sub">{{ ov.in_progress_subtext|default:"进行中的条目会显示在这里" }}</div>
+            </div>
+          </div>
+
+          {# 3 · 已通关 #}
+          <div class="lj-kpi">
+            <div class="lj-kpi-top">
+              <div class="lj-kpi-name">已通关<span class="lj-kpi-en">COMPLETED</span></div>
+              <span class="lj-badge is-emerald">占全部的 {{ completed_percent|default:0 }}%</span>
+            </div>
+            <div class="lj-kpi-mid">
+              <span class="lj-kpi-num" data-value="{{ status_distribution.total_completed|default:0 }}">{{ status_distribution.total_completed|default:0|intcomma:False }}</span>
+              <span class="lj-kpi-unit">/ {{ media_count.total|default:0|intcomma:False }}</span>
+            </div>
+            <div class="lj-kpi-foot">
+              <div class="lj-stack">
+                {% for row in ov.completed_split %}
+                  <span class="is-{{ row.tone }}" style="width: {{ row.percent }}%" title="{{ row.label }} {{ row.completed }} 个"></span>
+                {% endfor %}
+              </div>
+              <div class="lj-kpi-sub">{{ ov.completed_subtext|default:"把条目改成已通关后会计入这里" }}</div>
+            </div>
+          </div>
+
+          {# 4 · 已评分 #}
+          <div class="lj-kpi">
+            <div class="lj-kpi-top">
+              <div class="lj-kpi-name">已评分<span class="lj-kpi-en">RATED</span></div>
+              <span class="lj-badge is-gold">★ {{ score_distribution.average_score|default:"—" }} / 10 均分</span>
+            </div>
+            <div class="lj-kpi-mid">
+              <span class="lj-kpi-num" data-value="{{ rated_percent|default:0 }}">{{ rated_percent|default:0 }}<span class="lj-kpi-unit">%</span></span>
+              <span class="lj-kpi-unit">的条目打过星</span>
+            </div>
+            <div class="lj-kpi-foot">
+              <div class="lj-stack">
+                {% for row in ov.media_split %}
+                  <span class="is-{{ row.tone }}" style="width: {{ row.split_percent }}%"></span>
+                {% endfor %}
+              </div>
+              <div class="lj-kpi-sub">共 {{ score_distribution.total_scored|default:0|intcomma:False }} 条评分 · {{ top_rated|length }} 部高分殿堂作</div>
+            </div>
+          </div>
         </div>
+      {% endwith %}
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          <div class="st-card">
-            <div class="flex items-center justify-between mb-3">
-              <span class="st-eyebrow text-gray-500">总条目</span>
-              <span class="text-indigo-400">{% include "app/icons/four-square.svg" with classes="w-4 h-4" %}</span>
+      <div class="lj-ledger-split">
+        {# 左：全库时长账本 #}
+        <div class="lj-card">
+          <div class="lj-card-hd">
+            <div>
+              <h3 class="lj-card-title">消费量 · 四大媒介真实总量</h3>
+              <p class="lj-card-sub">按每个类型的真实时长与完成度精算汇总</p>
             </div>
-            <div class="flex items-baseline gap-2">
-              <span class="st-num {% if not media_count.total %}text-gray-500{% endif %}">{{ media_count.total|default:0 }}</span>
-              <span class="text-xs text-gray-500">个</span>
-            </div>
-            <p class="mt-2 text-xs text-gray-500">{{ consumption_stats|length }} 类媒体在跟踪</p>
+            <span class="lj-badge is-gold">全库时长账本</span>
           </div>
 
-          <div class="st-card">
-            <div class="flex items-center justify-between mb-3">
-              <span class="st-eyebrow text-gray-500">{% trans "In Progress" %}</span>
-              <span class="text-sky-400">{% include "app/icons/states/in-progress.svg" with classes="w-4 h-4" %}</span>
-            </div>
-            <div class="flex items-baseline gap-2">
-              {% if media_count.total %}
-                <span class="st-num">{{ in_progress_count }}</span>
-                <span class="text-xs text-gray-500">个</span>
-              {% else %}
-                <span class="st-num text-gray-500">--</span>
-              {% endif %}
-            </div>
-            <p class="mt-2 text-xs text-gray-500">正在推进的条目</p>
-          </div>
-
-          <div class="st-card">
-            <div class="flex items-center justify-between mb-3">
-              <span class="st-eyebrow text-gray-500">已通关</span>
-              <span class="text-indigo-400">{% include "app/icons/states/completed.svg" with classes="w-4 h-4" %}</span>
-            </div>
-            <div class="flex items-baseline gap-2">
-              {% if media_count.total %}
-                <span class="st-num">{{ status_distribution.total_completed }}</span>
-                <span class="text-xs text-gray-500">/ {{ media_count.total }}</span>
-              {% else %}
-                <span class="st-num text-gray-500">--</span>
-              {% endif %}
-            </div>
-            <p class="mt-2 text-xs text-gray-500">
-              {% if media_count.total and completed_percent is not None %}
-                占全部的 {{ completed_percent }}%
-              {% else %}
-                还没有条目
-              {% endif %}
-            </p>
-          </div>
-
-          <div class="st-card">
-            <div class="flex items-center justify-between mb-3">
-              <span class="st-eyebrow text-gray-500">{% trans "% Rated" %}</span>
-              <span class="text-emerald-400">{% include "app/icons/star.svg" with classes="w-4 h-4" %}</span>
-            </div>
-            <div class="flex items-baseline gap-2">
-              {% if rated_percent is not None %}
-                <span class="st-num">{{ rated_percent }}</span>
-                <span class="text-xs text-gray-500">%</span>
-              {% else %}
-                <span class="st-num text-gray-500">--</span>
-              {% endif %}
-            </div>
-            <p class="mt-2 text-xs text-gray-500">
-              {% if score_distribution.total_scored %}
-                平均 {{ score_distribution.average_score }} / 10 · 共 {{ score_distribution.total_scored }} 条评分
-              {% else %}
-                还没有任何评分
-              {% endif %}
-            </p>
-          </div>
-        </div>
-
-        {% if consumption_stats %}
-          <div class="mt-4 st-card">
-            <div class="flex items-center justify-between mb-4">
-              <h3 class="text-base font-semibold text-gray-200">{% trans "Consumption" %}</h3>
-              <span class="text-xs text-gray-500">每个类型的真实总量</span>
-            </div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-              {% for stat in consumption_stats %}
-                <div class="st-inner p-4 flex items-center gap-3">
-                  <div class="shrink-0 {{ stat.media_type|media_color }}">{% icon stat.media_type False "w-6 h-6" %}</div>
-                  <div class="min-w-0">
-                    <p class="st-num-sm">{{ stat.value }}</p>
-                    <p class="text-xs text-gray-400 truncate" title="{{ stat.descriptor }}">{{ stat.descriptor }}</p>
+          {% if extra_charts.time_ledger.items %}
+            <div class="lj-domain-grid">
+              {% for row in extra_charts.time_ledger.items %}
+                <div class="lj-dom">
+                  <div class="lj-dom-head">
+                    <span>{{ row.name }}</span>
+                    <span class="lj-dom-tag is-{{ row.tone }}">{{ row.percent_text }}</span>
                   </div>
+                  <div class="lj-dom-valrow">
+                    <span class="lj-dom-val">{{ row.hours_text }}</span>
+                    <span class="lj-dom-unit">{{ row.unit }}</span>
+                  </div>
+                  <div class="lj-dom-meta">{{ row.meta }}</div>
                 </div>
               {% endfor %}
             </div>
-          </div>
-        {% endif %}
-      </section>
 
-      {# ---------------- 构成 ---------------- #}
-      <section>
-        <div class="flex items-center gap-3 mb-4">
-          <h2 class="st-eyebrow text-gray-500">构成</h2>
-          <div class="st-rule"></div>
+            <div class="lj-total">
+              <div class="lj-total-head">
+                <span class="lj-total-title">全库累计投入总时长</span>
+                <span class="lj-total-val">约 {{ extra_charts.time_ledger.total_text }} 小时</span>
+              </div>
+              <div class="lj-total-bar">
+                {% for row in extra_charts.time_ledger.items %}
+                  <span class="is-{{ row.tone }}" style="width: {{ row.percent }}%" title="{{ row.name }} {{ row.percent_text }}"></span>
+                {% endfor %}
+              </div>
+              <div class="lj-total-legend">
+                {% for row in extra_charts.time_ledger.items %}
+                  <span class="lj-leg-item"><span class="lj-dot is-{{ row.tone }}"></span>{{ row.short }} {{ row.percent_text }}</span>
+                {% endfor %}
+              </div>
+            </div>
+
+            {% if consumption_stats %}
+              <div class="lj-chips">
+                {% for stat in consumption_stats %}
+                  <span class="lj-chip">{{ stat.media_type|media_type_readable }} <b>{{ stat.value|intcomma:False }}</b> {{ stat.descriptor }}</span>
+                {% endfor %}
+              </div>
+            {% endif %}
+          {% else %}
+            <p class="lj-empty">还没有可汇总的时长：追踪一些条目并补上进度后，四个维度的账本会自己长出来。</p>
+          {% endif %}
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div class="st-card">
-            <div class="flex items-baseline justify-between gap-3 mb-4">
-              <h3 class="text-base font-semibold text-gray-200">媒体类型分布</h3>
-              <span class="text-xs text-gray-500">按条目数</span>
+        {# 右：读书 & 观影逐年对比账本 #}
+        <div class="lj-card" x-data="{ view: 'both' }">
+          <div class="lj-card-hd">
+            <div>
+              <h3 class="lj-card-title">读书时长 &amp; 观影时长 · 逐年对比账本</h3>
+              <p class="lj-card-sub">历年阅读与影视投入双轨对照</p>
             </div>
+            <div class="lj-seg" role="group" aria-label="账本视图切换">
+              <button type="button" :class="{ 'is-on': view === 'both' }" @click="view = 'both'">双轨并列</button>
+              <button type="button" :class="{ 'is-on': view === 'read' }" @click="view = 'read'">📖 读书</button>
+              <button type="button" :class="{ 'is-on': view === 'watch' }" @click="view = 'watch'">🎬 观影</button>
+            </div>
+          </div>
+
+          {% if reading.has_data or watch.has_data %}
+            <div class="lj-dual" :data-view="view">
+              {% if reading.has_data %}
+                <div class="lj-sl lj-sl-read">
+                  <div class="lj-sl-hd">
+                    <h4 class="lj-sl-title">📖 读书时长 · {{ reading.total_hours|intcomma:False }} 小时</h4>
+                  </div>
+                  <div class="lj-sl-pills">
+                    {% if reading.finished_hours is not None %}
+                      <span class="lj-pill">已读完 {{ reading.finished_hours|intcomma:False }}h / {{ reading.finished_books|intcomma:False }} 本</span>
+                    {% endif %}
+                    <span class="lj-pill">今年 {{ reading.this_year_hours|intcomma:False }}h / {{ reading.this_year_books|intcomma:False }} 本</span>
+                    {% if reading.unknown_date_hours %}
+                      <span class="lj-pill">另有在读 {{ reading.unknown_date_hours|intcomma:False }}h（未归年）</span>
+                    {% endif %}
+                  </div>
+                  <div class="lj-yr-rows">
+                    {% for row in reading.by_year %}
+                      <div class="lj-yr-row">
+                        <span class="lj-yr-label">{{ row.year }}</span>
+                        <span class="lj-yr-track">
+                          <span class="lj-yr-fill is-emerald" style="width: {{ row.bar_percent }}%"></span>
+                        </span>
+                        <span class="lj-yr-val">{{ row.hours|intcomma:False }}h · {{ row.book_count|intcomma:False }} 本</span>
+                      </div>
+                    {% endfor %}
+                  </div>
+                  <div class="lj-sl-foot">
+                    <span>数据源：微信读书精准同步</span>
+                    {% if extra_charts.time_ledger.reading_peak_year %}
+                      <span>峰值：{{ extra_charts.time_ledger.reading_peak_year }} 年（{{ extra_charts.time_ledger.reading_peak_hours }}h）</span>
+                    {% endif %}
+                  </div>
+                </div>
+              {% endif %}
+
+              {% if watch.has_data %}
+                <div class="lj-sl lj-sl-watch">
+                  <div class="lj-sl-hd">
+                    <h4 class="lj-sl-title">
+                      🎬 观影时长 · {{ watch.total_hours|intcomma:False }} 小时
+                      {% if watch.tv_is_estimated %}<span class="lj-badge is-sky">含估算</span>{% endif %}
+                    </h4>
+                  </div>
+                  <div class="lj-sl-pills">
+                    <span class="lj-pill">电影 {{ watch.movie_hours|intcomma:False }}h（{{ watch.movie_count|intcomma:False }} 部）</span>
+                    <span class="lj-pill">剧集 {{ watch.tv_hours|intcomma:False }}h（{{ watch.tv_episodes|intcomma:False }} 集 × 45m）</span>
+                  </div>
+                  <div class="lj-yr-rows">
+                    {% for row in watch.by_year %}
+                      <div class="lj-yr-row">
+                        <span class="lj-yr-label">{{ row.year }}</span>
+                        <span class="lj-yr-track">
+                          <span class="lj-yr-stack" style="width: {{ row.bar_percent }}%">
+                            <span class="is-sky" style="width: {{ row.movie_percent }}%" title="电影 {{ row.movie_hours|intcomma:False }}h"></span>
+                            <span class="is-amber" style="width: {{ row.tv_percent }}%" title="剧集 {{ row.tv_hours|intcomma:False }}h"></span>
+                          </span>
+                        </span>
+                        <span class="lj-yr-val">{{ row.total_hours|intcomma:False }}h · 影 {{ row.movie_hours|intcomma:False }} / 剧 {{ row.tv_hours|intcomma:False }}</span>
+                      </div>
+                    {% endfor %}
+                  </div>
+                  <div class="lj-sl-foot">
+                    <span>剧集时长按 45 分钟/集估算，电影按真实片长</span>
+                    <span>注：早年含一次性批量补标，单年峰值供看趋势</span>
+                  </div>
+                </div>
+              {% endif %}
+            </div>
+          {% else %}
+            <p class="lj-empty">还没有读书或观影时长记录：同步微信读书、补上影视的观看日期后，这块账本才会有内容。</p>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+
+    {# ═══════════ 二、构成、趋势与年代 ═══════════ #}
+    <section class="lj-sec">
+      <div class="lj-sec-head">
+        <h2 class="lj-sec-label"><span class="lj-sec-bar" aria-hidden="true"></span>构成、趋势与年代<span class="lj-sec-en">Composition · Trend · Era</span></h2>
+        <span class="lj-sec-note">按条目数、完成年份与发行年代三条线拆开看</span>
+      </div>
+
+      <div class="lj-tri">
+        {# 构成 #}
+        <div class="lj-card">
+          <div class="lj-card-hd">
+            <div>
+              <h3 class="lj-card-title">构成</h3>
+              <p class="lj-card-sub">按条目数与状态档位</p>
+            </div>
+          </div>
+          <div class="lj-sub-block">
+            <div class="lj-block-lbl"><span>按媒体类型</span><span>共 {{ media_count.total|default:0|intcomma:False }} 条</span></div>
             {% if media_type_distribution.labels %}
-              <div class="h-80 flex justify-center items-center">
+              <div class="lj-chart-box is-sm">
                 <canvas id="mediaTypeChart"></canvas>
               </div>
             {% else %}
-              {% include "app/components/empty_state.html" with empty_icon="app/icons/piechart.svg" empty_title="还没有可统计的条目" empty_description="先追踪一些条目，这里就会显示类型分布。" empty_url="/" empty_label="回首页看看" %}
+              <div class="lj-empty-wrap">
+                {% include "app/components/empty_state.html" with empty_icon="app/icons/piechart.svg" empty_title="还没有可统计的条目" empty_description="先追踪一些条目，这里就会显示类型分布。" empty_url="/" empty_label="回首页看看" %}
+              </div>
             {% endif %}
           </div>
-
-          <div class="st-card">
-            <div class="flex items-baseline justify-between gap-3 mb-4">
-              <h3 class="text-base font-semibold text-gray-200">状态分布</h3>
-              <span class="text-xs text-gray-500">按状态档位</span>
-            </div>
+          <div class="lj-sub-block">
+            <div class="lj-block-lbl"><span>按状态档位</span><span>已通关 {{ status_distribution.total_completed|default:0|intcomma:False }} 条</span></div>
             {% if status_pie_chart_data.labels %}
-              <div class="h-80 flex justify-center items-center">
+              <div class="lj-chart-box is-sm">
                 <canvas id="statusChart"></canvas>
               </div>
             {% else %}
-              {% include "app/components/empty_state.html" with empty_icon="app/icons/bars-increasing.svg" empty_title="还没有状态数据" empty_description="把条目标成已通关、进行中或已暂停，状态分布就会出现。" empty_url="/" empty_label="回首页看看" %}
+              <div class="lj-empty-wrap">
+                {% include "app/components/empty_state.html" with empty_icon="app/icons/bars-increasing.svg" empty_title="还没有状态数据" empty_description="把条目标成已通关、进行中或已暂停，状态分布就会出现。" empty_url="/" empty_label="回首页看看" %}
+              </div>
             {% endif %}
           </div>
         </div>
-      </section>
 
-      {# ---------------- 趋势 ---------------- #}
-      <section>
-        <div class="flex items-center gap-3 mb-4">
-          <h2 class="st-eyebrow text-gray-500">趋势</h2>
-          <div class="st-rule"></div>
-        </div>
-
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div class="st-card">
-            <div class="flex items-baseline justify-between gap-3 mb-4">
-              <h3 class="text-base font-semibold text-gray-200">年度完成趋势</h3>
-              <span class="text-xs text-gray-500">按完成年份</span>
+        {# 趋势 + 月度 #}
+        <div class="lj-card">
+          <div class="lj-card-hd">
+            <div>
+              <h3 class="lj-card-title">趋势</h3>
+              <p class="lj-card-sub">年度完成趋势与月度游玩</p>
             </div>
+          </div>
+          <div class="lj-sub-block">
+            <div class="lj-block-lbl"><span>年度完成趋势</span><span>按完成年份</span></div>
             {% if extra_charts.yearly_completed.labels %}
-              <div class="h-80 flex justify-center items-center">
+              <div class="lj-chart-box">
                 <canvas id="yearlyCompletedChart"></canvas>
               </div>
             {% else %}
-              {% include "app/components/empty_state.html" with empty_icon="app/icons/bars-increasing.svg" empty_title="还没有完成记录" empty_description="把条目的状态改成「已通关」，这里就会按年份堆叠出每年通关了多少。" empty_url="/" empty_label="回首页看看" %}
+              <div class="lj-empty-wrap">
+                {% include "app/components/empty_state.html" with empty_icon="app/icons/bars-increasing.svg" empty_title="还没有完成记录" empty_description="把条目的状态改成「已通关」，这里就会按年份堆叠出每年通关了多少。" empty_url="/" empty_label="回首页看看" %}
+              </div>
             {% endif %}
           </div>
-
-          <div class="st-card">
-            <div class="flex items-baseline justify-between gap-3 mb-4">
-              <h3 class="text-base font-semibold text-gray-200">月度游玩趋势</h3>
-              <span class="text-xs text-gray-500">近 12 个月</span>
-            </div>
+          <div class="lj-sub-block">
+            <div class="lj-block-lbl"><span>月度游玩趋势</span><span>近 12 个月</span></div>
             {% if monthly_playtime and monthly_playtime.has_data %}
-              <div class="h-80 flex justify-center items-center">
+              <div class="lj-chart-box is-sm">
                 <canvas id="monthlyPlaytimeChart"></canvas>
               </div>
             {% else %}
@@ -360,161 +1507,211 @@
                 has_data=False：本月只是基线，本月以前没有任何可对比的快照。
                 这里绝不画一排 0 的假柱子，只说明数据从哪个月开始积累。
               {% endcomment %}
-              <div class="st-inner p-5">
-                <div class="flex items-start gap-3">
-                  <div class="bg-indigo-600/20 p-2 rounded-full shrink-0">
-                    {% include "app/icons/clock.svg" with classes="w-5 h-5 text-indigo-400" %}
-                  </div>
-                  <div class="min-w-0">
-                    <p class="text-sm font-medium text-gray-200">
-                      月度游玩统计从
-                      {% if monthly_this_label %}{{ monthly_this_label }}{% else %}本月{% endif %}
-                      开始记录
-                    </p>
-                    <p class="mt-2 text-xs text-gray-400">
-                      {{ monthly_playtime.message|default:"还没有可对比的快照，本月是基线，下个月起才有柱子" }}
-                    </p>
-                    <p class="mt-1 text-xs text-gray-500">
-                      {% if monthly_next_label %}{{ monthly_next_label }}{% else %}下个月{% endif %}
-                      起这里会出现第一根柱子；之后每个月自动累加。
-                    </p>
-                  </div>
-                </div>
+              <div class="lj-inner-note">
+                <p class="lj-inner-note-title">
+                  月度游玩统计从
+                  {% if monthly_this_label %}{{ monthly_this_label }}{% else %}本月{% endif %}
+                  开始记录
+                </p>
+                <p class="lj-inner-note-body">
+                  {{ monthly_playtime.message|default:"还没有可对比的快照，本月是基线，下个月起才有柱子" }}
+                </p>
+                <p class="lj-inner-note-foot">
+                  {% if monthly_next_label %}{{ monthly_next_label }}{% else %}下个月{% endif %}起这里会出现第一根柱子；之后每个月自动累加。
+                </p>
               </div>
             {% endif %}
           </div>
         </div>
-      </section>
 
-      {# ---------------- 深度 ---------------- #}
-      <section>
-        <div class="flex items-center gap-3 mb-4">
-          <h2 class="st-eyebrow text-gray-500">深度</h2>
-          <div class="st-rule"></div>
-        </div>
-
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div class="st-card">
-            <div class="flex items-baseline justify-between gap-3 mb-4">
-              <h3 class="text-base font-semibold text-gray-200">游玩时长 Top 10</h3>
-              <span class="text-xs text-gray-500">单位：小时</span>
+        {# 年代 #}
+        <div class="lj-card">
+          <div class="lj-card-hd">
+            <div>
+              <h3 class="lj-card-title">年代</h3>
+              <p class="lj-card-sub">发行年份分布，跨度大时自动按年代合并</p>
             </div>
-            {% if extra_charts.playtime_top.labels %}
-              <div class="h-80 flex justify-center items-center">
-                <canvas id="playtimeChart"></canvas>
-              </div>
-            {% else %}
-              {% include "app/components/empty_state.html" with empty_icon="app/icons/clock.svg" empty_title="还没有游玩时长" empty_description="同步一次 Steam 数据，玩得最久的那 10 款游戏就会排在这里。" empty_url=import_url empty_label="去同步 Steam 数据" %}
-            {% endif %}
-          </div>
-
-          <div class="st-card">
-            <div class="flex items-baseline justify-between gap-3 mb-4">
-              <h3 class="text-base font-semibold text-gray-200">成就完成度分布</h3>
-              <span class="text-xs text-gray-500">按游戏数</span>
-            </div>
-            {% if extra_charts.achievement_buckets.labels %}
-              <div class="h-80 flex justify-center items-center">
-                <canvas id="achievementChart"></canvas>
-              </div>
-            {% else %}
-              {% include "app/components/empty_state.html" with empty_icon="app/icons/trophy.svg" empty_title="还没有成就数据" empty_description="成就数据要单独同步一次；Steam 不开放成就的游戏会归到「无成就数据」。" empty_url=import_url empty_label="去同步 Steam 数据" %}
-            {% endif %}
-          </div>
-        </div>
-      </section>
-
-      {# ---------------- 时间与年代 ---------------- #}
-      <section>
-        <div class="flex items-center gap-3 mb-4">
-          <h2 class="st-eyebrow text-gray-500">时间与年代</h2>
-          <div class="st-rule"></div>
-        </div>
-
-        <div class="st-card">
-          <div class="flex items-baseline justify-between gap-3 mb-4">
-            <h3 class="text-base font-semibold text-gray-200">发行年份分布</h3>
-            <span class="text-xs text-gray-500">跨度大时自动按年代合并</span>
           </div>
           {% if extra_charts.release_years.labels %}
-            <div class="h-80 flex justify-center items-center">
-              <canvas id="releaseYearChart"></canvas>
+            <div class="lj-sub-block">
+              <div class="lj-block-lbl"><span>年代分布（图表）</span><span>按条目数</span></div>
+              <div class="lj-chart-box is-xs">
+                <canvas id="releaseYearChart"></canvas>
+              </div>
+            </div>
+            <div class="lj-sub-block">
+              <div class="lj-block-lbl"><span>逐年代明细</span><span>条数 · 占比</span></div>
+              <div class="lj-dec-list">
+                {% for row in extra_charts.release_year_rows %}
+                  <div class="lj-dec-row">
+                    <span class="lj-dec-lbl">{{ row.label }}</span>
+                    <span class="lj-dec-track">
+                      <span class="lj-dec-fill" style="width: {{ row.percent }}%"></span>
+                    </span>
+                    <span class="lj-dec-val">{{ row.count_text }} 条 · {{ row.share_text }}</span>
+                  </div>
+                {% endfor %}
+              </div>
             </div>
           {% else %}
-            {% include "app/components/empty_state.html" with empty_icon="app/icons/calendar.svg" empty_title="还没有发行日期" empty_description="条目补上发行年份后，这里就会显示你库里的年代分布。" empty_url="/" empty_label="回首页看看" %}
+            <div class="lj-empty-wrap">
+              {% include "app/components/empty_state.html" with empty_icon="app/icons/calendar.svg" empty_title="还没有发行日期" empty_description="条目补上发行年份后，这里就会显示你库里的年代分布。" empty_url="/" empty_label="回首页看看" %}
+            </div>
           {% endif %}
         </div>
-      </section>
+      </div>
+    </section>
 
-      {# ---------------- 按类型的细分 ---------------- #}
-      <section>
-        <div class="flex items-center gap-3 mb-4">
-          <h2 class="st-eyebrow text-gray-500">按类型的细分</h2>
-          <div class="st-rule"></div>
+    {# ═══════════ 三、深度榜单与类型细分 ═══════════ #}
+    <section class="lj-sec">
+      <div class="lj-sec-head">
+        <h2 class="lj-sec-label"><span class="lj-sec-bar" aria-hidden="true"></span>深度榜单与类型细分<span class="lj-sec-en">Deep Cuts</span></h2>
+        <span class="lj-sec-note">玩得最久的、成就最全的、状态与评分各占多少</span>
+      </div>
+
+      <div class="lj-deep-split">
+        {# 左：游玩时长 Top 10 #}
+        <div class="lj-card">
+          <div class="lj-card-hd">
+            <div>
+              <h3 class="lj-card-title">游玩时长 Top 10</h3>
+              <p class="lj-card-sub">单位：小时，按累计游玩时长排序</p>
+            </div>
+          </div>
+          {% if extra_charts.playtime_top.labels %}
+            <div class="lj-chart-box" style="height: 340px;">
+              <canvas id="playtimeChart"></canvas>
+            </div>
+            {% if extra_charts.playtime_rows %}
+              <div class="lj-chips" style="margin-top: 12px;">
+                {% for row in extra_charts.playtime_rows|slice:":3" %}
+                  <span class="lj-chip">{{ row.rank }}. {{ row.name }} <b>{{ row.hours_text }}h</b></span>
+                {% endfor %}
+              </div>
+            {% endif %}
+          {% else %}
+            <div class="lj-empty-wrap">
+              {% include "app/components/empty_state.html" with empty_icon="app/icons/clock.svg" empty_title="还没有游玩时长" empty_description="同步一次 Steam 数据，玩得最久的那 10 款游戏就会排在这里。" empty_url=import_url empty_label="去同步 Steam 数据" %}
+            </div>
+          {% endif %}
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div class="st-card">
-            <div class="flex items-baseline justify-between gap-3 mb-4">
-              <h3 class="text-base font-semibold text-gray-200">按类型的状态分布</h3>
-              <span class="text-xs text-gray-500">堆叠</span>
+        {# 右：成就 #}
+        <div class="lj-card">
+          <div class="lj-card-hd">
+            <div>
+              <h3 class="lj-card-title">成就完成度分布</h3>
+              <p class="lj-card-sub">按游戏数，全成就 / 部分完成 / 无成就数据</p>
             </div>
-            {% if media_type_distribution.labels %}
-              <div class="h-80 flex justify-center items-center">
-                <canvas id="statusStackedChart"></canvas>
+          </div>
+          {% if extra_charts.achievement_buckets.labels %}
+            <div class="lj-ach">
+              <div class="lj-ach-bar">
+                {% for row in extra_charts.overview.achievement_rows %}
+                  <span class="is-{{ row.tone }}" style="width: {{ row.percent }}%" title="{{ row.label }} {{ row.count_text }} 款"></span>
+                {% endfor %}
               </div>
-            {% else %}
+              <div class="lj-ach-boxes">
+                {% for row in extra_charts.overview.achievement_rows %}
+                  <div class="lj-ach-metric is-{{ row.tone }}">
+                    <span class="lj-am-lbl">{{ row.label }}</span>
+                    <span class="lj-am-val">{{ row.count_text }}</span>
+                    <span class="lj-am-lbl">{{ row.percent_text }}</span>
+                  </div>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="lj-sub-block">
+              <div class="lj-block-lbl"><span>成就分布（图表）</span><span>共 {{ extra_charts.overview.achievement_total_text }} 款</span></div>
+              <div class="lj-chart-box is-sm">
+                <canvas id="achievementChart"></canvas>
+              </div>
+            </div>
+          {% else %}
+            <div class="lj-empty-wrap">
+              {% include "app/components/empty_state.html" with empty_icon="app/icons/trophy.svg" empty_title="还没有成就数据" empty_description="成就数据要单独同步一次；Steam 不开放成就的游戏会归到「无成就数据」。" empty_url=import_url empty_label="去同步 Steam 数据" %}
+            </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="lj-deep-split">
+        <div class="lj-card">
+          <div class="lj-card-hd">
+            <div>
+              <h3 class="lj-card-title">按类型的状态分布</h3>
+              <p class="lj-card-sub">堆叠：每类条目里各状态占多少</p>
+            </div>
+          </div>
+          {% if media_type_distribution.labels %}
+            <div class="lj-chart-box is-sm">
+              <canvas id="statusStackedChart"></canvas>
+            </div>
+          {% else %}
+            <div class="lj-empty-wrap">
               {% include "app/components/empty_state.html" with empty_icon="app/icons/bars-pyramid.svg" empty_title="还没有按类型的状态数据" empty_description="同一类条目里出现不同状态后，这张对比图才有内容。" empty_url="/" empty_label="回首页看看" %}
-            {% endif %}
-          </div>
-
-          <div class="st-card">
-            <div class="flex items-baseline justify-between gap-3 mb-4">
-              <h3 class="text-base font-semibold text-gray-200">按类型的评分分布</h3>
-              <span class="text-xs text-gray-500">堆叠</span>
-            </div>
-            {% if score_distribution.total_scored %}
-              <div class="h-80 flex justify-center items-center">
-                <canvas id="scoreStackedChart"></canvas>
-              </div>
-            {% else %}
-              {% include "app/components/empty_state.html" with empty_icon="app/icons/ribbon.svg" empty_title="还没有任何评分" empty_description="给条目打个星，评分分布图就有数据了；这不是页面坏了。" empty_url="/" empty_label="去挑几款打分" %}
-            {% endif %}
-          </div>
-        </div>
-      </section>
-
-      {# ---------------- 高分条目 ---------------- #}
-      <section>
-        <div class="flex items-center gap-3 mb-4">
-          <h2 class="st-eyebrow text-gray-500">高分条目</h2>
-          <div class="st-rule"></div>
-        </div>
-
-        <div class="st-card">
-          <div class="flex items-baseline justify-between gap-3 mb-4">
-            <h3 class="text-base font-semibold text-gray-200">评分最高的条目</h3>
-            <span class="text-xs text-gray-500">{{ top_rated|length }} 个</span>
-          </div>
-          {% if top_rated %}
-            <div class="media-grid lib-grid lj-showcase">
-              {% for media in top_rated %}
-                {% include "app/components/media_card.html" with media=media item=media.item title=media.item from_grid=True secondary_color=True info_card=True %}
-              {% endfor %}
-            </div>
-          {% else %}
-            <div class="flex flex-col items-center justify-center py-16">
-              <div class="st-inner rounded-full p-4 w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-                {% include "app/icons/ribbon.svg" with classes="w-8 h-8 text-gray-400" %}
-              </div>
-              <h3 class="text-lg font-medium mb-2">还没有评分</h3>
-              <p class="text-gray-400 text-center max-w-md">给条目打分后，评分最高的那些会排在这里。</p>
             </div>
           {% endif %}
         </div>
-      </section>
 
-    </div>
+        <div class="lj-card">
+          <div class="lj-card-hd">
+            <div>
+              <h3 class="lj-card-title">按类型的评分分布</h3>
+              <p class="lj-card-sub">堆叠：每条评分落在哪个档位</p>
+            </div>
+          </div>
+          {% if score_distribution.total_scored %}
+            <div class="lj-chart-box is-sm">
+              <canvas id="scoreStackedChart"></canvas>
+            </div>
+          {% else %}
+            <div class="lj-empty-wrap">
+              {% include "app/components/empty_state.html" with empty_icon="app/icons/ribbon.svg" empty_title="还没有任何评分" empty_description="给条目打个星，评分分布图就有数据了；这不是页面坏了。" empty_url="/" empty_label="去挑几款打分" %}
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+
+    {# ═══════════ 四、高分殿堂 ═══════════ #}
+    <section class="lj-sec">
+      <div class="lj-sec-head">
+        <h2 class="lj-sec-label"><span class="lj-sec-bar" aria-hidden="true"></span>高分条目殿堂<span class="lj-sec-en">Hall of Fame</span></h2>
+        <span class="lj-sec-note">{{ top_rated|length }} 部 · 按评分从高到低</span>
+      </div>
+
+      {% if top_rated %}
+        <div class="lj-hof">
+          {% for media in top_rated %}
+            {% with item=media.item %}
+              <a class="lj-hof-card" href="{{ item|media_url }}" title="{{ item.title }}">
+                <span class="lj-hof-poster">
+                  {% if item.image %}
+                    <img src="{{ item.image|relay_image }}" alt="{{ item.title }}" loading="lazy">
+                  {% else %}
+                    <span class="lj-hof-fallback">{{ media.score|floatformat:"-1" }}</span>
+                  {% endif %}
+                  <span class="lj-hof-type">{{ item.media_type|media_type_readable }}</span>
+                  <span class="lj-hof-score">★ {{ media.score|floatformat:"-1" }}</span>
+                </span>
+                <span class="lj-hof-title">{{ item.title }}</span>
+                <span class="lj-hof-meta">
+                  {{ item.media_type|media_type_readable }}{% if item.release_date %} · {{ item.release_date|date:"Y" }}{% endif %}
+                </span>
+              </a>
+            {% endwith %}
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="lj-card">
+          <div class="lj-empty-wrap">
+            {% include "app/components/empty_state.html" with empty_icon="app/icons/ribbon.svg" empty_title="还没有评分" empty_description="给条目打分后，评分最高的那些会排在这里。" empty_url="/" empty_label="回首页看看" %}
+          </div>
+        </div>
+      {% endif %}
+    </section>
+
   </div>
 {% endblock content %}
 
