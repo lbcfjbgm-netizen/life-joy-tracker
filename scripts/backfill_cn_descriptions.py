@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """用 Steam 本地缓存里的中文简介补 `Item.synopsis`（零网络，只读本地 JSON）。
 
-数据源：`D:\\steam\\userdata\\STEAM_ACCOUNT_ID\\config\\librarycache\\<appid>.json`
+数据源：`D:\\steam\\userdata\\<account id>\\config\\librarycache\\<appid>.json`
+（`<account id>` 是 Steam 账号在本机的数字目录名，因人而异；用
+`--cache-dir` 或环境变量 `STEAM_LIBRARYCACHE_DIR` 指定，不写死。）
 每个文件是个数组，其中形如 `["descriptions", {"version": 1, "data": {...}}]`
 的一项里带 `strFullDescription`（Steam 商店的中文简介，带 BBCode 标记）。
 
@@ -36,7 +38,46 @@ from django.db import transaction  # noqa: E402
 
 from app.models import Item, MediaTypes, Sources  # noqa: E402
 
-DEFAULT_CACHE_DIR = r"D:\steam\userdata\STEAM_ACCOUNT_ID\config\librarycache"
+
+def detect_cache_dir():
+    r"""Return the librarycache folder found on this machine, or ``""``.
+
+    The folder name is the Steam account id, which differs per person, so the
+    only portable way to find it is to look for it under the usual install
+    locations: ``<Steam>\userdata\<account id>\config\librarycache``.
+    """
+    steam_dirs = (
+        r"C:\Program Files (x86)\Steam",
+        r"C:\Program Files\Steam",
+        r"D:\steam",
+        r"D:\Steam",
+        r"E:\steam",
+        r"E:\Steam",
+    )
+    for steam_dir in steam_dirs:
+        userdata = Path(steam_dir) / "userdata"
+        if not userdata.is_dir():
+            continue
+        for account in sorted(userdata.iterdir()):
+            cache_dir = account / "config" / "librarycache"
+            if cache_dir.is_dir():
+                return str(cache_dir)
+    return ""
+
+
+def resolve_cache_dir():
+    r"""Pick the librarycache folder: env var first, then auto detection.
+
+    Returns ``""`` when nothing is configured and nothing was found; the caller
+    turns that into a plain-language hint instead of a traceback.
+    """
+    override = os.environ.get("STEAM_LIBRARYCACHE_DIR", "").strip()
+    if override:
+        return override
+    return detect_cache_dir()
+
+
+DEFAULT_CACHE_DIR = resolve_cache_dir()
 
 # 少于这个字数的一律不补：Steam 有时只给一句广告词，那算不上简介
 MIN_LEN = 40
@@ -115,8 +156,29 @@ def clean_description(raw):
 
 def collect_candidates(cache_dir):
     """Return the games whose cached description can fill an empty synopsis."""
-    if not os.path.isdir(cache_dir):
-        raise SystemExit(f"缓存目录不存在：{cache_dir}")
+    if not cache_dir:
+        message = (
+            "没找到 Steam 的本地缓存目录 (librarycache)。\n"
+            "\n"
+            "这个目录藏在 Steam 安装目录下的:\n"
+            "    <Steam 安装目录>\\userdata\\<你的账号数字>\\config\\librarycache\n"
+            "账号数字每个人都不同, 所以程序没法替你猜死。请二选一:\n"
+            "  1) 命令行指路:\n"
+            '     --cache-dir "D:\\steam\\<账号数字>\\config\\librarycache"\n'
+            "  2) 设个环境变量:\n"
+            '     $env:STEAM_LIBRARYCACHE_DIR = "<同上那个路径>"\n'
+            "\n"
+            "不确定是哪个? 在 Steam 安装目录里搜一下 librarycache 这个文件夹名就有了。"
+        )
+        raise SystemExit(message)
+
+    if not Path(cache_dir).is_dir():
+        message = (
+            "这个缓存目录打不开, 可能路径写错了或盘符没挂上:\n"
+            f"    {cache_dir}\n"
+            "确认一下目录里有没有一堆 <appid>.json 文件, 再重跑。"
+        )
+        raise SystemExit(message)
 
     stats = {
         "cache_files": 0,
@@ -178,7 +240,11 @@ def main():  # noqa: PLR0915
         description="用 Steam librarycache 的中文简介补 Item.synopsis（默认 dry-run）",
     )
     parser.add_argument("--apply", action="store_true", help="真写库")
-    parser.add_argument("--cache-dir", default=DEFAULT_CACHE_DIR, help="librarycache 目录")
+    parser.add_argument(
+        "--cache-dir",
+        default=DEFAULT_CACHE_DIR,
+        help="librarycache 目录（也可用环境变量 STEAM_LIBRARYCACHE_DIR，留空自动探测）",
+    )
     parser.add_argument("--report", help="把明细写成 Markdown")
     parser.add_argument("--sample", type=int, default=10, help="报告里列几条样例")
     args = parser.parse_args()

@@ -39,9 +39,20 @@ from app.models import MediaTypes, Sources
 
 logger = logging.getLogger(__name__)
 
-# Used when the setting is missing entirely (a settings module that predates
-# ``STEAM_SCREENSHOT_ROOT``), so the module still answers something sensible.
-_DEFAULT_ROOT = r"C:\Program Files (x86)\Steam\userdata\STEAM_ACCOUNT_ID\760\remote"
+# Steam keeps each account's client data under
+# ``<steam>/userdata/<account id>/760/remote``, and the account id belongs to
+# whoever is logged in -- it is not something this module can know. Instead of
+# hard-coding one, the usual install locations are scanned for the first
+# account that actually has that folder (see :func:`detect_root`).
+_STEAM_DIRS = (
+    r"C:\Program Files (x86)\Steam",
+    r"C:\Program Files\Steam",
+)
+
+# The one detected root, cached for the life of the process. Only a root that
+# was really found is remembered: a machine where Steam shows up later (or a
+# fresh account) is still picked up on the next call.
+_DETECTED_ROOT = None
 
 # Suffixes the Steam client writes. Anything else in the directory (a stray
 # ``desktop.ini``, a user's own ``.mp4``) is not a screenshot and is skipped.
@@ -93,15 +104,49 @@ _LISTING_CACHE = {}
 _LISTING_CACHE_MAX = 256
 
 
+def detect_root():
+    """Return the screenshot root found on this machine, or ``""``.
+
+    Steam names the folder after the account id of the person logged in
+    (``userdata/<account id>/760/remote``), so the only portable way to find it
+    is to look for it. The two conventional install locations are tried, and
+    the first directory that exists wins.
+
+    Nothing here is required: a machine without the Steam client simply gets
+    ``""``, which the item page reads as "no screenshots to show".
+    """
+    global _DETECTED_ROOT  # noqa: PLW0603
+    if _DETECTED_ROOT is not None:
+        return _DETECTED_ROOT
+
+    for steam_dir in _STEAM_DIRS:
+        userdata = Path(steam_dir) / "userdata"
+        try:
+            accounts = sorted(entry for entry in userdata.iterdir() if entry.is_dir())
+        except OSError:
+            # No Steam here, or the folder is unreadable: try the next one.
+            continue
+        for account in accounts:
+            remote = account / "760" / "remote"
+            try:
+                if remote.is_dir():
+                    _DETECTED_ROOT = str(remote)
+                    return _DETECTED_ROOT
+            except OSError:
+                continue
+    return ""
+
+
 def screenshot_root():
     """Return the Steam screenshot root as a :class:`Path`.
 
+    The configured setting wins; without one the directory is auto detected.
     The directory is not required to exist: a machine without the Steam client
     simply has no screenshots, and every function here degrades to an empty
     answer.
     """
-    root = getattr(settings, "STEAM_SCREENSHOT_ROOT", None) or _DEFAULT_ROOT
-    return Path(root)
+    root = getattr(settings, "STEAM_SCREENSHOT_ROOT", None) or detect_root()
+    return Path(root) if root else Path()
 
 
 def content_type_for(filename):

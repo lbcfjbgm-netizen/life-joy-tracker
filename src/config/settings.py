@@ -345,10 +345,11 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 
 # Steam 客户端本地截图缓存，详情页直接从这里读图，不入库。
 # 目录结构是 <根>\<appid>\screenshots\<文件名>.jpg 加同名的 thumbnails\ 副本，
-# 读取逻辑在 app/steam_screenshots.py。默认值是本机实测路径，换机器改这一项即可。
+# 读取逻辑在 app/steam_screenshots.py。这里默认留空，也就是「没配就自动探测」
+# （扫 Steam 常见安装位置下的 userdata\<账号>\760\remote）；换机器一般不用改。
 STEAM_SCREENSHOT_ROOT = config(
     "STEAM_SCREENSHOT_ROOT",
-    default=r"C:\Program Files (x86)\Steam\userdata\STEAM_ACCOUNT_ID\760\remote",
+    default="",
 )
 
 if BASE_URL:
