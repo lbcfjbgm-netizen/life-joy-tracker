@@ -281,7 +281,14 @@ html[data-theme="light"] .lj-showcase .pcard::after {
   font-variant-numeric: tabular-nums;
   color: var(--lj-gold);
 }
+/* 状态徽章：默认（拿不到状态时）中性灰；拿到状态后走下面的四色语义色。
+   颜色和详情页状态按钮、统计饼图是同一套色相（绿 / 靛 / 橙 / 红），
+   但按主题各取一档亮度：深色底用 400 档，浅色纸底用 700 档，
+   9.5px 的小字才不会在浅色下糊成一片（对比度见下面的注释）。 */
 .lj-showcase .lc-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 9.5px;
   letter-spacing: .08em;
   padding: 2px 7px;
@@ -290,10 +297,65 @@ html[data-theme="light"] .lj-showcase .pcard::after {
   color: var(--lj-ink2);
   white-space: nowrap;
 }
+/* 小圆点：不只靠颜色区分状态，黑白打印 / 色弱也能看出有状态 */
+.lj-showcase .lc-state::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+  opacity: .9;
+}
+/* —— 深色主题四色（400 档，对比度 ≥ 4.5） —— */
+.lj-showcase .lc-state--completed {            /* 已通关 / 全成就 · 绿 */
+  color: #34d399;
+  border-color: rgba(16, 185, 129, .40);
+  background: rgba(16, 185, 129, .13);
+}
+.lj-showcase .lc-state--in-progress {          /* 进行中 · 靛 */
+  color: #818cf8;
+  border-color: rgba(99, 102, 241, .42);
+  background: rgba(99, 102, 241, .16);
+}
+.lj-showcase .lc-state--paused,                /* 已暂停 · 橙 */
+.lj-showcase .lc-state--planning {             /* 计划中也显示「已暂停」，必须同色 */
+  color: #fb923c;
+  border-color: rgba(249, 115, 22, .40);
+  background: rgba(249, 115, 22, .13);
+}
+.lj-showcase .lc-state--dropped {              /* 已放弃 · 红 */
+  color: #f87171;
+  border-color: rgba(239, 68, 68, .40);
+  background: rgba(239, 68, 68, .13);
+}
+/* 浅色主题的兜底（没有状态时仍是原来的金棕色） */
 html[data-theme="light"] .lj-showcase .lc-state {
   border-color: rgba(154, 107, 31, .35);
   background: rgba(154, 107, 31, .10);
   color: var(--lj-gold);
+}
+/* —— 浅色主题四色（700 档，压在白纸 #fffcf6 上对比度 4.5~7.5，不会发飘） —— */
+html[data-theme="light"] .lj-showcase .lc-state--completed {
+  color: #047857;                              /* 4.9:1 */
+  border-color: rgba(4, 120, 87, .34);
+  background: rgba(16, 185, 129, .12);
+}
+html[data-theme="light"] .lj-showcase .lc-state--in-progress {
+  color: #4338ca;                              /* 7.6:1 */
+  border-color: rgba(67, 56, 202, .30);
+  background: rgba(99, 102, 241, .12);
+}
+html[data-theme="light"] .lj-showcase .lc-state--paused,
+html[data-theme="light"] .lj-showcase .lc-state--planning {
+  color: #c2410c;                              /* 4.9:1 */
+  border-color: rgba(194, 65, 12, .30);
+  background: rgba(249, 115, 22, .12);
+}
+html[data-theme="light"] .lj-showcase .lc-state--dropped {
+  color: #b91c1c;                              /* 5.9:1 */
+  border-color: rgba(185, 28, 28, .30);
+  background: rgba(239, 68, 68, .12);
 }
 .lj-showcase .lc-review {
   font-size: 10.5px;
@@ -1640,4 +1702,139 @@ main#main-content:has(.lj-showcase.lj-hero) .lj-genre-dd {
 .lj-showcase.lj-hero .lj-hero-text .lj-hero-syn {
   -webkit-line-clamp: 5;
   line-clamp: 5;
+}
+
+/* ==========================================================================
+   13. 筛选排统一形态（U3）
+   --------------------------------------------------------------------------
+   改前实测（1440px，游戏库，量的是计算样式）：
+     · 状态 / 排序 / 分类 三个下拉：实底 #39404b、无边框、圆角 8px
+     · 网格 / 表格 双联：外壳 8px，但里面两格 0px；选中格实心靛蓝
+     · 并列平铺 / 首卡特写：外壳 8px，选中格实心靛蓝，未选格 #39404b
+     · 密度胶囊：999px（它 position:fixed 钉在顶栏，不在这一排里）
+   问题不是「圆角不统一」，是**三种形态各说各话**：实心块、实底块、描边框。
+   统一后的一套逻辑（只改样子，功能 / 类名 / DOM 一律不动）：
+     · 次要动作（三个下拉）= 透明底 + 1px 主题描边
+     · 切换组（网格/表格、并列平铺/首卡特写）= 同一款描边外壳，选中格实心靛蓝
+     · 圆角统一 8px（和卡片、搜索框一致），不再出现 999px / 6px / 0px 混排
+   为什么桌面端不会被改坏：这一排本来就靠 flex-wrap 单行排列，改的只有
+   边框、底色、圆角三个属性，一点尺寸都没动（按钮仍是 px-4 min-h-11）。
+   ⚠ 作用域用 `#filter-form + div`：它就是这个筛选排的根，hero.css 早就在用它，
+     全站别的页面没有 #filter-form，所以零外溢。
+   ⚠ 不动 #lj-density-pill（钉在顶栏那颗，见第 11 节），它不在这一排的视觉里。
+   ========================================================================== */
+
+/* ---- 13.0 搜索框：圆角与右侧按钮组对齐到 8px ---- */
+#filter-form + div input[type="text"] {
+  border-radius: 8px;
+}
+
+/* ---- 13.1 三个下拉（状态 / 排序 / 分类）：统一成「透明底 + 描边」次要形态 ---- */
+#filter-form + div > div + div > div.relative > button {
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: transparent;
+  color: rgba(246, 244, 238, .72);
+  transition: border-color .18s ease, color .18s ease, background .18s ease;
+}
+#filter-form + div > div + div > div.relative > button:hover {
+  border-color: rgba(232, 201, 130, .42);
+  background: rgba(255, 255, 255, .05);
+  color: #f6f4ee;
+}
+html[data-theme="light"] #filter-form + div > div + div > div.relative > button {
+  border-color: rgba(48, 34, 18, .18);
+  color: rgba(24, 22, 19, .78);
+}
+html[data-theme="light"] #filter-form + div > div + div > div.relative > button:hover {
+  border-color: rgba(154, 107, 31, .42);
+  background: rgba(48, 34, 18, .05);
+  color: #181613;
+}
+
+/* ---- 13.2 两个切换组（网格/表格、并列平铺/首卡特写）：同一款描边外壳 ---- */
+/* 现在这两种容器都是 `flex rounded-lg overflow-hidden border border-gray-700`，
+   表现却不一样：一个未选格是 #39404b 实底，另一个是透明。这里统一成透明 + 描边，
+   选中格才实心。:not(#lj-density-pill) 把顶栏那颗排除掉。 */
+#filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) {
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: transparent;
+  overflow: hidden;
+}
+#filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) > a,
+#filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) > button {
+  border-radius: 0;
+  background: transparent;
+  color: rgba(246, 244, 238, .68);
+  transition: background .18s ease, color .18s ease;
+}
+/* 格与格之间一条细分隔线，让「一组」看起来是一组，而不是两个孤立的块 */
+#filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) > * + * {
+  border-left: 1px solid rgba(255, 255, 255, .14);
+}
+/* 选中格：实心靛蓝（沿用原来的 bg-indigo-600 结论，只是不再各自为政） */
+#filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) > a.bg-indigo-600,
+#filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) > button.bg-indigo-600 {
+  background: #4f39f6;
+  color: #fff;
+}
+/* 未选格 hover：只提亮，不变实心，避免和选中态分不清 */
+#filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) > a:not(.bg-indigo-600):hover,
+#filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) > button:not(.bg-indigo-600):hover {
+  background: rgba(255, 255, 255, .07);
+  color: #f6f4ee;
+}
+
+/* 亮色：描边换成暖棕，未选格字色加深；选中格仍实心靛蓝 + 白字（对比度 6.5） */
+html[data-theme="light"] #filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) {
+  border-color: rgba(48, 34, 18, .18);
+}
+html[data-theme="light"] #filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) > a,
+html[data-theme="light"] #filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) > button {
+  color: rgba(24, 22, 19, .74);
+}
+html[data-theme="light"] #filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) > * + * {
+  border-left-color: rgba(48, 34, 18, .18);
+}
+html[data-theme="light"] #filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) > a:not(.bg-indigo-600):hover,
+html[data-theme="light"] #filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) > button:not(.bg-indigo-600):hover {
+  background: rgba(48, 34, 18, .06);
+  color: #181613;
+}
+html[data-theme="light"] #filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) > a.bg-indigo-600,
+html[data-theme="light"] #filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) > button.bg-indigo-600 {
+  background: #4f39f6;
+  color: #fff;
+}
+
+/* ---- 13.3 只在窄屏收口：375px 下筛选排走两列网格，不再忽左忽右地乱换行 ---- */
+@media (max-width: 760px) {
+  #filter-form + div > div + div {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+  }
+  #filter-form + div > div + div > * {
+    min-width: 0;
+  }
+  #filter-form + div > div + div > div.relative > button,
+  #filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) > button {
+    width: 100%;
+    justify-content: center;
+  }
+  /* 「并列平铺 / 首卡特写」四个字一格，两格并排半行放不下会折成两行 ——
+     这一组单独占满整行，两个按钮还是一左一右，视觉上仍是「一组两个」。 */
+  #filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill):last-child {
+    grid-column: 1 / -1;
+  }
+  /* 窄屏把切换组文字收紧一档，保证「⊞ 并列平铺」在半个格子里也是一行 */
+  #filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) > button,
+  #filter-form + div > div + div > div.flex.rounded-lg:not(#lj-density-pill) > a {
+    padding-left: 8px;
+    padding-right: 8px;
+    font-size: 12.5px;
+    white-space: nowrap;
+  }
 }

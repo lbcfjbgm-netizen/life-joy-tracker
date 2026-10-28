@@ -7,9 +7,10 @@
 """
 
 # 状态
-# 界面按用户拍板的 4 档显示（Dropped 库里没有数据，保留原样）：
+# 界面按用户拍板的 5 档显示（Dropped 库里没有数据，保留原样）：
 #   全成就 = Completed 且 is_all_achievements（靠 app_tags.media_status_readable 按对象判断）
 #   已通关 = Completed（含全成就，全成就是通关的子集）
+#   仅通关 = Completed 且没拿满成就（全成就的补集，只对游戏有意义）
 #   进行中 = In progress
 #   已暂停 = Paused 或 Planning（这两个在界面上合并成一档）
 STATUS = {
@@ -23,6 +24,8 @@ STATUS = {
     "All": "全部",
     # 只有 media_status_readable 用到：Completed + is_all_achievements
     "All achievements": "全成就",
+    # 筛选下拉专用：Completed + not is_all_achievements
+    "Completed only": "仅通关",
 }
 
 # 同一个状态值在不同媒体类型下说人话不一样：
@@ -179,12 +182,51 @@ def tr_choices(choices):
     return [(value, tr(label)) for value, label in choices]
 
 
-def tr_form_labels(form):
-    """Translate a bound form's labels, choices and placeholders for display."""
-    for field in form.fields.values():
+def tr_status_choices(choices, media_type=None):
+    """状态下拉的 (value, label)，按媒体类型换成该类型下的说法。
+
+    只有「状态写死一档」的三类库（电影 / 剧集 / 季）才换：
+    Completed 在电影叫「已观看」、在剧集和季叫「已看完」，而不是游戏的「已通关」。
+    其它媒体类型（游戏 / 书籍 / 动画 / 分集 …）维持原来的 tr_choices 行为，
+    一个字都不变 —— 游戏的下拉是 5 档真实状态，不能因为这次改动换词。
+    """
+    from app import status_filters
+
+    if not status_filters.is_fixed_status_type(media_type):
+        return tr_choices(choices)
+
+    if not _is_chinese():
+        return list(choices)
+
+    labels = STATUS_BY_MEDIA_TYPE.get(media_type) or {}
+    return [(value, labels.get(value, tr(label))) for value, label in choices]
+
+
+def tr_form_labels(form, media_type=None):
+    """Translate a bound form's labels, choices and placeholders for display.
+
+    ``media_type`` 只影响状态下拉的措辞和档位：电影 / 剧集 / 季这三类库只留
+    「已观看」一档（见 status_filters.is_fixed_status_type），游戏和书籍照旧。
+    """
+    for name, field in form.fields.items():
         field.label = tr(field.label)
         if getattr(field, "choices", None):
-            field.choices = tr_choices(field.choices)
+            if name == "status":
+                # 状态下拉里 Planning 并进「已暂停」一档，否则会出现两个同名选项。
+                # 传当前值进去，是为了让现状是 Planning 的记录保存后仍是 Planning。
+                from app import status_filters
+
+                current = getattr(getattr(form, "instance", None), "status", None)
+                if not current:
+                    current = form.initial.get(name)
+                choices = status_filters.form_status_choices(
+                    field.choices,
+                    current,
+                    media_type,
+                )
+                field.choices = tr_status_choices(choices, media_type)
+            else:
+                field.choices = tr_choices(field.choices)
         placeholder = field.widget.attrs.get("placeholder")
         if placeholder:
             field.widget.attrs["placeholder"] = tr(placeholder)

@@ -114,6 +114,7 @@ SpecialModels = [
     "AICopy",
     # 游玩时长快照不是 Media 的子类，套 MediaAdmin 会报 admin.E108。
     "PlaytimeSnapshot",
+    "PlaytimeDaily",
 ]
 for model in app_models:
     if (

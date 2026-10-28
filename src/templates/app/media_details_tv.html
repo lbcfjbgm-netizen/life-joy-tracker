@@ -1581,6 +1581,7 @@ html[data-theme="light"] .lj-tv .rating-glyph.is-on { color: #7d5416; }
           {% endif %}
 
           <div x-show="createOpen"
+               @click.self.stop="createOpen = false"
                role="dialog"
                aria-modal="true"
                class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -1590,6 +1591,7 @@ html[data-theme="light"] .lj-tv .rating-glyph.is-on { color: #7d5416; }
           </div>
 
           <div x-show="trackOpen"
+               @click.self.stop="trackOpen = false"
                role="dialog"
                aria-modal="true"
                class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -1974,7 +1976,7 @@ html[data-theme="light"] .lj-tv .rating-glyph.is-on { color: #7d5416; }
                           x-text="cur() ? ((cur().w ? (cur().d ? cur().d + ' 已看' : '已打卡') : '未打卡') + ({{ runtime_minutes|default:"0" }} ? ' · {{ runtime_minutes|default:"0" }}m' : '')) : ''"></span>
                   </div>
                   <p class="ep-spot-desc"
-                     x-text="cur() ? (cur().note || (cur().w ? '这一集已经打卡，可以在「活动历史」里查看完整记录。' : '这一集还没有打卡，点下面的「+1 集」或「标记看完」开始记录。')) : '先用下面的按钮把进度往上加，或者到追剧弹层里补历史。'"></p>
+                     x-text="cur() ? (cur().note || (cur().w ? '这一集已经打卡，可以在「活动历史」里查看完整记录。' : '这一集还没有打卡，在下面的分集列表里点眼睛图标就能打卡。')) : '分集进度由豆瓣同步；要补历史可以到追剧弹层里手动记一条。'"></p>
                 </div>
                 <div class="ep-spot-actions">
                   <span class="qa-btn" :class="{ 'qa-btn--primary': cur() && cur().w }">
@@ -1985,7 +1987,7 @@ html[data-theme="light"] .lj-tv .rating-glyph.is-on { color: #7d5416; }
               </div>
             </div>
           {% else %}
-            <p class="ep-empty">还没有分集记录。先用下面的按钮把进度往上加，或者到追剧弹层里补历史。</p>
+            <p class="ep-empty">分集进度由豆瓣同步；要补历史可以到追剧弹层里手动记一条。</p>
           {% endif %}
 
           {# 真实的快捷打卡：锚点 id 一个字没动，只在外面套了一层 .ep-quick 外壳 #}
@@ -2047,6 +2049,7 @@ html[data-theme="light"] .lj-tv .rating-glyph.is-on { color: #7d5416; }
                             {% include "app/icons/list-add.svg" with classes="ic" %}
                           </button>
                           <div x-show="listsOpen"
+                               @click.self.stop="listsOpen = false"
                                @keydown.escape.window="listsOpen = false"
                                role="dialog"
                                aria-modal="true"
@@ -2069,6 +2072,7 @@ html[data-theme="light"] .lj-tv .rating-glyph.is-on { color: #7d5416; }
                             {% include "app/icons/history.svg" with classes="ic" %}
                           </button>
                           <div x-show="historyOpen"
+                               @click.self.stop="historyOpen = false"
                                @keydown.escape.window="historyOpen = false"
                                role="dialog"
                                aria-modal="true"
@@ -2319,6 +2323,7 @@ html[data-theme="light"] .lj-tv .rating-glyph.is-on { color: #7d5416; }
                 <span>加入清单</span>
               </button>
               <div x-show="listsOpen"
+                   @click.self.stop="listsOpen = false"
                    @keydown.escape.window="listsOpen = false"
                    role="dialog"
                    aria-modal="true"
@@ -2343,6 +2348,7 @@ html[data-theme="light"] .lj-tv .rating-glyph.is-on { color: #7d5416; }
                 <span>活动历史</span>
               </button>
               <div x-show="historyOpen"
+                   @click.self.stop="historyOpen = false"
                    @keydown.escape.window="historyOpen = false"
                    role="dialog"
                    aria-modal="true"
@@ -2407,6 +2413,7 @@ html[data-theme="light"] .lj-tv .rating-glyph.is-on { color: #7d5416; }
                         {% include "app/icons/edit-flat.svg" with classes="ic" %}
                       </button>
                       <div x-show="trackOpen"
+                           @click.self.stop="trackOpen = false"
                            @keydown.escape.window="trackOpen = false"
                            role="dialog"
                            aria-modal="true"

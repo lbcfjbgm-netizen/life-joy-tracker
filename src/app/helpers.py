@@ -260,6 +260,70 @@ def _build_user_media_lookup(user, items, media_type):
     return media_lookup
 
 
+def season_metadata_from(
+    tv_with_seasons_metadata,
+    season_number,
+    library_episodes=(),
+):
+    """Return the metadata of one season, even when the provider cannot give it.
+
+    Not every source describes a show season by season: Douban hands back the
+    show alone and no ``season/N`` entry at all. Reading the key directly is
+    what turned such a page into a 500, so the season is built here from the
+    smallest set of facts that are true: the show's title and cover, the season
+    number that was asked for, and the episodes the library already holds.
+    Callers must not assume real per-episode data in the fallback.
+    """
+    metadata = tv_with_seasons_metadata or {}
+    key = f"season/{season_number}"
+
+    if key in metadata:
+        return metadata[key]
+
+    episodes = []
+    for episode in library_episodes:
+        item = getattr(episode, "item", None)
+        if item is None:
+            continue
+        episodes.append(
+            {
+                "media_id": getattr(item, "media_id", ""),
+                "source": getattr(item, "source", ""),
+                "media_type": MediaTypes.EPISODE.value,
+                "season_number": season_number,
+                "episode_number": item.episode_number,
+                "name": item.title,
+                "overview": item.synopsis or "",
+                "image": item.image,
+                # The keys ``tmdb.process_episodes`` and the season template
+                # read directly. Nothing is known about them locally, so they
+                # stay empty rather than being invented.
+                "still_path": None,
+                "runtime": None,
+                "air_date": (
+                    item.release_date.isoformat() if item.release_date else None
+                ),
+                "history": [episode],
+            },
+        )
+
+    return {
+        "media_id": metadata.get("media_id", ""),
+        "source": metadata.get("source", ""),
+        "media_type": MediaTypes.SEASON.value,
+        "title": metadata.get("title", ""),
+        "season_title": metadata.get("title", ""),
+        "season_number": season_number,
+        "max_progress": metadata.get("max_progress"),
+        "image": metadata.get("image") or settings.IMG_NONE,
+        "synopsis": metadata.get("synopsis", ""),
+        "score": None,
+        "score_count": None,
+        "details": metadata.get("details", {}),
+        "episodes": episodes,
+    }
+
+
 def _should_skip_completed_recommendation(user, section_name, media_item):
     """Return True when a completed recommendation should be hidden."""
     return (
@@ -268,3 +332,4 @@ def _should_skip_completed_recommendation(user, section_name, media_item):
         and media_item is not None
         and media_item.status == Status.COMPLETED.value
     )
+

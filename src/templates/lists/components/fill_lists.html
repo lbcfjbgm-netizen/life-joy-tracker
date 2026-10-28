@@ -16,7 +16,7 @@
         {% include "lists/components/list_item_button.html" with has_item=custom_list.has_item %}
       </li>
     {% empty %}
-      <li class="text-gray-200">{% trans "You haven't created any lists yet." %}</li>
+      <li class="text-gray-200">{% if missing %}这个条目还没入库，先添加到库中再来管理清单。{% else %}{% trans "You haven't created any lists yet." %}{% endif %}</li>
     {% endfor %}
   </ul>
 </div>

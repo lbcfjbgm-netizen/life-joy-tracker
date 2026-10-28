@@ -7,9 +7,11 @@
 {% endblock title %}
 
 {% block content %}
-  {# 数据源连不上 / 返回错误时的提示条。和「真的没搜到」严格分开：
-     这里说的是「服务没应答」，下面空态说的是「应答了但没有这条」。
-     两种情况用户该做的事不一样，混成一句会让人以为关键词打错了。 #}
+  {% comment %}
+    数据源连不上 / 返回错误时的提示条。和「真的没搜到」严格分开：
+    这里说的是「服务没应答」，下面空态说的是「应答了但没有这条」。
+    两种情况用户该做的事不一样，混成一句会让人以为关键词打错了。
+  {% endcomment %}
   {% if degraded %}
     <div class="mb-6 rounded-lg border {% if degraded.kind == 'unavailable' %}border-amber-600/60 bg-amber-950/30{% else %}border-rose-700/60 bg-rose-950/30{% endif %} p-5 flex items-start gap-4">
       <div class="shrink-0 mt-0.5">
@@ -119,8 +121,10 @@
     </div>
   {% endif %}
 {% else %}
-  {# 没有结果时要说清是哪一种「没有」：没输关键词 / 服务连不上 / 真的没这条。
-     三种情况用户的下一步动作完全不同，全都说成「没搜到」等于骗人。 #}
+  {% comment %}
+    没有结果时要说清是哪一种「没有」：没输关键词 / 服务连不上 / 真的没这条。
+    三种情况用户的下一步动作完全不同，全都说成「没搜到」等于骗人。
+  {% endcomment %}
   <div class="flex flex-col items-center justify-center py-32 px-4 bg-[#2a2f35] rounded-lg">
     <div class="bg-[#39404b] rounded-full p-4 w-16 h-16 mx-auto mb-4 flex items-center justify-center">
       {% include "app/icons/magnifying-glass.svg" with classes="w-8 h-8 text-gray-400" %}

@@ -191,7 +191,47 @@ function dateRangePicker(defaultMode) {
       this.applyDateFilter();
     },
 
+    clampDateInput(value) {
+      // 年份越界就夹到边界：统计页后端把 1900 之前当作无限制，而 0001-01-01
+      // 会踩到 Asia/Shanghai 公元 1 年的 LMT 时区（+08:05:43），转 UTC 时下溢
+      // 直接 500；2999 之后同理没有意义。只在真的越界时才动值：
+      // 「全部时间」的 "all" 和正常日期一律原样返回，日志页的行为不受影响。
+      if (!value || value === "all") {
+        return value;
+      }
+
+      const year = Number(String(value).split("-")[0]);
+      if (!Number.isFinite(year)) {
+        return value;
+      }
+
+      if (year < 1900) {
+        return "1900-01-01";
+      }
+
+      if (year > 2999) {
+        return "2999-12-31";
+      }
+
+      return value;
+    },
+
     applyDateFilter() {
+      // 导航前先拦一道越界年份（浏览器 input 的 min/max 只在手动输入时生效，
+      // 按钮直接改 startDate/endDate 的路径挡不住）。
+      this.startDate = this.clampDateInput(this.startDate);
+      this.endDate = this.clampDateInput(this.endDate);
+
+      // 夹完之后两端可能反过来（比如结束日期本来在 1900 之前），跟
+      // updateDateRange() 一样把结束拉到开始，别把倒序范围发出去。
+      if (
+        this.startDate !== "all" &&
+        this.endDate !== "all" &&
+        this.parseInputDate(this.endDate) < this.parseInputDate(this.startDate)
+      ) {
+        this.endDate = this.startDate;
+      }
+
       // Create URL with date parameters
       const url = new URL(window.location.href);
       url.searchParams.set("start-date", this.startDate);

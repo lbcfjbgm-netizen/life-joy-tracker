@@ -1127,7 +1127,7 @@
                   aria-haspopup="true"
                   :aria-expanded="isOpen ? 'true' : 'false'">
             <span aria-hidden="true">📅</span>
-            <span x-text="selectedRange === '全部时间' ? '全部时间 (All Time)' : selectedRange">全部时间 (All Time)</span>
+            <span x-text="selectedRange === '全部时间' ? '全部时间 (All Time)' : selectedRange">选择时间范围</span>
             <span class="lj-chev" :class="{ 'is-open': isOpen }" aria-hidden="true">▾</span>
           </button>
           {% if date_range_from_memory and date_range_start != 'all' %}
@@ -1170,8 +1170,12 @@
             <div class="lj-dp-custom">
               <span>自定义日期范围</span>
               <div class="lj-dp-inputs">
-                <input type="date" x-model="startDate" @change="updateDateRange()" aria-label="开始日期">
-                <input type="date" x-model="endDate" @change="updateDateRange()" aria-label="结束日期">
+                {# min/max：浏览器原生先拦一道越界日期（1900 之前 / 2999 之后）。 #}
+                {# 后端 statistics._safe_parse_date 还有同一道校验兜底，别只信前端。 #}
+                <input type="date" x-model="startDate" @change="updateDateRange()"
+                       min="1900-01-01" max="2999-12-31" aria-label="开始日期">
+                <input type="date" x-model="endDate" @change="updateDateRange()"
+                       min="1900-01-01" max="2999-12-31" aria-label="结束日期">
               </div>
               <button type="button" class="lj-dp-apply" @click="applyCustomRange()">应用自定义范围</button>
             </div>

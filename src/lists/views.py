@@ -9,7 +9,6 @@ from django.views.decorators.http import require_GET, require_POST
 
 from app import helpers, i18n_zh, status_filters
 from app.models import Item, MediaManager, MediaTypes
-from app.providers import services
 from lists.forms import CustomListForm
 from lists.models import CustomList, CustomListItem
 from users.models import ListDetailSortChoices, ListSortChoices, MediaStatusChoices
@@ -295,30 +294,22 @@ def lists_modal(
     episode_number=None,
 ):
     """Return the modal showing all custom lists and allowing to add to them."""
-    try:
-        item = Item.objects.get(
-            media_id=media_id,
-            source=source,
-            media_type=media_type,
-            season_number=season_number,
-            episode_number=episode_number,
-        )
-    except Item.DoesNotExist:
-        metadata = services.get_media_metadata(
-            media_type,
-            media_id,
-            source,
-            [season_number],
-            episode_number,
-        )
-        item = Item.objects.create(
-            media_id=media_id,
-            source=source,
-            media_type=media_type,
-            season_number=season_number,
-            episode_number=episode_number,
-            title=metadata["title"],
-            image=metadata["image"],
+    item = Item.objects.filter(
+        media_id=media_id,
+        source=source,
+        media_type=media_type,
+        season_number=season_number,
+        episode_number=episode_number,
+    ).first()
+
+    # A GET request must never write. The item is created when the user
+    # actually starts tracking it, not while a modal is being opened, so an
+    # unknown item renders an empty state instead of a new row.
+    if item is None:
+        return render(
+            request,
+            "lists/components/fill_lists.html",
+            {"item": None, "custom_lists": [], "missing": True},
         )
 
     custom_lists = CustomList.objects.get_user_lists_with_item(request.user, item)

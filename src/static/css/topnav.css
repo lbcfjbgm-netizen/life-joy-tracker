@@ -405,20 +405,86 @@ html[data-sidebar="collapsed"] .lj-showcase.lj-hero {
    （工具类直接写死颜色，会压过父级 .lj-tn-item 的 color），所以「游戏库」
    那颗图标会莫名其妙变成蓝色，和顶栏的描金风格打架。
    base.html 不能改，就在这儿用更高优先级把颜色按顶栏变量重置回来：
-   普通项 = --lj-tn-ink2，当前页 = --lj-tn-gold（和文字态一致）。 */
-.lj-topnav .lj-tn-item > svg.text-indigo-400,
-.lj-topnav .lj-tn-item.is-on > svg.text-indigo-400 {
-  color: var(--lj-tn-gold);
-}
+   普通项 = --lj-tn-ink2，当前页 = --lj-tn-gold（和文字态一致）。
+
+   注意 !important：light 主题在 input.css:252（编译后 main.css:3201）写了
+   [data-theme="light"] .text-indigo-400 { color: #4f46e5 !important }。
+   带 !important 的声明无视优先级，普通声明永远输，所以下面每一条都必须自带
+   !important 才压得住——之前少了它就是 light 下变靛蓝的根因。
+   加 !important 不会污染别处：选择器全部以 .lj-topnav 开头，只作用于顶栏这几颗图标。 */
 .lj-topnav .lj-tn-item > svg.text-indigo-400 {
-  color: var(--lj-tn-ink2);
+  color: var(--lj-tn-ink2) !important;
+}
+.lj-topnav .lj-tn-item.is-on > svg.text-indigo-400 {
+  color: var(--lj-tn-gold) !important;
 }
 .lj-topnav .lj-tn-item:hover > svg.text-indigo-400 {
-  color: var(--lj-tn-ink);
+  color: var(--lj-tn-ink) !important;
 }
 .lj-topnav .lj-tn-item.is-on:hover > svg.text-indigo-400 {
-  color: var(--lj-tn-gold);
+  color: var(--lj-tn-gold) !important;
 }
 /* ⋯ 面板里克隆出来的图标同理 */
-.lj-topnav .lj-tn-pitem > svg.text-indigo-400 { color: var(--lj-tn-gold); }
-.lj-topnav .lj-tn-pitem:hover > svg.text-indigo-400 { color: var(--lj-tn-ink); }
+.lj-topnav .lj-tn-pitem > svg.text-indigo-400 { color: var(--lj-tn-gold) !important; }
+.lj-topnav .lj-tn-pitem:hover > svg.text-indigo-400 { color: var(--lj-tn-ink) !important; }
+.lj-topnav .lj-tn-pitem.is-on:hover > svg.text-indigo-400 { color: var(--lj-tn-gold) !important; }
+
+/* ---- 10. 窄屏适配：顶栏自己收，绝不把视口撑宽 ------------------------------
+   根因：.lj-tn-row 是 flex-wrap:nowrap，三个子项（品牌 flex:0 0 auto、
+   折叠键 24px、动作区 flex:0 0 auto）宽度全写死，375px 下实测
+   169.5 + 24 + 142.8 + 3×10(gap) = 366.3px > 行内容区 335px（375 - 20×2），
+   动作区右边缘被顶到 386.3 → documentElement.scrollWidth 比 clientWidth 大 11px。
+   这里靠「真的把宽度让出来」消除溢出，不用 overflow:hidden 去藏（藏了元素照样撑破）：
+     ≤900px  左右内边距 20→12、行内 gap 10→6、库名标签让位、⋯ 面板改自适应宽
+     ≤640px  搜索/日夜药丸收成纯图标（aria-label 还在，点起来功能一点没少）
+   断点最大 900px，1280px 以上的桌面端一条都不会命中。 */
+@media (max-width: 900px) {
+  /* --lj-tp-pad 要改在 :root 上：showcase.css 那颗密度胶囊靠同一个变量算右偏移，
+     只在 .lj-topnav 里改会让两边错开一截。 */
+  :root { --lj-tp-pad: 12px; }
+  .lj-topnav .lj-tn-row { gap: 6px; }
+  /* 品牌区允许收缩（min-width:0 才真的能缩），不然它是 0 0 auto 的硬块 */
+  .lj-topnav .lj-tn-brand { flex: 0 1 auto; min-width: 0; }
+  /* 库名（游戏库/图书库…）窄屏不占位；它只是当前位置的提示，信息在图标高亮里 */
+  .lj-topnav .lj-tn-lib { display: none; }
+  /* ⋯ 面板原本写死 352px，320px 屏一打开就比视口宽 → 这里跟 .lj-tn-query 用同一套算法 */
+  .lj-topnav .lj-tn-menu { width: min(352px, calc(100vw - 28px)); }
+}
+
+@media (max-width: 640px) {
+  .lj-topnav .lj-tn-name { letter-spacing: .1em; }
+  .lj-topnav .lj-tn-pill { padding: 0 9px; }
+  /* 一颗纯图标药丸 = 13(svg) + 9×2(padding) + 2(border) ≈ 33px，两颗省下约 69px。
+     必须 !important：上面的 html[data-theme="light"] .lj-topnav .lj-tn-when-light
+     是「按主题决定显隐」的三类选择器（还带 html + 属性），普通声明压不住，
+     窄屏下会漏出「日间/夜间」两个字，又把宽度吃回去。选择器只落在药丸内的 span 上，
+     不会波及其它地方。 */
+  .lj-topnav .lj-tn-pill > span { display: none !important; }
+}
+
+/* ---- 11. 统计页在 320px 的残留溢出（与顶栏无关，是页面自身两处硬宽度） --------
+   站点的 statistics.html 里有 1000 多行内联 <style>，站点是 --noreload 起的，
+   模板被缓存（实测往模板里插探针，响应里不出现），改模板必须重启才生效，
+   而重启被禁止。所以这两条只能写在最后加载、不经过 Tailwind 的 topnav.css 里，
+   靠「更高优先级 + 后加载」压过内联样式；选择器全部以 .lj-stats 开头，只碰统计页。
+
+   覆盖本身不带标签，去掉后统计页恢复原样，不影响别的页面。
+
+   甲、.lj-tabs nav 是 inline-flex + 三个页签 nowrap，父级 .lj-hero-side 是 flex，
+       两者都没有 min-width:0，flex 子项的 min-content 撑着不给缩，实测 307.5px，
+       而 320px 屏里那块只剩 224px → 右边缘顶到 355.5。
+       这里 min-width:0 让它们肯缩；缩到 224px 后三个页签放不下一行，
+       用 flex-wrap:wrap 折成两行（实测高 38→70px，三个页签全都看得见，
+       也不会变成要横着拖才能点第三个的滚动条）。
+
+   乙、.lj-yr-val 是 grid 第三列 auto，还写了 white-space:nowrap，
+       「12.5h · 3 本」这种串实测 202.5px，网格总宽 202.5+38+8×2+1fr → 右边缘到 336.5。
+       窄屏允许它折行（右对齐不变），网格就收得住。
+
+   断点 480px：320/360/375 都覆盖到，768 以上平板和桌面一条都不命中。 */
+@media (max-width: 480px) {
+  .lj-stats .lj-hero-side { min-width: 0; }
+  .lj-stats .lj-tabs { min-width: 0; }
+  .lj-stats .lj-tabs nav { min-width: 0; flex-wrap: wrap; }
+  .lj-stats .lj-yr-val { white-space: normal; }
+}

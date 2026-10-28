@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from urllib.parse import urlsplit
 
 import requests
+import urllib3
 from defusedxml import ElementTree
 from django.conf import settings
 from django.core.cache import cache
@@ -655,6 +656,14 @@ def api_request(  # noqa: PLR0913 - the signature is part of the public API
             )
 
         raise error from None
+
+    except urllib3.exceptions.HTTPError as error:
+        # 交互式请求的 Retry.increment 会原样抛 urllib3 的异常（见
+        # _InteractiveRetry.increment）。这类异常既不是 OSError 也不是
+        # MaxRetryError，requests 不会包装它，所以必须在这里接住，
+        # 否则会一路冒到 Django 变成 500.
+        _record_network_failure(provider, error, url)
+        raise ProviderUnavailableError(provider, error) from error
 
     except requests.exceptions.RequestException as error:
         # The provider answered nothing at all: refused, or timed out before a

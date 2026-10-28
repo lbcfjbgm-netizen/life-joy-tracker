@@ -285,7 +285,9 @@
     box-shadow: var(--skylight), 0 6px 16px -8px rgba(16, 185, 129, .8);
   }
   .lj-md .status-split.status-in-progress { background: #6366f1; }
-  .lj-md .status-split.status-planning { background: #0284c7; }
+  /* Planning 在界面上并进「已暂停」一档（i18n_zh 里两者同名），
+     底色必须跟 status-paused 一样，否则同一个「已暂停」会一蓝一橙。 */
+  .lj-md .status-split.status-planning { background: #ea580c; }
   .lj-md .status-split.status-paused { background: #ea580c; }
   .lj-md .status-split.status-dropped { background: #dc2626; }
   .lj-md .status-split.status-idle { background: #4b5563; }
@@ -1048,6 +1050,7 @@
 
           {# Track modal #}
           <div x-show="trackOpen"
+               @click.self.stop="trackOpen = false"
                role="dialog"
                aria-modal="true"
                class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -1058,6 +1061,7 @@
 
           {# Create track modal #}
           <div x-show="createOpen"
+               @click.self.stop="createOpen = false"
                role="dialog"
                aria-modal="true"
                class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -1636,6 +1640,7 @@
 
   {# Lists modal #}
   <div x-show="listsOpen"
+       @click.self.stop="listsOpen = false"
        role="dialog"
        aria-modal="true"
        class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -1646,6 +1651,7 @@
 
   {# History modal #}
   <div x-show="historyOpen"
+       @click.self.stop="historyOpen = false"
        role="dialog"
        aria-modal="true"
        class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">

@@ -239,6 +239,7 @@ else:
                     "PRAGMA synchronous=NORMAL;"
                     "PRAGMA mmap_size=134217728;"
                     "PRAGMA journal_size_limit=27103364;"
+                    "PRAGMA temp_store=MEMORY;"
                     "PRAGMA cache_size=2000;"
                 ),
             },
@@ -615,7 +616,12 @@ if REDIS_PREFIX:
 
 CELERY_WORKER_HIJACK_ROOT_LOGGER = False
 CELERY_WORKER_CONCURRENCY = 1
-CELERY_WORKER_MAX_TASKS_PER_CHILD = 1
+# 2026-10-26 改：原来是 1，意思是「每个任务跑完就把干活的执行体换掉」。
+# 真正的多进程池（prefork）下这等于每跑一个任务就重启一次进程，导入 Steam
+# 这种长任务会被反复打断；本机现在用 --pool solo（单进程、没有子进程），
+# 这个值其实压根不生效，属于「暂时不炸、哪天换池就炸」的定时炸弹。
+# 所以改成 200（跑满 200 个任务才换一次，足够兜住内存慢慢变大的情况）。
+CELERY_WORKER_MAX_TASKS_PER_CHILD = 200
 CELERY_BEAT_SYNC_EVERY = 1
 
 CELERY_TASK_TRACK_STARTED = True
@@ -650,7 +656,10 @@ CELERY_BEAT_SCHEDULE = {
     },
     "send_release_notifications": {
         "task": "Send release notifications",
-        "schedule": 60 * 10,  # every 10 minutes
+        # 每 6 小时一次（原为 10 分钟）：用户不需要发行提醒，且数据库里该周期任务
+        # 已置为 enabled=False。这里保留任务只为不改变数据库状态，避免 beat 重启
+        # 时把周期频率与数据库登记值打架。
+        "schedule": 60 * 60 * 6,
     },
     "send_daily_digest": {
         "task": "Send daily digest",

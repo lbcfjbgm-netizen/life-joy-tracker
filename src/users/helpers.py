@@ -56,6 +56,19 @@ def process_task_result(task):
     elif task.status == "PENDING":
         task.summary = "This task has been queued and is waiting to run."
         task.errors = None
+    elif task.status == "RETRY":
+        # Celery RETRY means the task raised and is waiting for its next
+        # automatic attempt. ``task.result`` is not reliable here (it can be
+        # the original exception or empty), so this branch deliberately does
+        # not parse it.
+        task.summary = "This task failed and is waiting to be retried automatically."
+        task.errors = task.traceback
+    else:
+        # REVOKED, IGNORED, or any status Celery adds in the future: still give
+        # the caller a summary and an errors attribute, so that reading
+        # ``task.summary`` never raises AttributeError.
+        task.summary = "This task ended in an unexpected state."
+        task.errors = task.traceback
 
     return task
 

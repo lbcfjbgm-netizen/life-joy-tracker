@@ -24,7 +24,7 @@
            data-achv="{% if media.achievements_total %}{{ media.achievements_unlocked }}/{{ media.achievements_total }}{% endif %}"
            data-cleared="{% if media.end_date %}{% if media.completion_estimated %}{{ media.end_date|date:'Y' }}{% else %}{{ media.end_date|date:'Y-m-d' }}{% endif %}{% endif %}"
            data-score="{% if media.score is not None %}{{ media.formatted_score }}{% endif %}"
-           data-status="{% if media.status %}{{ media.status|media_status_readable }}{% endif %}"
+           data-status="{% if media.status %}{{ media|media_status_readable }}{% endif %}"
            data-quote="{% if item.ai_copy %}{{ item.ai_copy.quote }}{% endif %}"
            data-summary="{% if item.ai_copy %}{{ item.ai_copy.summary }}{% endif %}"
            data-synopsis="{{ item.synopsis }}"
@@ -133,7 +133,16 @@
               {% if media.score|show_media_score:user %}
                 <span class="lc-rate">★ {{ media.formatted_score }}</span>
               {% endif %}
-              {% if media.status %}<span class="lc-state">{{ media.status|media_status_readable }}</span>{% endif %}
+              {% comment %}
+                传整个 media 对象，不是 media.status 字符串：过滤器拿到对象才看得见
+                is_all_achievements，全成就的卡才会显示「全成就」而不是「已通关」。
+                后面的 status_color 是状态徽章的语义色来源：它返回 STATUS_CONFIG 里
+                的 text_color（text-emerald-400 / text-indigo-400 / text-orange-400 /
+                text-red-400），和详情页状态按钮、统计饼图同一套四色。Planning 和
+                Paused 在界面上同名，取到的也是同一个橙色。万一取不到，showcase.css
+                里 .lc-state 本身的中性灰会顶上，徽章不会因此消失。
+              {% endcomment %}
+              {% if media.status %}<span class="lc-state lc-state--{{ media.status|slugify }} {{ media.status|status_color }}">{{ media|media_status_readable }}</span>{% endif %}
             </div>
           {% endif %}
         {% endwith %}
@@ -165,6 +174,7 @@
       {% include "app/components/fill_track_episode.html" with request=request media=item episode=item episode_title=item.title csrf_token=csrf_token TRACK_TIME=TRACK_TIME only %}
     {% else %}
       <div x-show="trackOpen"
+           @click.self.stop="trackOpen = false"
            @keydown.escape.window="trackOpen = false"
            role="dialog"
            aria-modal="true"
@@ -176,6 +186,7 @@
     {% endif %}
 
     <div x-show="listsOpen"
+         @click.self.stop="listsOpen = false"
          @keydown.escape.window="listsOpen = false"
          role="dialog"
          aria-modal="true"
@@ -186,6 +197,7 @@
     </div>
 
     <div x-show="historyOpen"
+         @click.self.stop="historyOpen = false"
          @keydown.escape.window="historyOpen = false"
          role="dialog"
          aria-modal="true"
@@ -337,6 +349,7 @@
       {% include "app/components/fill_track_episode.html" with request=request media=item episode=item episode_title=title csrf_token=csrf_token TRACK_TIME=TRACK_TIME only %}
     {% else %}
       <div x-show="trackOpen"
+           @click.self.stop="trackOpen = false"
            @keydown.escape.window="trackOpen = false"
            role="dialog"
            aria-modal="true"
@@ -348,6 +361,7 @@
     {% endif %}
 
     <div x-show="listsOpen"
+         @click.self.stop="listsOpen = false"
          @keydown.escape.window="listsOpen = false"
          role="dialog"
          aria-modal="true"
@@ -358,6 +372,7 @@
     </div>
 
     <div x-show="historyOpen"
+         @click.self.stop="historyOpen = false"
          @keydown.escape.window="historyOpen = false"
          role="dialog"
          aria-modal="true"

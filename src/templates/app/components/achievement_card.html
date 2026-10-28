@@ -1,0 +1,72 @@
+{# 成就进度卡：详情页和「刷新成就」按钮共用这一份，两处显示才不会走样 #}
+{# 需要的上下文：achievements / achievement_appid / achievement_sync_url / achievement_notice #}
+<div class="m-card" id="achievement-card">
+  <div class="m-head">
+    <span class="m-label">
+      {% include "app/icons/trophy.svg" with classes="w-3.5 h-3.5" %}
+      <span>成就进度</span>
+    </span>
+    <span class="m-head-right">
+      {% if achievements.total %}
+        <span class="m-unit">{{ achievements.percent|default:0 }}%</span>
+      {% endif %}
+      {% if achievement_sync_url %}
+        {# hx-target 用 closest 是因为这张卡整体会被换掉，按钮跟着一起走 #}
+        {% comment %}
+          服务端已经把这条路径压到 15 秒以内，这里的 30 秒只是最后一道保险：
+          万一站点被别的任务拖住，按钮也不会永远停在「同步中」。超时后 htmx
+          会自己撤销请求并清掉 htmx-request，按钮就恢复可点了；服务端那 45 秒
+          节流还在，用户手快连点也只会拿到「刚同步过」的提示，不会真的并发同步。
+          注意必须用 {% templatetag openblock %} comment {% templatetag closeblock %}：
+          Django 的 {# #} 只吃单行，写成多行会被当成正文原样显示出来。
+        {% endcomment %}
+        <button type="button"
+                class="m-mini-btn m-sync-btn"
+                title="只同步这一个游戏的成就"
+                hx-post="{{ achievement_sync_url }}"
+                hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                hx-target="closest .m-card"
+                hx-swap="outerHTML"
+                hx-disabled-elt="this"
+                hx-request='{"timeout": 30000}'
+                hx-on::timeout="let card = this.closest('.m-card'), old = card.querySelector('.m-sync-note'); if (old) { old.remove(); } let note = document.createElement('div'); note.className = 'm-sync-note is-warn'; note.textContent = '官网很慢，稍后再试'; card.appendChild(note);">
+          <span class="m-sync-idle">刷新成就</span>
+          <span class="m-sync-busy">
+            {% include "app/icons/circle-spinning-clockwise.svg" with classes="w-3 h-3" %}
+            <span>同步中</span>
+          </span>
+        </button>
+      {% endif %}
+    </span>
+  </div>
+  {% if achievements.total %}
+    <div class="m-value-row">
+      <span class="m-val">{{ achievements.unlocked }}</span>
+      <span class="m-unit">/ {{ achievements.total }} 已解锁</span>
+    </div>
+    <div class="prog-track"
+         role="progressbar"
+         aria-valuenow="{{ achievements.unlocked }}"
+         aria-valuemin="0"
+         aria-valuemax="{{ achievements.total }}">
+      <div class="prog-fill"
+           style="width: {{ achievements.percent|default:0 }}%"></div>
+    </div>
+    <div class="m-foot">
+      <span>已解锁 {{ achievements.percent|default:0 }}%</span>
+      {% if achievements.synced_at %}
+        <span>{{ achievements.synced_at|date:"n-j" }}</span>
+      {% endif %}
+    </div>
+  {% else %}
+    <div class="m-value-row">
+      <span class="m-val" style="font-size:15px">无成就清单</span>
+    </div>
+    <div class="m-foot">
+      <span>{% if achievements.is_all %}已标全成就{% else %}Steam 未提供成就{% endif %}</span>
+    </div>
+  {% endif %}
+  {% if achievement_notice %}
+    <div class="m-sync-note is-{{ achievement_notice.tone }}">{{ achievement_notice.text }}</div>
+  {% endif %}
+</div>

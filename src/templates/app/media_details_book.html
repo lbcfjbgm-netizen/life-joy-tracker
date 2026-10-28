@@ -309,6 +309,11 @@
   }
   .lj-bk .note-card:hover { transform: translateY(-2px); border-color: var(--warm-line); box-shadow: var(--shadow-s); }
   .lj-bk .note-card--thought { background: var(--thought-bg); border-color: var(--gold-line); }
+  /* 「书中划线」专属配色（紫色系）：和上面金色的「想法」卡片区分开。
+     两套主题各自写死值，不依赖 --violet-* 的间接关系，便于日后单独微调。 */
+  .lj-bk .note-card--highlight { background: linear-gradient(135deg, var(--violet-soft) 0%, var(--panel) 100%); border-color: var(--violet-line); }
+  html[data-theme="dark"] .lj-bk .note-card--highlight { background: linear-gradient(135deg, rgba(157, 141, 247, .16) 0%, rgba(29, 34, 41, .92) 100%); border-color: rgba(157, 141, 247, .34); }
+  html[data-theme="light"] .lj-bk .note-card--highlight { background: linear-gradient(135deg, rgba(95, 75, 196, .10) 0%, rgba(255, 252, 246, .96) 100%); border-color: rgba(95, 75, 196, .26); }
   .lj-bk .note-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
   .lj-bk .note-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 5px; font-size: 10.5px; font-weight: 600; letter-spacing: .03em; flex: 0 0 auto; }
   .lj-bk .note-badge--thought { background: var(--verm-soft); color: var(--verm); border: 1px solid var(--verm-line); }
@@ -406,6 +411,9 @@
 </style>
 
 <div class="lj-bk"
+     data-shot-url="{% url 'share_page_shot' source=media.source media_type=media.media_type media_id=media.media_id %}"
+     data-shot-title="{{ media.title }}"
+     data-csrf="{{ csrf_token }}"
      x-data="{
        tab: 'overview',
        noteFilter: 'all',
@@ -413,19 +421,30 @@
        notesExpanded: true,
        shareToast: false,
        shareMsg: '',
+       shooting: false,
        _toastTimer: null,
        flash(msg) {
          this.shareMsg = msg;
          this.shareToast = true;
          clearTimeout(this._toastTimer);
-         this._toastTimer = setTimeout(() => { this.shareToast = false; }, 1800);
+         this._toastTimer = setTimeout(() => { this.shareToast = false; }, 3600);
        },
-       shareLink() {
-         if (navigator.clipboard) {
-           navigator.clipboard.writeText(window.location.href)
-             .then(() => this.flash('链接已复制'))
-             .catch(() => this.flash('复制失败'));
-         } else { this.flash('当前环境不支持复制'); }
+       shootShare() {
+         /* 本地部署，分享链接没意义：让后端把整页拍成长图存到桌面 */
+         /* 注意：this.$el 是内层按钮自己，必须往上找挂 data-shot-url 的根节点 */
+         const box = this.$el.closest('[data-shot-url]') || this.$el;
+         const url = (box && box.dataset.shotUrl) || '';
+         if (!url) { this.flash('这个条目暂时拍不了长图'); return; }
+         if (this.shooting) { return; }
+         this.shooting = true;
+         const fd = new FormData();
+         fd.append('title', (box && box.dataset.shotTitle) || '');
+         fetch(url, { method: 'POST', body: fd, credentials: 'same-origin',
+                      headers: { 'X-CSRFToken': (box && box.dataset.csrf) || '' } })
+           .then(r => r.json())
+           .then(d => { this.flash(d.message || (d.ok ? '已存到桌面' : '截图没成功')); })
+           .catch(() => this.flash('截图没成功，再点一次试试'))
+           .finally(() => { this.shooting = false; });
        },
        copyText(text) {
          if (!text || !text.trim()) { this.flash('没有可复制的内容'); return; }
@@ -456,9 +475,14 @@
         <span class="crumb-sep" aria-hidden="true">/</span>
         <span class="crumb-cur" title="{{ media.title }}">{{ media.title }}</span>
       </div>
-      <button type="button" class="pill-btn" title="复制本页链接" @click="shareLink()">
-        {% include "app/icons/link.svg" with classes="ic" %}
-        <span>分享</span>
+      <button type="button" class="pill-btn"
+              title="把这个页面整页拍成长图，存到桌面"
+              :disabled="shooting"
+              @click="shootShare()">
+        <span class="flex" :class="{ 'animate-spin': shooting }">
+          {% include "app/icons/link.svg" with classes="ic" %}
+        </span>
+        <span x-text="shooting ? '截图中…' : '分享'">分享</span>
       </button>
     </nav>
 
@@ -1015,9 +1039,14 @@
                 <span>同步元数据</span>
               </button>
 
-              <button type="button" class="side-btn" title="复制本页链接" @click="shareLink()">
-                {% include "app/icons/link.svg" with classes="ic" %}
-                <span>复制链接</span>
+              <button type="button" class="side-btn"
+                      title="把这个页面整页拍成长图，存到桌面"
+                      :disabled="shooting"
+                      @click="shootShare()">
+                <span class="flex" :class="{ 'animate-spin': shooting }">
+                  {% include "app/icons/link.svg" with classes="ic" %}
+                </span>
+                <span x-text="shooting ? '截图中…' : '存长图'">存长图</span>
               </button>
             </div>
           </div>
@@ -1189,6 +1218,7 @@
                       </button>
 
                       <div x-show="trackOpen"
+                           @click.self.stop="trackOpen = false"
                            @keydown.escape.window="trackOpen = false"
                            role="dialog"
                            aria-modal="true"
@@ -1314,6 +1344,7 @@
                               </button>
 
                               <div x-show="listsOpen"
+                                   @click.self.stop="listsOpen = false"
                                    @keydown.escape.window="listsOpen = false"
                                    role="dialog"
                                    aria-modal="true"
@@ -1336,6 +1367,7 @@
                                 {% include "app/icons/history.svg" with classes="w-4 h-4" %}
                               </button>
                               <div x-show="historyOpen"
+                                   @click.self.stop="historyOpen = false"
                                    @keydown.escape.window="historyOpen = false"
                                    role="dialog"
                                    aria-modal="true"

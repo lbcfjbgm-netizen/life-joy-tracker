@@ -1260,12 +1260,81 @@
             else document.head.appendChild(link);
           });
         };
+        // ── 软导航后补「页面内联的 style 标签」────────────────────────────────
+        // 上面那套只认 link rel=stylesheet 指向 .css 的外链，对页面自己写死的内联 style 毫无办法。
+        // 而首页 app/home.html 的 extra_head 块里，样式是一大坨内联 style（约 660 行 CSS，
+        // 实测响应里 17878 字节），不是外链；statistics / year_in_review / 电影详情 / 剧集详情 /
+        // 书详情 / near_complete / 游戏详情的 extra_head 同样是内联 style（各 1~2 块）。
+        // → 整页打开首页样式正常；从别的页面点顶栏回首页时这 660 行一个字节都进不了 head，
+        //   页面变成纯文字堆叠、封面图巨大无比（图片没有尺寸约束），必须手动 F5 才恢复。
+        //
+        // ⚠️ 四个坑，动之前先看完：
+        //   1) 必须用 [\s\S]*? 非贪婪跨行匹配。写成贪婪会把后面几块整个吞进第一块。
+        //   2) 不能拿原始 CSS 原文当去重 key：换行/缩进在不同渲染路径下可能不同，必须先把
+        //      连续空白压成一个空格再比，否则 base 自己那块（本文件 94 行 skip-link）会被重复插一份。
+        //   3) 多块新样式必须保持响应文本里的原始先后顺序。都 insertBefore 到同一个锚点会天然
+        //      反序（后插的排前面）→ 后出现的样式反而先加载，层叠顺序反转。下面用「游标往后推」解决。
+        //   4) 🔴 扫之前必须先把 script 块整段剔掉！页面里的 JS 常常把标签名当字符串写
+        //      （本项目 base.html 自己就有：下面这几个正则/注释里都写着这个标签名）。
+        //      不剔的话正则会把「脚本里的一段字面量」当成一块真样式抓进来，往 head 里塞一坨垃圾。
+        //      这是实打实踩到的：改之前忘了剔，fresh 渲染出来凭空多出第 3 块 1553 字节。
+        var STYLE_RE = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+        var SCRIPT_RE = /<script\b[^>]*>[\s\S]*?<\/script>/gi;
+        // 归一化：只当去重指纹用；真正塞进 head 的还是原文，一个字符都不改。
+        var squeezeCss = function (css) { return String(css || '').replace(/\s+/g, ' ').trim(); };
+        var ensureInlineStyles = function (html) {
+          // 🔴 整段包 try/catch 静默降级：补样式失败绝不能打断 htmx 的后续处理（换 #main-content、
+          //    触发下面那些 init 脚本）。最坏也只是这一次软导航缺样式、用户按 F5 就好，
+          //    总比整个软导航链路挂掉、页面彻底不动强。
+          try {
+            if (!html) return;
+            // 先剔 script（坑 4），再在剩下的标记里找 style 块。
+            var body = html.replace(SCRIPT_RE, '');
+            if (body.indexOf('<style') < 0) return;
+            var blocks = [], m, rx = new RegExp(STYLE_RE.source, 'gi');
+            while ((m = rx.exec(body))) {
+              var key = squeezeCss(m[1]);
+              if (key) blocks.push({ css: m[1], key: key });  // 空 style 块没意义，跳过
+            }
+            if (!blocks.length) return;
+            // head 里已经在的都收成一张表（含 base 自己那块）；归一化后文本相同即视为同一块。
+            var have = {};
+            [].slice.call(document.head.querySelectorAll('style')).forEach(function (s) {
+              have[squeezeCss(s.textContent)] = 1;
+            });
+            // 🔴 锚点 = base 自己 main.css 那个 link，规则与上面 ensureStylesheets 完全一致：
+            //    页面级 extra_head 在整页加载时本来就排在 main.css 之前（见本文件 59 行），
+            //    appendChild 挂到 head 末尾会让页面级样式反过来盖住 main.css / showcase.css /
+            //    topnav.css —— 层叠顺序反转，只在软导航后出现、整页加载永远正常，极难查。
+            //    只认 head 的直接子节点（正文里的 style 不算样式表锚点）。
+            var anchor = null;
+            [].slice.call(document.head.children).forEach(function (el) {
+              if (anchor || el.tagName !== 'LINK') return;
+              if (/\/css\/main\.css$/.test(norm(el.getAttribute('href')))) anchor = el;
+            });
+            blocks.forEach(function (b) {
+              if (have[b.key]) return;
+              have[b.key] = 1;
+              var el = document.createElement('style');
+              el.textContent = b.css;
+              if (anchor && anchor.parentNode === document.head) {
+                document.head.insertBefore(el, anchor);
+                // 游标往后推一格（插完 el.nextSibling 就是原锚点），多块之间就保持原始先后顺序。
+                anchor = el.nextSibling;
+              } else {
+                document.head.appendChild(el);
+                anchor = null;   // 已经追到末尾了，后续继续往后赶，顺序天然正确
+              }
+            });
+          } catch (err) { /* 静默降级，原因见上面 🔴 */ }
+        };
         document.addEventListener('htmx:afterRequest', function (e) {
           var xhr = e.detail && e.detail.xhr;
           if (!xhr || xhr.status !== 200) return;
           var ct = (xhr.getResponseHeader('content-type') || '');
           if (ct.indexOf('html') < 0) return;
           ensureStylesheets(xhr.responseText);
+          ensureInlineStyles(xhr.responseText);   // ← 补内联 style，与上面并行
         });
       })();
     </script>

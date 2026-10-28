@@ -5,7 +5,6 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from app import config
 from app.models import (
     Item,
     MediaTypes,
@@ -260,21 +259,27 @@ class MediaDetailsViewTests(TestCase):
 
     @patch("app.providers.services.get_media_metadata")
     def test_track_button_uses_status_color(self, mock_get_metadata):
-        """The track button is filled with the status color of the tracked media."""
+        """The status chip is filled with the status colour of the media."""
         response = self._get_tracked_movie_details(
             mock_get_metadata,
             Status.PAUSED.value,
         )
 
-        # main button and "more tracking options" button
+        # media_details_movie.html 自 394a0d7 起不再调用 status_button_color
+        # 过滤器, 而是在 status-split 容器上写死 status-* 类, 两个按钮用
+        # background: inherit 继承底色, 所以底色类只出现一次
         self.assertContains(
             response,
-            config.get_status_button_color(Status.PAUSED.value),
-            count=2,
+            'class="status-split relative status-paused"',
+            count=1,
+        )
+        self.assertContains(
+            response,
+            ".status-split.status-paused { background: #ea580c; }",
         )
         self.assertNotContains(
             response,
-            config.get_status_button_color(Status.IN_PROGRESS.value),
+            'class="status-split relative status-in-progress"',
         )
 
     @patch("app.providers.services.get_media_metadata")
@@ -288,10 +293,15 @@ class MediaDetailsViewTests(TestCase):
             Status.PAUSED.value,
         )
 
+        # 关掉进度条不影响底色: 底色挂在 status-split 容器上
         self.assertContains(
             response,
-            config.get_status_button_color(Status.PAUSED.value),
-            count=2,
+            'class="status-split relative status-paused"',
+            count=1,
+        )
+        self.assertContains(
+            response,
+            ".status-split.status-paused { background: #ea580c; }",
         )
 
     @patch("app.providers.services.get_media_metadata")

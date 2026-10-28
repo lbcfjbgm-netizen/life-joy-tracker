@@ -6,6 +6,9 @@
 采集脚本为了省行数会跳过「时长没变」的月份，所以「上一条」可能是几个月前那条，
 差值归到「观察到变化」的那个月，总量不会丢。每个游戏的第一条快照是基线，
 没有上一条可减，当月计 0。
+
+「最近 7 天玩了多久」用的是另一张日表 PlaytimeDaily（见 get_weekly_playtime），
+两张表口径互不干扰：月表算月柱状图，日表算首页的「本周推进最快」。
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ from django.db.models import Count, F, Max, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
 
-from app.models import PlaytimeSnapshot
+from app.models import Game, PlaytimeDaily, PlaytimeSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -194,3 +197,160 @@ def _compute_monthly_playtime(user, months: int, this_month: datetime.date) -> d
             else "还没有可对比的快照，本月是基线，下个月起才有柱子"
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# 最近 N 天的游玩增量（首页「本周推进最快」那张卡）
+#
+# 数据来源是日表 PlaytimeDaily：某天的增量 = 今天的累计分钟数 -
+# 「N 天前或更早的最近一条」的累计分钟数。两个数来自同一张表、同一套采集脚本，
+# 所以相减出来的差值一定自洽，不会像 historical 记录那样掺进假的批量快照。
+# ---------------------------------------------------------------------------
+
+# 首页「本周推进最快」这一排最多展示几个游戏。
+WEEKLY_LIMIT = 3
+
+
+def get_weekly_playtime(user, days: int = 7) -> list[dict]:
+    """返回最近 days 天涨得最多的几个游戏，用于首页「本周推进最快」。
+
+    为什么必须等 7 天：这套增量靠「同一张日表里两个不同日期的累计值相减」算出来。
+    站点刚上线那天，库里只有一行，没有 7 天前的对照值 —— 那时候任何
+    「本周涨了 X 小时」都是编的。所以基线（captured_on <= 最新那天 - days 的最近一条）
+    不存在的游戏一律不参与排名；一条合法基线都没有时直接返回空 list，
+    调用方（首页）必须据此降级成「累计玩得最多」的文案，不许拿累计值冒充周增量。
+
+    Args:
+        user: 用户实例。
+        days: 往回看多少天，默认 7。
+
+    Returns:
+        list[dict]: 每条含 game（Game 实例）、delta_minutes、base_date、delta_hours_text，
+        按 delta_minutes 从大到小，最多 WEEKLY_LIMIT 条。没有合法基线时是空 list。
+    """
+    days = max(1, int(days))
+    today = timezone.localdate()
+    cache_key = f"playtime:weekly:{user.pk}:{today}"
+    # 缓存键按需求固定不含 days；天数不默认时就不碰缓存，免得 14 天拿到 7 天的结果。
+    use_cache = days == 7
+
+    cached = None
+    if use_cache:
+        try:
+            cached = cache.get(cache_key)
+        except Exception:  # noqa: BLE001 - 缓存坏了不能拖垮首页
+            logger.warning("%s - weekly playtime cache read failed", user)
+            cached = None
+
+    if cached is None:
+        try:
+            cached = _compute_weekly_playtime(user, today, days)
+        except Exception:  # noqa: BLE001 - 查库失败就当作「还没有数据」
+            logger.warning("%s - weekly playtime query failed", user, exc_info=True)
+            return []
+
+        if use_cache:
+            try:
+                cache.set(cache_key, cached, MONTHLY_CACHE_TTL)
+            except Exception:  # noqa: BLE001 - 写失败不影响返回
+                logger.warning("%s - weekly playtime cache write failed", user)
+
+    return _hydrate_weekly(user, cached)
+
+
+def _compute_weekly_playtime(user, today: datetime.date, days: int) -> list[dict]:
+    """跑聚合，返回可缓存的纯数据（不含模型实例）。
+
+    只缓 game_id / delta_minutes / base_date 三个标量：模型实例缓存进 Redis
+    既占地方又容易拿到旧对象，取回后再用一次 in_bulk 补齐更稳。
+
+    「今天」用的是**库里最新那一天**（captured_on <= 今天 的最大值），不是死等
+    timezone.localdate()。采集任务每天 23:50 才写当天那行，如果硬要等今天这行，
+    那这一整天（00:00–23:50）首页都只能显示降级文案，等于白做。用「最新一天」
+    相当于拿昨天那份数据算一个滚动 7 天窗口，数字仍是同源相减，不会失真。
+
+    但如果最新那条已经比今天早两天以上，说明采集任务断了，这时候再喊「本周」
+    就是在骗人：直接返回空 list，让首页降级。
+    """
+    anchor = PlaytimeDaily.objects.filter(
+        user=user,
+        captured_on__lte=today,
+    ).aggregate(latest=Max("captured_on"))["latest"]
+    if anchor is None:
+        # 一条快照都没有：没有任何可信的东西可算。
+        return []
+
+    if anchor < today - datetime.timedelta(days=1):
+        logger.warning(
+            "%s - weekly playtime: 最新快照停在 %s，采集可能断了，降级不显示",
+            user,
+            anchor,
+        )
+        return []
+
+    cutoff = anchor - datetime.timedelta(days=days)
+
+    # 基线：同一游戏、captured_on <= cutoff 的最近一条。
+    baseline = PlaytimeDaily.objects.filter(
+        user=user,
+        game_id=OuterRef("game_id"),
+        captured_on__lte=cutoff,
+    ).order_by("-captured_on")
+
+    rows = (
+        PlaytimeDaily.objects.filter(
+            user=user,
+            captured_on=anchor,
+            playtime_minutes__gt=0,
+        )
+        .annotate(
+            base_minutes=Subquery(baseline.values("playtime_minutes")[:1]),
+            base_date=Subquery(baseline.values("captured_on")[:1]),
+        )
+        # 没有基线 = 算不出真增量，直接不参与排名（不是当 0 处理）。
+        .filter(base_minutes__isnull=False)
+        .annotate(delta_minutes=F("playtime_minutes") - F("base_minutes"))
+        .filter(delta_minutes__gt=0)
+        .order_by("-delta_minutes", "game_id")
+        .values("game_id", "delta_minutes", "base_date")[:WEEKLY_LIMIT]
+    )
+
+    return [
+        {
+            "game_id": row["game_id"],
+            "delta_minutes": int(row["delta_minutes"]),
+            "base_date": row["base_date"],
+        }
+        for row in rows
+    ]
+
+
+def _hydrate_weekly(user, rows: list[dict]) -> list[dict]:
+    """把缓存里的 game_id 补成 Game 实例（带 item，模板要拿标题和封面）。"""
+    if not rows:
+        return []
+
+    games = {
+        game.pk: game
+        for game in Game.objects.filter(
+            pk__in=[row["game_id"] for row in rows],
+            user=user,
+        ).select_related("item")
+    }
+
+    result = []
+    for row in rows:
+        game = games.get(row["game_id"])
+        if game is None:
+            # 游戏被删了：跳过，不补假数据。
+            continue
+        minutes = row["delta_minutes"]
+        result.append(
+            {
+                "game": game,
+                "delta_minutes": minutes,
+                "base_date": row["base_date"],
+                "delta_hours_text": f"{minutes / 60:,.1f}",
+            },
+        )
+    return result

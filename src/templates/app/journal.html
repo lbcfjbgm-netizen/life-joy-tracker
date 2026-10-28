@@ -8,6 +8,23 @@
 {% endblock title %}
 
 {% block content %}
+  {% comment %}
+    窄屏（≤640px）横向溢出补丁 —— 只影响日志页，别处不要复制。
+    320px 实测：日志条目的变更描述里有「2026-10-25 07:28:27.512255+00:00」
+    这种中间没有空格的长串。卡片左图占 120px，右边留给文字只剩约 96px，
+    而 <p> 的 overflow-wrap 是默认值 normal，长串既不断行也不缩，直接把
+    article 的内部宽度顶到 290（clientWidth 只有 256），再往上把 <html> 的
+    initial containing block 撑到 322 —— 于是 documentElement.scrollWidth
+    比 clientWidth 多 2px，base.html 那几个 position:fixed 层也跟着歪。
+    overflow-wrap:anywhere 让这种长串随便哪都能断；只对日志条目里的 <p> 生效，
+    不动热力图那块的横向滚动（那个是设计上就该能横滚的，别改）。
+  {% endcomment %}
+  <style>
+    @media (max-width: 640px) {
+      article[data-journal-entry-day] p { overflow-wrap: anywhere; }
+    }
+  </style>
+
   <div class="mb-8">
     <h1 class="text-3xl font-bold mb-2">{% trans "Journal" %}</h1>
     <p class="text-gray-400">{% trans "A feed of everything you've done in Yamtrack" %}</p>

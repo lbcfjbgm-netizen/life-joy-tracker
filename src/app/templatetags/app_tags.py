@@ -593,6 +593,36 @@ def relay_image(url):
 
 
 @register.filter
+def friendly_title(title, media_id=None):
+    """把「拿不到元数据」的条目标题换成人话。
+
+    未收藏的条目（库里没有对应用户记录）如果连商店接口都拉不到，详情页兜底
+    字典里的 ``title`` 就是 ``media_id`` 本身，页面上会直接出现一串裸数字
+    （例如 /details/steam/game/2483190/x 的 h1 变成「2483190」）。
+
+    判为「没有真标题」的只有两种，且都必须和 id 对得上，避免误伤真标题：
+    - ``title`` 和 ``media_id`` 完全一样；
+    - ``title`` 是纯数字且正好是 ``media_id`` 的一部分（比如 id 写成
+      ``steam-2483190``、标题是 ``2483190``）。
+
+    这样电影《2012》、书《1984》这类名字本身就是数字的真条目不会被改写。
+    命中时返回「未知条目 <id>」，其余原样返回，一个字都不改。
+    """
+    # 模板里 media.title 可能是 dict 缺键时的空串，也可能压根是 None
+    text = "" if title is None else str(title).strip()
+    ident = "" if media_id is None else str(media_id).strip()
+
+    if not text:
+        # 空标题不算「有真标题」：页面会空一块，同样走占位
+        return f"未知条目 {ident}".strip() if ident else "未知条目"
+
+    is_bare_id = bool(ident) and (text == ident or (text.isdigit() and text in ident))
+    if not is_bare_id:
+        return title
+    return f"未知条目 {ident}"
+
+
+@register.filter
 def hero_image(media_id):
     """Return the local URL of a game's wide ``library_hero.jpg``.
 

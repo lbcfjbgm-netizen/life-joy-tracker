@@ -35,6 +35,23 @@ AUTO_NOTE_PREFIX = "Imported from Steam"
 BACKFILL_BATCH_SIZE = 200
 BACKFILL_BATCH_PAUSE = 2
 
+# How many times a game may be asked for its achievements before it is given
+# up on. Steam answers 403 for a private profile and 400 for a title without
+# an achievement system, and both are stable: the tenth attempt costs the same
+# request as the first and is just as empty. Measured on this library, roughly
+# a third of the games never answer, so retrying them forever is what turns a
+# 90 minute run into a nightly waste.
+MAX_ACHIEVEMENT_FAILURES = 10
+
+# Every batch job below selects games by "has a numeric App ID" rather than by
+# "was imported from Steam". The App ID is what a cache lookup needs, and the
+# Steam client cache is a perfectly good source for a game the operator added by
+# hand while owning it on Steam. Measured on this library, the six hand entered
+# games all carry a uuid media_id, so nothing changes today; the number is the
+# honest condition, and it keeps a future hand entered App ID from being
+# invisible to the daily passes.
+NUMERIC_APPID_REGEX = r"^\d{1,12}$"
+
 
 def _has_user_note(game):
     """Return whether the notes of a game were written by the operator."""
@@ -152,7 +169,12 @@ class RecentGameImporter(steam.SteamImporter):
             self.curated += 1
             return
 
-        self._sync_existing_game(existing, playtime_forever, playtime_2weeks)
+        self._sync_existing_game(
+            existing,
+            playtime_forever,
+            playtime_2weeks,
+            last_played=int(game_data.get("rtime_last_played") or 0) or None,
+        )
         self.updated += 1
 
     def _sync_curated_game(self, game, playtime_forever):
@@ -249,8 +271,10 @@ def backfill_achievements(
     appids = list(
         Game.objects.filter(
             user=user,
-            item__source=Sources.STEAM.value,
+            item__media_type=MediaTypes.GAME.value,
+            item__media_id__regex=NUMERIC_APPID_REGEX,
             achievements_synced_at__isnull=True,
+            achievement_sync_failures__lt=MAX_ACHIEVEMENT_FAILURES,
         ).values_list("item__media_id", flat=True),
     )
 
@@ -300,3 +324,165 @@ def backfill_achievements(
         total,
     )
     return {"total": total, "synced": synced, "skipped": skipped, "batches": batches}
+
+
+def refresh_played_achievements(
+    user,
+    steam_id,
+    batch_size=BACKFILL_BATCH_SIZE,
+    delay=steam_achievements.DEFAULT_DELAY,
+):
+    """Re-read the achievements of every game the operator actually played.
+
+    The backfill only ever looks at the games that never answered once, so a
+    game that was synced a year ago keeps its year old counters forever. Steam
+    does not push anything, and the daily recent-games pass only covers the two
+    last weeks, which leaves the long tail stale.
+
+    This one is the opposite filter: every Steam game with a playtime above
+    zero, whether it was synced already or not. Unplayed games are left out on
+    purpose, there is nothing to unlock in a game nobody launched, and a game
+    that kept failing is skipped so one bad app id cannot hold the whole run
+    for ten minutes every week.
+
+    It is a weekly job, not a before-bed one: nothing waits for it, and the
+    batches are paced exactly like the backfill.
+
+    Args:
+        user: the Django user the games belong to
+        steam_id (str): the 64-bit Steam ID the achievements are read from
+        batch_size (int): how many games are synced per batch
+        delay (float): seconds to wait between two achievement calls
+
+    Returns:
+        dict: how many games were rescanned and how they ended
+    """
+    if not settings.STEAM_API_KEY:
+        logger.warning("Steam API key not configured, achievements not refreshed")
+        return {"total": 0, "synced": 0, "skipped": 0, "batches": 0}
+
+    appids = list(
+        Game.objects.filter(
+            user=user,
+            item__media_type=MediaTypes.GAME.value,
+            item__media_id__regex=NUMERIC_APPID_REGEX,
+            progress__gt=0,
+            achievement_sync_failures__lt=MAX_ACHIEVEMENT_FAILURES,
+        ).values_list("item__media_id", flat=True),
+    )
+
+    total = len(appids)
+    if not total:
+        logger.info("No played Steam game to refresh for %s", user.username)
+        return {"total": 0, "synced": 0, "skipped": 0, "batches": 0}
+
+    logger.info(
+        "Refreshing the achievements of %s played Steam games for %s",
+        total,
+        user.username,
+    )
+
+    synced = 0
+    skipped = 0
+    batches = 0
+    for start in range(0, total, batch_size):
+        chunk = appids[start : start + batch_size]
+        result = steam_achievements.sync_achievements(
+            user,
+            steam_id,
+            appids=chunk,
+            delay=delay,
+        )
+        synced += result["synced"]
+        skipped += result["skipped"]
+        batches += 1
+
+        done = min(start + batch_size, total)
+        logger.info(
+            "Refreshed %s/%s played Steam achievements (%s synced, %s skipped so far)",
+            done,
+            total,
+            synced,
+            skipped,
+        )
+
+        if done < total:
+            time.sleep(BACKFILL_BATCH_PAUSE)
+
+    # The games that were given up on are rescued from the Steam client cache
+    # afterwards, never from the API: that is the whole point of giving up on
+    # them, and a run of ten refusals must not be replayed every night.
+    rescue_blacklisted_achievements(user, steam_id, batch_size)
+
+    logger.info(
+        "Played achievement refresh done for %s: %s synced, %s skipped out of %s",
+        user.username,
+        synced,
+        skipped,
+        total,
+    )
+    return {"total": total, "synced": synced, "skipped": skipped, "batches": batches}
+
+
+def rescue_blacklisted_achievements(user, steam_id, batch_size=BACKFILL_BATCH_SIZE):
+    """Refresh the given up games from the Steam client cache alone.
+
+    A game reaches ``MAX_ACHIEVEMENT_FAILURES`` when Steam refused it ten times
+    in a row, which is what a private profile looks like from the outside. For
+    many of those games the Steam client on this very machine still holds the
+    counters, but every batch job skips them on the failure count, so the cache
+    is never read and they stay frozen at the counters of the day they were
+    given up on.
+
+    This pass ignores the streak and reads the cache. A hit resets the streak,
+    so the game is back in the regular passes; a miss leaves the row untouched,
+    there is nothing to write and no reason to count another failure.
+
+    Args:
+        user: the Django user the games belong to
+        steam_id (str): the 64-bit Steam ID the achievements are read from
+        batch_size (int): how many games are read per batch
+
+    Returns:
+        dict: how many games were given up on, rescued and left alone
+    """
+    appids = list(
+        Game.objects.filter(
+            user=user,
+            item__media_type=MediaTypes.GAME.value,
+            item__media_id__regex=NUMERIC_APPID_REGEX,
+            achievement_sync_failures__gte=MAX_ACHIEVEMENT_FAILURES,
+        ).values_list("item__media_id", flat=True),
+    )
+
+    empty = {"blacklisted": len(appids), "rescued": 0, "batches": 0}
+    if not appids:
+        return empty
+
+    logger.info(
+        "Reading the Steam client cache for %s given up games of %s",
+        len(appids),
+        user.username,
+    )
+
+    rescued = 0
+    batches = 0
+    for start in range(0, len(appids), batch_size):
+        chunk = appids[start : start + batch_size]
+        result = steam_achievements.sync_achievements(
+            user,
+            steam_id,
+            appids=chunk,
+            local_only=True,
+        )
+        rescued += result["synced"]
+        batches += 1
+
+    logger.info(
+        "Rescued %s/%s given up games of %s from the Steam client cache",
+        rescued,
+        len(appids),
+        user.username,
+    )
+    return {"blacklisted": len(appids), "rescued": rescued, "batches": batches}
+

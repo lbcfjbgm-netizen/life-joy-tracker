@@ -499,7 +499,7 @@ class YearInReviewViewTests(TestCase):
         body = response.content.decode()
 
         self.assertIn("游戏库累计时长", body)
-        self.assertIn("从入库到现在的累计时长", body)
+        self.assertIn("从入库到现在的累计总时长", body)
         self.assertIn("不是 2025 这一年玩的", body)
         self.assertNotIn("相当于连续不睡", body)
         self.assertNotIn("平均每天", body)

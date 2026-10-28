@@ -23,6 +23,11 @@ Two consequences shape this module:
   only rejected when it could escape the directory, never merely because it
   does not look like the ones Steam writes.
 
+A second, drop-in gallery exists for games that did not come from Steam (a
+hand-entered Switch title, say): those have no appid at all, so their images
+live under the project's own ``.tools/notion_shots/<key>/`` and are looked up by
+the item's ``media_id`` instead. See :data:`_LOCAL_GALLERY_ROOT`.
+
 Everything here is read only: no file is written and nothing is imported into
 the database.
 """
@@ -58,11 +63,33 @@ _DETECTED_ROOT = None
 # ``desktop.ini``, a user's own ``.mp4``) is not a screenshot and is skipped.
 _SCREENSHOT_SUFFIXES = frozenset({".jpg", ".jpeg", ".png"})
 
+# 本地图库给非 Steam 来源游戏用,额外接受 .webp。这些图常常是从网页或
+# 笔记工具里另存下来的,格式不受 Steam 客户端约束。
+_LOCAL_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
+
 _CONTENT_TYPE_BY_SUFFIX = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".png": "image/png",
+    ".webp": "image/webp",
 }
+
+# Everything the two galleries together may serve. The Steam scan still filters
+# on its own narrower set, so a stray ``.webp`` dropped into a Steam folder
+# keeps behaving exactly as it did before.
+_ALL_SUFFIXES = _SCREENSHOT_SUFFIXES | _LOCAL_SUFFIXES
+
+# 本地图库根目录就是项目根下的 .tools/notion_shots。手工录入或从笔记导入的
+# 游戏截图按条目 media_id 分目录放在这里,形如 <根>/<key>/<图片文件>,
+# 详情页读它来给非 Steam 游戏显示截图。路径从本文件反推,不写死盘符,
+# 换机器或换用户名都不受影响。
+_LOCAL_GALLERY_ROOT = (
+    Path(__file__).resolve().parent.parent.parent / ".tools" / "notion_shots"
+)
+
+# 本地图库 key 的最大长度。够放下 uuid4 的 36 位,也短到能限制拼出来的路径。
+_MAX_KEY_LENGTH = 64
+
 
 # ``<YYYYMMDDHHMMSS>_<n>.<ext>``: the name is the moment of capture followed by
 # the index within that second, so it doubles as the sort key.
@@ -165,12 +192,45 @@ def valid_appid(appid):
     return bool(_APPID_PATTERN.match(str(appid or "").strip()))
 
 
+def valid_gallery_key(key):
+    """Return True if ``key`` may name one directory under a screenshot root.
+
+    The key ends up as a single path component in both the URL and the path
+    this module builds, and it is no longer always a Steam appid: a hand added
+    game has a UUID ``media_id`` instead. So instead of "digits only" the rule
+    is "one safe component": 1 to :data:`_MAX_KEY_LENGTH` characters, each of
+    them ``[A-Za-z0-9_-]``. That already excludes ``.``/``..``, both path
+    separators, ``:`` and NUL, and is loose enough for every real key this site
+    produces.
+    """
+    key = str(key or "").strip()
+    if not 1 <= len(key) <= _MAX_KEY_LENGTH:
+        return False
+    return all(
+        char.isascii() and (char.isalnum() or char in {"_", "-"}) for char in key
+    )
+
+
 def _screenshots_dir(appid):
     """Return the ``screenshots`` directory for an appid, or None if invalid."""
     appid = str(appid or "").strip()
     if not valid_appid(appid):
         return None
     return screenshot_root() / appid / "screenshots"
+
+
+def local_gallery_dir(key):
+    """Return the local gallery directory for one key, or None if invalid.
+
+    The layout is ``<project>/.tools/notion_shots/<key>/<image file>``: no
+    extra ``screenshots`` level and usually no ``thumbnails`` subdirectory,
+    because these images are dropped in by hand or by the Notion importer
+    rather than written by the Steam client.
+    """
+    key = str(key or "").strip()
+    if not valid_gallery_key(key):
+        return None
+    return _LOCAL_GALLERY_ROOT / key
 
 
 def _thumbnails_dir(shots_dir):
@@ -207,7 +267,7 @@ def is_safe_filename(filename):
         return False
     if name in {".", ".."}:
         return False
-    if Path(name).suffix.lower() not in _SCREENSHOT_SUFFIXES:
+    if Path(name).suffix.lower() not in _ALL_SUFFIXES:
         return False
     if any(char in _FORBIDDEN_FILENAME_CHARS for char in name):
         return False
@@ -256,8 +316,14 @@ def _thumbnail_names(thumbs_dir):
         return frozenset()
 
 
-def _scan(appid, shots_dir, thumb_names):
-    """Build the listing for one appid. Never raises."""
+def _scan(appid, shots_dir, thumb_names, suffixes=_SCREENSHOT_SUFFIXES):
+    """Build the listing for one gallery. Never raises.
+
+    ``suffixes`` is the set of file types this gallery accepts: the Steam
+    client's own three for a Steam folder, the wider local set for the drop-in
+    gallery (which also takes ``.webp``). A filename itself is only rejected
+    when it could escape the directory -- see :func:`is_safe_filename`.
+    """
     shots = []
     try:
         entries = list(shots_dir.iterdir())
@@ -268,6 +334,8 @@ def _scan(appid, shots_dir, thumb_names):
     for entry in entries:
         name = entry.name
         if not is_safe_filename(name):
+            continue
+        if Path(name).suffix.lower() not in suffixes:
             continue
         try:
             if not entry.is_file():
@@ -322,25 +390,54 @@ def _directory_stamp(shots_dir):
     return (shots_stamp, thumbs_stamp, str(shots_dir))
 
 
-def list_screenshots(appid):
-    """Return one appid's screenshots, newest first, or ``[]``.
+def _gallery_specs(key):
+    """Return the ``(dir, suffixes)`` galleries to try for one key, in order.
+
+    A Steam appid is tried first so an existing game resolves exactly as it did
+    before; the local gallery is the fallback, which is what gives a hand added
+    game its screenshots without touching the Steam path. A key that fails the
+    Steam pattern gets an empty directory back and is skipped by the caller, so
+    a UUID never even looks at the Steam root.
+    """
+    specs = []
+    steam_dir = _screenshots_dir(key)
+    if steam_dir is not None:
+        specs.append((steam_dir, _SCREENSHOT_SUFFIXES))
+    local_dir = local_gallery_dir(key)
+    if local_dir is not None:
+        specs.append((local_dir, _LOCAL_SUFFIXES))
+    return specs
+
+
+def list_screenshots(key):
+    """Return one gallery's screenshots, newest first, or ``[]``.
+
+    ``key`` is a Steam appid for a Steam game, or the item's ``media_id`` (a
+    UUID for hand added ones) for the local gallery. The two layouts differ:
+    Steam nests ``<root>/<appid>/screenshots/``, while the local gallery is
+    ``<root>/<key>/`` with the images directly inside.
 
     Each entry is a dict with ``filename``, ``url``, ``thumb_url``,
     ``has_thumb``, ``taken_at``, ``width`` and ``height``. Only captures whose
     original file really exists are listed, so a leftover thumbnail (the user
     deleted the original) never shows up as a broken image.
 
-    A missing directory, a malformed appid or an unreadable folder all give an
+    A missing directory, a malformed key or an unreadable folder all give an
     empty list rather than an error: the item page must still render.
     """
-    appid = str(appid or "").strip()
-    shots_dir = _screenshots_dir(appid)
-    if shots_dir is None:
-        return []
+    key = str(key or "").strip()
+    for shots_dir, suffixes in _gallery_specs(key):
+        shots = _list_one_gallery(key, shots_dir, suffixes)
+        if shots:
+            return shots
+    return []
 
+
+def _list_one_gallery(key, shots_dir, suffixes):
+    """Return the (possibly cached) listing for exactly one gallery directory."""
     stamp = _directory_stamp(shots_dir)
     if stamp is not None:
-        cached = _LISTING_CACHE.get(appid)
+        cached = _LISTING_CACHE.get(stamp[2])
         if cached is not None and cached[0] == stamp:
             # Copy the list: a caller appending to it must not edit the cache.
             return list(cached[1])
@@ -349,24 +446,33 @@ def list_screenshots(appid):
         # Nothing on this machine (a game never played, or no Steam at all).
         return []
 
-    shots = _scan(appid, shots_dir, _thumbnail_names(_thumbnails_dir(shots_dir)))
+    thumbs = _thumbnail_names(_thumbnails_dir(shots_dir))
+    shots = _scan(key, shots_dir, thumbs, suffixes)
 
     if stamp is not None:
         if len(_LISTING_CACHE) >= _LISTING_CACHE_MAX:
             _LISTING_CACHE.pop(next(iter(_LISTING_CACHE)), None)
-        _LISTING_CACHE[appid] = (stamp, shots)
+        # Keyed by the directory itself, not the key: "123" as a Steam appid and
+        # "123" as a local gallery are different folders.
+        _LISTING_CACHE[stamp[2]] = (stamp, shots)
     return list(shots)
 
 
-def _request_parts(appid, kind, filename):
+def _request_parts(key, kind, filename):
     """Validate the three URL parts, or return None if any of them is wrong.
 
     Split out of :func:`resolve_screenshot_path` so the checks the URL has to
     pass read as one list, and the function that walks the disk is only about
     files. Nothing here touches the filesystem.
+
+    ``key`` is either a Steam appid or a local gallery key. The local rule is
+    deliberately the looser one and is applied to both, because an appid that
+    passes ``[A-Za-z0-9_-]{1,64}`` is a superset of "digits only" and would
+    change nothing on the Steam side; where the key is only usable as a real
+    appid is checked by :func:`_request_galleries`.
     """
-    appid = str(appid or "").strip()
-    if not valid_appid(appid):
+    key = str(key or "").strip()
+    if not valid_gallery_key(key):
         return None
 
     kind = str(kind or "")
@@ -377,10 +483,19 @@ def _request_parts(appid, kind, filename):
     if not is_safe_filename(filename):
         return None
 
-    shots_dir = _screenshots_dir(appid)
-    if shots_dir is None:
-        return None
-    return shots_dir, kind, filename
+    return key, kind, filename
+
+
+def _request_galleries(key):
+    """Return ``[(dir, root), ...]`` to search for one validated key."""
+    galleries = []
+    steam_dir = _screenshots_dir(key)
+    if steam_dir is not None:
+        galleries.append((steam_dir, screenshot_root()))
+    local_dir = local_gallery_dir(key)
+    if local_dir is not None:
+        galleries.append((local_dir, _LOCAL_GALLERY_ROOT))
+    return galleries
 
 
 def _candidates(shots_dir, kind, filename):
@@ -414,48 +529,51 @@ def _inside(path, root):
     return True, resolved
 
 
-def resolve_screenshot_path(appid, kind, filename):
+def resolve_screenshot_path(key, kind, filename):
     """Return the file behind one screenshot URL, or None.
 
     This is the only place a request's strings turn into a filesystem path, so
-    every part is validated before anything is touched: the appid must be
-    digits only, ``kind`` must be one of :data:`KINDS`, and the filename must
-    be a single safe component ending in a screenshot suffix (see
-    :func:`is_safe_filename`). The resolved path is then checked against the
-    screenshot root again, so neither a crafted ``..`` nor a symlink planted in
-    the cache can reach a file outside it.
+    every part is validated before anything is touched: the key must be one
+    safe path component (an appid or a local gallery key), ``kind`` must be one
+    of :data:`KINDS`, and the filename must be a single safe component ending
+    in a screenshot suffix (see :func:`is_safe_filename`). Every resolved path
+    is then checked against the root it came from again, so neither a crafted
+    ``..`` nor a symlink planted in either gallery can reach a file outside it.
     """
-    parts = _request_parts(appid, kind, filename)
+    parts = _request_parts(key, kind, filename)
     if parts is None:
         return None
-    shots_dir, kind, filename = parts
+    key, kind, filename = parts
 
-    try:
-        root = screenshot_root().resolve()
-    except OSError as error:
-        logger.warning("Steam screenshots root is unusable: %s", error)
-        return None
-
-    for candidate in _candidates(shots_dir, kind, filename):
-        allowed, resolved = _inside(candidate, root)
-        if not allowed:
-            return None
-        if resolved is None:
-            continue
+    for shots_dir, root in _request_galleries(key):
         try:
-            if resolved.is_file():
-                return resolved
-        except OSError:
+            resolved_root = Path(root).resolve()
+        except OSError as error:
+            logger.warning("Steam screenshots root is unusable: %s", error)
             continue
+        for candidate in _candidates(shots_dir, kind, filename):
+            allowed, resolved = _inside(candidate, resolved_root)
+            if not allowed:
+                return None
+            if resolved is None:
+                continue
+            try:
+                if resolved.is_file():
+                    return resolved
+            except OSError:
+                continue
     return None
 
 
 def appid_for_item(item):
-    """Return the Steam appid an :class:`app.models.Item` was captured from.
+    """Return the screenshot gallery key for an :class:`app.models.Item`, or None.
 
-    Only Steam games have a screenshot directory. Every other item (a film, a
-    manually added game, a Steam DLC) gets None, which the item page reads as
-    "no screenshots to show".
+    A Steam game is keyed by its appid, exactly as before. Any other game (a
+    hand entered Switch title, an import from a notebook) is keyed by its
+    ``media_id`` -- normally a UUID -- which names a folder under the local
+    gallery; ``str(item.id)`` is the last resort for a game whose ``media_id``
+    came out empty. Non-game items still get None: films and books have no
+    screenshot gallery, and the item page reads None as "nothing to show".
     """
     if item is None:
         return None
@@ -466,10 +584,13 @@ def appid_for_item(item):
     except (AttributeError, ValueError):
         return None
 
-    if source != Sources.STEAM.value or media_type != MediaTypes.GAME.value:
+    if media_type != MediaTypes.GAME.value:
         return None
 
-    appid = str(media_id or "").strip()
-    if not valid_appid(appid):
-        return None
-    return appid
+    key = str(media_id or "").strip()
+    if source == Sources.STEAM.value:
+        return key if valid_appid(key) else None
+    if not valid_gallery_key(key):
+        key = str(item.id or "").strip()
+    return key if valid_gallery_key(key) else None
+

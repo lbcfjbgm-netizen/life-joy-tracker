@@ -4,7 +4,34 @@
       否则会被 .page-shell 的 z-index:1 困住，顶栏会盖住它、点背景也关不掉。
     {% endcomment %}
     <div class="lj-gd"
+         data-shot-url="{% url 'share_page_shot' source=media.source media_type=media.media_type media_id=media.media_id %}"
+         data-shot-title="{{ media.title }}"
+         data-csrf="{{ csrf_token }}"
          x-data="{ tab: 'overview', gmode: '4col', shareToast: false, shareMsg: '',
+                   shooting: false,
+                   shootShare() {
+                     /* 本地部署，分享链接没意义：让后端把整页拍成长图存到桌面 */
+                     /* 注意：this.$el 是内层按钮自己，必须往上找挂 data-shot-url 的根节点 */
+                     const box = this.$el.closest('[data-shot-url]') || this.$el;
+                     const url = (box && box.dataset.shotUrl) || '';
+                     if (!url) { this.flash('这个条目暂时拍不了长图'); return; }
+                     if (this.shooting) return;
+                     this.shooting = true;
+                     const fd = new FormData();
+                     fd.append('title', (box && box.dataset.shotTitle) || '');
+                     fetch(url, { method: 'POST', body: fd, credentials: 'same-origin',
+                                  headers: { 'X-CSRFToken': (box && box.dataset.csrf) || '' } })
+                       .then(r => r.json())
+                       .then(d => { this.flash(d.message || (d.ok ? '已存到桌面' : '截图没成功')); })
+                       .catch(() => this.flash('截图没成功，再点一次试试'))
+                       .finally(() => { this.shooting = false; });
+                   },
+                   flash(msg) {
+                     this.shareMsg = msg;
+                     this.shareToast = true;
+                     clearTimeout(this._toastTimer);
+                     this._toastTimer = setTimeout(() => { this.shareToast = false; }, 3600);
+                   },
                    open: false, idx: 0, showAll: false,
                    items: [{% for shot in screenshots %}{ url: '{{ shot.url|escapejs }}', thumb: '{{ shot.thumb_url|escapejs }}', taken: '{% if shot.taken_at %}{{ shot.taken_at|date:'Y 年 n 月 j 日 H:i' }}{% endif %}' }{% if not forloop.last %}, {% endif %}{% endfor %}],
                    show(i) { this.idx = i; this.open = true; },
@@ -12,13 +39,33 @@
          @keydown.escape.window="open = false"
          @keydown.window.arrow-right="if (open) step(1)"
          @keydown.window.arrow-left="if (open) step(-1)">
-        {% with bg=media.media_id|hero_image %}
-        <div class="ambient" aria-hidden="true">
-          {% if bg %}<div class="ambient-art"><img src="{{ bg }}" alt=""></div>{% endif %}
-          <div class="ambient-glow"></div>
-          <div class="ambient-fade"></div>
-        </div>
-      {% endwith %}
+        {% comment %}
+          横屏背景两层叠图，从下到上：
+          1) 封面兜底层：库里存的 media.image。手工条目（media_id 是 uuid，拼不出
+             appid）只有这一层；Steam 新游戏 library_hero.jpg 是 404 时也靠它顶上，
+             当作电影页那种"封面模糊放大"的底图。
+          2) Steam 官方横屏层：media_id 是纯数字 appid 才拼得出 library_hero.jpg
+             （1920×620，最佳）。它盖在上面；一旦 404 浏览器渲染成透明，
+             底下的封面层就露出来，不需要额外 JS。
+          两层都没有时才进 is-empty，只留柔光+渐层，避免变成一块死色块。
+        {% endcomment %}
+        {% with hero=media.media_id|hero_image cover=media.image|relay_image %}
+          <div class="ambient{% if hero %} has-hero{% endif %}{% if not hero %}{% if not cover or cover == IMG_NONE %} is-empty{% endif %}{% endif %}" aria-hidden="true">
+            {% if cover and cover != IMG_NONE %}
+              <div class="ambient-art ambient-art-cover"><img src="{{ cover }}" alt=""></div>
+            {% endif %}
+            {% if hero %}
+              {% comment %}
+                新游戏（appid≥300 万那种）library_hero.jpg 经常 404。那时浏览器把这张图渲染成透明，
+                底下封面层就露出来；顺手摘掉 has-hero，让封面层从"陪衬"升回正常亮度，不然会淡得看不见。
+              {% endcomment %}
+              <div class="ambient-art ambient-art-hero"><img src="{{ hero }}" alt=""
+                   onerror="var a=this.closest('.ambient'); if(a){a.classList.remove('has-hero');} var h=this.parentNode; if(h){h.remove();}"></div>
+            {% endif %}
+            <div class="ambient-glow"></div>
+            <div class="ambient-fade"></div>
+          </div>
+        {% endwith %}
       <div class="page-shell">
         {# 面包屑 + 分享 #}
         <div class="crumb-bar">
@@ -28,14 +75,17 @@
               <span>{{ media_type|media_type_readable_plural }}</span>
             </a>
             <span class="crumb-sep" aria-hidden="true">/</span>
-            <span class="crumb-cur line-clamp-1">{{ media.title }}</span>
+            <span class="crumb-cur line-clamp-1">{{ media.title|friendly_title:media.media_id }}</span>
           </div>
           <button type="button"
                   class="pill-btn"
-                  title="复制本页链接"
-                  @click="navigator.clipboard && navigator.clipboard.writeText(location.href).then(() => { shareMsg = '链接已复制'; shareToast = true; setTimeout(() => shareToast = false, 1800) }).catch(() => { shareMsg = location.href; shareToast = true; });">
-            {% include "app/icons/link.svg" with classes="w-3.5 h-3.5" %}
-            <span>分享</span>
+                  title="把这个页面整页拍成长图，存到桌面"
+                  :disabled="shooting"
+                  @click="shootShare()">
+            <span class="flex" :class="{ 'animate-spin': shooting }">
+              {% include "app/icons/link.svg" with classes="w-3.5 h-3.5" %}
+            </span>
+            <span x-text="shooting ? '截图中…' : '分享'">分享</span>
           </button>
         </div>
 
@@ -43,7 +93,18 @@
         <section class="hero-compact">
           <div class="poster-col">
             <div class="poster-frame">
-              <img alt="{{ media.title }}" src="{{ media.image }}" loading="eager">
+              {% comment %}
+                未收藏条目（元数据拉不到）media.image 是空串，直接塞进 src 会变成裂图。
+                没有可用封面时不出 img 标签，改成和 IMG_NONE 同款的纯色占位块
+                （#3e454d 底 + 图片图标），观感与列表页「无封面」一致。
+              {% endcomment %}
+              {% if media.image and media.image != IMG_NONE %}
+                <img alt="{{ media.title|friendly_title:media.media_id }}" src="{{ media.image }}" loading="eager">
+              {% else %}
+                <div class="poster-fallback" aria-hidden="true">
+                  {% include "app/icons/image.svg" with classes="w-8 h-8" %}
+                </div>
+              {% endif %}
             </div>
 
             {# 状态按钮 + 更多选项下拉（属性原样保留，只换外壳） #}
@@ -57,10 +118,10 @@
                       hx-target="#{% component_id 'track' media current_instance.id %}"
                       hx-trigger="click"
                       @click="trackOpen = true">
-                {{ current_instance|media_status_readable }}
+                {% if user_medias %}{{ current_instance|media_status_readable }}{% else %}未追踪{% endif %}
               </button>
 
-              <button class="px-3 min-w-11 min-h-11 inline-flex items-center justify-center rounded-r-lg {{ current_instance.status|status_button_color }} border-l border-white/30 text-white transition duration-300 cursor-pointer"
+              <button class="px-3 min-w-11 min-h-11 inline-flex items-center justify-center rounded-r-lg {% if user_medias %}{{ current_instance.status|status_button_color }}{% else %}bg-gray-600 hover:bg-gray-700{% endif %} border-l border-white/30 text-white transition duration-300 cursor-pointer"
                       title="更多记录选项"
                       @click="menuOpen = !menuOpen">
                 <div class="w-4 h-4 transition-transform"
@@ -87,6 +148,7 @@
               </div>
 
               <div x-show="createOpen"
+                   @click.self.stop="createOpen = false"
                    role="dialog"
                    aria-modal="true"
                    class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -96,6 +158,7 @@
               </div>
 
               <div x-show="trackOpen"
+                   @click.self.stop="trackOpen = false"
                    role="dialog"
                    aria-modal="true"
                    class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -110,7 +173,7 @@
           <div class="hero-main">
             <div class="hero-head">
               <div class="title-line">
-                <h1 class="game-title">{{ media.title }}</h1>
+                <h1 class="game-title">{{ media.title|friendly_title:media.media_id }}</h1>
                 {% if media.title_zh and media.title_zh != media.title %}<span class="game-cn-sub">{{ media.title_zh }}</span>{% endif %}
                 {% if media.title_en and media.title_en != media.title and media.title_en != media.title_zh %}<span class="game-cn-sub">{{ media.title_en }}</span>{% endif %}
                 {% if media.source_url %}
@@ -160,6 +223,7 @@
             {% endif %}
 
             {# ===== 四张指标卡 ===== #}
+            {% if current_instance %}
             <div class="metrics-ribbon">
               {# ① 游玩时长 #}
               <div class="m-card">
@@ -167,6 +231,27 @@
                   <span class="m-label">
                     {% include "app/icons/clock.svg" with classes="w-3.5 h-3.5" %}
                     <span>游玩时长</span>
+                  </span>
+                  {% comment %}
+                    「+30 分钟」从「快捷打卡」卡片搬到这里，做右上角的小角标，
+                    和「成就进度」卡右上角的「刷新成就」同一个位置、同一个皮（.m-mini-btn）。
+
+                    注意取 id 用的是 current_instance（用户的游戏记录），不是 media（条目本身）：
+                    这两个 id 不是一回事，用错了会 404。渲染出来的 URL 和搬家前逐字一致。
+
+                    这里必须用 comment 标签、不能用井号注释：那种注释只吃单行，
+                    写成多行会被当成正文原样显示在页面上（本轮的坑之一）。
+                  {% endcomment %}
+                  <span class="m-head-right">
+                    <button type="button"
+                            class="m-mini-btn"
+                            aria-label="加 30 分钟游玩时长"
+                            title="加 30 分钟游玩时长"
+                            hx-post="{% url 'progress_edit' media_type current_instance.id %}"
+                            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+                            hx-vals='{"operation": "increase", "detail": "1"}'
+                            hx-swap="innerHTML"
+                            hx-target="#detail-progress-{{ media_type }}-{{ current_instance.id }}">+30 分钟</button>
                   </span>
                 </div>
                 <div class="m-value-row">
@@ -179,44 +264,7 @@
               </div>
 
               {# ② 成就进度 #}
-              <div class="m-card">
-                <div class="m-head">
-                  <span class="m-label">
-                    {% include "app/icons/trophy.svg" with classes="w-3.5 h-3.5" %}
-                    <span>成就进度</span>
-                  </span>
-                  {% if media.achievements.total %}
-                    <span class="m-unit">{{ media.achievements.percent|default:0 }}%</span>
-                  {% endif %}
-                </div>
-                {% if media.achievements.total %}
-                  <div class="m-value-row">
-                    <span class="m-val">{{ media.achievements.unlocked }}</span>
-                    <span class="m-unit">/ {{ media.achievements.total }} 已解锁</span>
-                  </div>
-                  <div class="prog-track"
-                       role="progressbar"
-                       aria-valuenow="{{ media.achievements.unlocked }}"
-                       aria-valuemin="0"
-                       aria-valuemax="{{ media.achievements.total }}">
-                    <div class="prog-fill"
-                         style="width: {{ media.achievements.percent|default:0 }}%"></div>
-                  </div>
-                  <div class="m-foot">
-                    <span>已解锁 {{ media.achievements.percent|default:0 }}%</span>
-                    {% if current_instance.achievements_synced_at %}
-                      <span>{{ current_instance.achievements_synced_at|date:"n-j" }}</span>
-                    {% endif %}
-                  </div>
-                {% else %}
-                  <div class="m-value-row">
-                    <span class="m-val" style="font-size:15px">无成就清单</span>
-                  </div>
-                  <div class="m-foot">
-                    <span>{% if current_instance.is_all_achievements %}已标全成就{% else %}Steam 未提供成就{% endif %}</span>
-                  </div>
-                {% endif %}
-              </div>
+              {% include "app/components/achievement_card.html" %}
 
               {# ③ 你的评分（保留原评分弹层与提交交互） #}
               {% if user_medias %}
@@ -292,14 +340,20 @@
                 </div>
               {% endif %}
 
-              {# ④ 快捷打卡（+30 分钟 / 标记通关：属性原样，仅换外壳） #}
+              {% comment %}
+                ④ 当前状态（原「快捷打卡」卡片）。本轮改名并瘦身：
+                「+30 分钟」已搬到「游玩时长」卡右上角；
+                这里只留状态药丸 + 当前时长 + 手动「标记通关」+ 最近记录。
+
+                id="detail-progress-..." 是 htmx 局部刷新的锚点，「标记通关」的 hx-target
+                指着它，一个字都不能改。
+              {% endcomment %}
               <div class="m-card">
                 <div class="m-head">
                   <span class="m-label">
                     {% include "app/icons/pulse.svg" with classes="w-3.5 h-3.5" %}
-                    <span>快捷打卡</span>
+                    <span>当前状态</span>
                   </span>
-                  <span class="m-unit" style="color:var(--emerald)">● 记录中</span>
                 </div>
                 <div id="detail-progress-{{ media_type }}-{{ current_instance.id }}" class="gd-quick">
                   {% include "app/components/detail_progress_actions.html" with media=current_instance media_type=media_type csrf_token=csrf_token Status=Status only %}
@@ -310,6 +364,7 @@
                 </div>
               </div>
             </div>
+            {% endif %}
           </div>
         </section>
 
@@ -321,7 +376,7 @@
                 <div class="sec-header">
                   <div class="sec-title-wrap">
                     <h2 class="sec-title">游戏截图</h2>
-                    <span class="sec-count" data-lj-shot-count>共 {% if screenshot_count %}{{ screenshot_count }}{% else %}{{ screenshots|length }}{% endif %} 张 · 本地 Steam 截图库</span>
+                    <span class="sec-count" data-lj-shot-count>共 {% if screenshot_count %}{{ screenshot_count }}{% else %}{{ screenshots|length }}{% endif %} 张 · 本地截图库</span>
                   </div>
                   <div class="gallery-tools">
                     <div class="layout-seg" role="group" aria-label="截图布局">
@@ -379,7 +434,7 @@
                   <span class="sec-count" data-lj-shot-count>暂无截图</span>
                 </div>
               </div>
-              <p class="note-box" style="margin:0">Steam 本地截图库里还没有这款游戏的截图。</p>
+              <p class="note-box" style="margin:0">本地截图库里还没有这款游戏的截图。</p>
             {% endif %}
           </div>
 
@@ -417,7 +472,7 @@
               <div class="kv-list">
                 <div class="kv-row">
                   <span class="kv-k">当前进度</span>
-                  <span class="kv-v">{{ current_instance.formatted_progress }}</span>
+                  <span class="kv-v">{{ current_instance.formatted_progress|default_if_none:"—"|default:"—" }}</span>
                 </div>
                 {% if current_instance.start_date %}
                   <div class="kv-row">
@@ -437,19 +492,33 @@
                     </span>
                   </div>
                 {% endif %}
+                {% comment %}
+                  未收藏条目没有用户记录：进度/日期/状态全是空，模板直接打印会把
+                  Python 的 None 吐到页面上（progressed_at 走 datetime_format
+                  过滤器时，空值返回的是 None 而不是空串）。所以一律显式判断，
+                  空值统一显示破折号，不再让 None 落进 HTML。
+                {% endcomment %}
                 <div class="kv-row">
                   <span class="kv-k">最近记录</span>
                   <span class="kv-v">
                     {% if current_instance.progressed_at %}
                       {{ current_instance.progressed_at|datetime_format:user }}
-                    {% else %}
+                    {% elif current_instance.created_at %}
                       {{ current_instance.created_at|datetime_format:user }}
+                    {% else %}
+                      —
                     {% endif %}
                   </span>
                 </div>
                 <div class="kv-row">
                   <span class="kv-k">记录状态</span>
-                  <span class="kv-v">{{ current_instance|media_status_readable }}</span>
+                  <span class="kv-v">
+                    {% if current_instance.status %}
+                      {{ current_instance|media_status_readable }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </span>
                 </div>
               </div>
             </div>
@@ -517,6 +586,7 @@
                     <span>加入清单</span>
                   </button>
                   <div x-show="listsOpen"
+                       @click.self.stop="listsOpen = false"
                        @keydown.escape.window="listsOpen = false"
                        role="dialog"
                        aria-modal="true"
@@ -540,6 +610,7 @@
                     <span>活动历史</span>
                   </button>
                   <div x-show="historyOpen"
+                       @click.self.stop="historyOpen = false"
                        @keydown.escape.window="historyOpen = false"
                        role="dialog"
                        aria-modal="true"
@@ -568,13 +639,16 @@
                   <span>刷新元数据</span>
                 </button>
 
-                {# 复制链接（分享给朋友看这一页） #}
+                {# 复制链接（分享给朋友看这一页）→ 本地部署下没意义，改成拍长图存桌面 #}
                 <button type="button"
                         class="side-btn w-full"
-                        title="复制本页链接"
-                        @click="navigator.clipboard && navigator.clipboard.writeText(location.href).then(() => { shareMsg = '链接已复制'; shareToast = true; setTimeout(() => shareToast = false, 1800) }).catch(() => { shareMsg = '复制失败，请手动复制地址栏'; shareToast = true; setTimeout(() => shareToast = false, 2200); });">
-                  {% include "app/icons/link.svg" with classes="w-3.5 h-3.5" %}
-                  <span>复制链接</span>
+                        title="把这个页面整页拍成长图，存到桌面"
+                        :disabled="shooting"
+                        @click="shootShare()">
+                  <span class="flex" :class="{ 'animate-spin': shooting }">
+                    {% include "app/icons/link.svg" with classes="w-3.5 h-3.5" %}
+                  </span>
+                  <span x-text="shooting ? '截图中…' : '存长图'">存长图</span>
                 </button>
               </div>
             </div>

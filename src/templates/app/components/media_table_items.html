@@ -21,6 +21,7 @@
 
         {# Track Modal #}
         <div x-show="trackOpen"
+             @click.self.stop="trackOpen = false"
              @keydown.escape.window="trackOpen = false"
              role="dialog"
              aria-modal="true"
@@ -31,7 +32,7 @@
         </div>
       {% endif %}
     </td>
-    <td class="p-2 pe-2 sm:pe-8 font-medium">
+    <td class="p-2 pe-2 sm:pe-8 font-medium lj-tbl-title">
       <div class=" flex justify-between items-center">
         <a href="{{ media.item|media_url }}"
            class="inline-flex items-center min-h-11 hover:text-indigo-400 transition-colors line-clamp-1">{{ media.item }}</a>

@@ -32,7 +32,13 @@ TODO.txt
 .tools/steam-profile/
 
 # Steam 商店原始抓取数据（68MB / 6693 个 JSON），绝不进版本库
-.tools/raw/
+# 但 raw/ 里有两份是手工维护的配置，要跟着代码走：中文名对照表、排除清单
+.tools/raw/*
+!.tools/raw/cn_names.json
+!.tools/raw/steam_excluded.json
+
+# 从 Notion 下载的截图（107 张 / 481MB），本地图库，绝不进版本库
+.tools/notion_shots/
 
 # 临时产物：探测输出、抓取的 html 快照、运行日志（2026-10-25 基线整理）
 .tools/_*
@@ -58,6 +64,8 @@ _tmp/
 src/tmp*
 tmp/
 *.tmp
+# start_silent.py 每次启动会在项目根建 tmpXXXXXX\ 放 pid，属于运行产物
+tmp*/
 
 # 任何运行日志都不进版本库（含 .tools 之外的，如 .i18nwork/server.log）
 *.log

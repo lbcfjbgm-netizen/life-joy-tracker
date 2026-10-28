@@ -151,6 +151,9 @@ def fetch_token() -> tuple[str, str]:
     args = [
         str(CHROME),
         "--headless=new",
+        # 这台机器上 Chrome 沙箱起不来，会直接崩（退出码 2147483651 = 0x80000003，
+        # 断点异常，stdout/stderr 全是空的），必须关掉沙箱才能拿到页面内容。
+        "--no-sandbox",
         "--dump-dom",
         f"--user-data-dir={PROFILE}",
         "--no-first-run",

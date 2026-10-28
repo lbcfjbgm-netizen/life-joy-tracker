@@ -2,165 +2,289 @@
 {% load i18n %}
 
 {% comment %}
-  详情页的快捷动作：复用首页那套 progress_edit 端点（operation=increase / complete），
-  只换一份局部模板回来，这样不用新造 API，两处行为也不会分叉。
+  详情页的「当前状态」块（2026-10-27 第二次重做）。
 
-  文案按媒体类型分支，但**不改提交端点、不改字段名、不改请求方法**：
-  - game：保持原样（游玩时长 / +30 分钟 / 标记通关）。这是本站主功能，
-    2783 个游戏全靠它，这一段的 DOM 和文案一个字都不要动。
-  - book：已读页数，有总页数（item.total_pages）时显示「已读 / 总页数」，没有就只显示已读。
-  - movie：已看 / 未看，只有一个「标记已看」（就是原来的 complete 动作）。
-  - 其他类型（tv / season / episode / anime 等）：保持进度语义，不出现游戏词。
+  这一份组件被 5 个详情页 include（game / book / movie / tv / generic），
+  所以样式和结构写在这里，两边不会改漏、也不会慢慢跑偏。
+
+  本轮（R8）改了什么、为什么：
+  1) 游戏页的「+30 分钟」搬出本组件，改到「游玩时长」卡右上角当天的小角标
+     （用户在截图里圈的就是那个位置，参照物是「成就进度」卡的「刷新成就」）。
+  2) 书 / 电影 / 剧集 / 其它类型的「+1 页」「+1%」「+1 集」「+1」全部删掉。
+     原因（用户原话）：页数、集数是豆瓣和微信读书同步来的，手动加没有意义，
+     还会跟数据源打架。
+  3) 只留三样东西：当前状态（淡金小药丸）、当前进度值、手动标记按钮。
+     手动标记「已通关 / 已看完 / 已读完」是有意义的，所以保留。
+
+  不许动的东西（一个字符都不许改）：
+  - hx-post / hx-vals / hx-target / hx-swap / hx-headers 的取值；
+  - hx-target 指向的 #detail-progress-{{ media_type }}-{{ media.id }} —— 那个容器
+    在各详情页模板里，删按钮只删 DOM，锚点必须留着，否则点了没反应。
+
+  ⚠️ 为什么文字全用 <b> 而不是 <span>：剧集页有一批老 shim，
+     `.lj-tv .ep-quick span, .lj-tv .ep-quick p { font-size: 12px !important; color: var(--ink2) !important; }`
+     写的是 !important。用 <span> 写状态文字会被它强行盖成灰字、字号也变，
+     <b> 不在它的选择器里，所以躲得开，金色和字号都能保住。
+
+  颜色一律走站点现成的金色令牌 --gold / --gold-soft / --gold-line
+  （深色 #e8c982，浅色 #9a6b1f，四个详情页的 <style> 里都已定义）。
+  后面逗号里的值只是 generic 页（season / episode / anime / comic / boardgame）的兜底，
+  那一页没定义这些令牌，不写兜底会变成透明。
 {% endcomment %}
-<div class="flex flex-wrap items-center gap-3 px-4 py-3">
+<style>
+  .lj-qa.lj-qa {
+    --qa-gold: var(--gold, #e8c982);
+    --qa-gold-soft: var(--gold-soft, rgba(232, 201, 130, 0.14));
+    --qa-gold-line: var(--gold-line, rgba(232, 201, 130, 0.30));
+    --qa-ink2: var(--ink2, rgba(244, 241, 234, 0.76));
+    --qa-ink3: var(--ink3, rgba(244, 241, 234, 0.48));
+    --qa-on-gold: var(--bg, #14171b);
+  }
+  html[data-theme="light"] .lj-qa.lj-qa {
+    --qa-gold: var(--gold, #9a6b1f);
+    --qa-gold-soft: var(--gold-soft, rgba(154, 107, 31, 0.11));
+    --qa-gold-line: var(--gold-line, rgba(154, 107, 31, 0.26));
+    --qa-ink2: var(--ink2, rgba(34, 29, 23, 0.78));
+    --qa-ink3: var(--ink3, rgba(34, 29, 23, 0.52));
+    --qa-on-gold: var(--bg, #f4efe5);
+  }
+
+  /* 文案用 <b> 只是为了让「键」和「值」在小字号下也够清楚；
+     真正的字重由下面几条规则决定，所以把 <b> 自带的 bold 关掉，让它继承。 */
+  .lj-qa b { font-weight: inherit; }
+
+  /* ① 当前状态：一枚淡金小药丸（进行中 / 已通关 / 已看完 / 已读完 …） */
+  .lj-qa .lj-qa-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex: 0 0 auto;
+    padding: 2px 8px;
+    border: 1px solid var(--qa-gold-line);
+    border-radius: 999px;
+    background: var(--qa-gold-soft);
+    color: var(--qa-gold);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.6;
+    white-space: nowrap;
+  }
+  /* 已达成：只留描边，不再铺金底，安静一点 */
+  .lj-qa .lj-qa-state--done {
+    background: transparent;
+  }
+  .lj-qa .lj-qa-dot {
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: 0 0 auto;
+  }
+
+  /* ② 当前进度值：「已玩 31 分钟」「已读 45%」「已看 5 / 12 集」 */
+  .lj-qa .lj-qa-metric {
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: 100%;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--qa-ink2);
+    white-space: nowrap;
+  }
+  .lj-qa .lj-qa-metric b {
+    font-weight: 700;
+    color: var(--qa-gold);
+    font-variant-numeric: tabular-nums;
+  }
+  /* ②b 「当前状态」这四个字的小标签。
+     只在非游戏页出现：游戏页的卡片标题本身就是「当前状态」，再来一个就重复了。 */
+  .lj-qa .lj-qa-tag {
+    flex: 0 0 auto;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    line-height: 1.6;
+    color: var(--qa-ink3);
+    white-space: nowrap;
+  }
+
+  /* ③ 手动标记按钮：淡金描边 + 半透明金底，不用实心翠绿 */
+  .lj-qa.lj-qa .lj-qa-act {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    height: 26px;
+    min-height: 0;
+    margin-inline-start: auto;
+    padding: 0 10px;
+    border: 1px solid var(--qa-gold-line);
+    border-radius: 8px;
+    background: var(--qa-gold-soft);
+    color: var(--qa-gold);
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background .18s, color .18s, border-color .18s, box-shadow .18s;
+  }
+  .lj-qa.lj-qa .lj-qa-act:not(:disabled):hover {
+    background: var(--qa-gold);
+    border-color: var(--qa-gold);
+    color: var(--qa-on-gold);
+    box-shadow: 0 6px 16px -8px var(--qa-gold);
+  }
+  .lj-qa .lj-qa-act svg { width: 13px; height: 13px; }
+
+  /* ④ 已完成：透明底 + 金描边 + 勾，不灰、不假装坏掉、没有 hover 反应 */
+  .lj-qa.lj-qa .lj-qa-act--done {
+    background: transparent;
+    border-color: var(--qa-gold-line);
+    color: var(--qa-gold);
+    opacity: .82;
+    cursor: default;
+    box-shadow: none;
+  }
+
+  /* 窄屏（≤760px，含 375px）：让「标记」按钮独占一整行当够大的点击区；
+     状态药丸和进度值继续并排，`white-space: nowrap` 保证不被拆成一字一行。 */
+  @media (max-width: 760px) {
+    .lj-qa.lj-qa .lj-qa-act { flex: 1 1 100%; }
+  }
+</style>
+<div class="lj-qa flex flex-wrap items-center gap-2 px-4 py-3">
   {% if media_type == "game" %}
-  <span class="flex items-center gap-2 text-sm text-gray-200">
-    <span class="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-600/15 text-indigo-400 shrink-0">
-      {% include "app/icons/clock.svg" with classes="w-4 h-4" %}
-    </span>
-    <span class="font-medium">{% trans "Playtime" %}</span>
-    <span class="text-indigo-400 font-medium">{{ media.formatted_progress }}</span>
-  </span>
+  {# 游戏页的卡片标题本身就是「当前状态」，这里不再重复那个小标签，直接上状态药丸 #}
+  <b class="lj-qa-state{% if media.status == Status.COMPLETED.value %} lj-qa-state--done{% endif %}">
+    <b class="lj-qa-dot"></b>{{ media|media_status_readable }}
+  </b>
+  <b class="lj-qa-metric">已玩 <b>{{ media.formatted_progress }}</b></b>
 
-  <div class="flex items-center gap-2 ms-auto">
-    <button type="button"
-            class="inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-11 text-sm font-medium text-white bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#4a9eff]"
-            aria-label="加 30 分钟游玩时长"
-            title="加 30 分钟游玩时长"
-            hx-post="{% url 'progress_edit' media_type media.id %}"
-            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-            hx-vals='{"operation": "increase", "detail": "1"}'
-            hx-swap="innerHTML"
-            hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
-      {% include "app/icons/plus.svg" with classes="w-4 h-4" %}
-      <span>+30 分钟</span>
-    </button>
-
-    <button type="button"
-            class="inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-11 text-sm font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-[#4a9eff] {% if media.status == Status.COMPLETED.value %}bg-gray-700/40 text-gray-500 cursor-not-allowed{% else %}text-white bg-emerald-700 hover:bg-emerald-800 cursor-pointer{% endif %}"
-            {% if media.status == Status.COMPLETED.value %}disabled{% endif %}
-            aria-label="标记为已通关"
-            title="标记为已通关"
-            hx-post="{% url 'progress_edit' media_type media.id %}"
-            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-            hx-vals='{"operation": "complete", "detail": "1"}'
-            hx-swap="innerHTML"
-            hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
-      {% include "app/icons/states/completed.svg" with classes="w-4 h-4" %}
-      <span>{% if media.status == Status.COMPLETED.value %}已通关{% else %}标记通关{% endif %}</span>
-    </button>
-  </div>
+  <button type="button"
+          class="lj-qa-act{% if media.status == Status.COMPLETED.value %} lj-qa-act--done{% endif %}"
+          {% if media.status == Status.COMPLETED.value %}disabled{% endif %}
+          aria-label="标记为已通关"
+          title="标记为已通关"
+          hx-post="{% url 'progress_edit' media_type media.id %}"
+          hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+          hx-vals='{"operation": "complete", "detail": "1"}'
+          hx-swap="innerHTML"
+          hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
+    {% include "app/icons/states/completed.svg" with classes="w-3.5 h-3.5" %}
+    <b>{% if media.status == Status.COMPLETED.value %}已通关{% else %}标记通关{% endif %}</b>
+  </button>
 
   {% elif media_type == "book" %}
   {% comment %}
     书的进度有两种口径：有总页数时是「已读第几页」，没有总页数时是「已读百分之几」。
-    微信读书只给百分比、不给总页数（接口里没有页数字段），所以没有总页数才是常态，
-    这时直接显示百分比，不硬凑成页数（凑不出来，只会显示 0 页）。
+    微信读书只给百分比、不给总页数（接口里没有页数字段），所以没有总页数才是常态。
+    这两个数字都由豆瓣 / 微信读书同步，所以「+1 页 / +1%」按钮本轮已删除，只做展示。
+
+    已完成时显示满值（100% / 满页）：后端的 complete 只改 status 和 end_date，
+    不动 progress，所以一本读到 45% 的书点「标记读完」后 progress 仍是 45。
+    按用户的直觉「标记已读完 = 读 100%」，这里在显示层兜底成满值 —— 只改显示，
+    不动数据库、不动 views.py（那个端点首页和列表页也在用）。
+
+    用 widthratio 拼 100 而不用裸数字：模板里直接写 `100%` 会和 `{% %}` 的
+    百分号语法打架，拼出来更稳。
   {% endcomment %}
-  <span class="flex items-center gap-2 text-sm text-gray-200">
-    <span class="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-600/15 text-indigo-400 shrink-0">
-      {% include "app/icons/book-open.svg" with classes="w-4 h-4" %}
-    </span>
+  <b class="lj-qa-tag">当前状态</b>
+  <b class="lj-qa-state{% if media.status == Status.COMPLETED.value %} lj-qa-state--done{% endif %}">
+    <b class="lj-qa-dot"></b>{{ media|media_status_readable }}
+  </b>
+  <b class="lj-qa-metric">
     {% if media.item.total_pages %}
-      <span class="font-medium">已读页数</span>
-      <span class="text-indigo-400 font-medium">
-        {{ media.formatted_progress }} / {{ media.item.total_pages }} 页
-      </span>
+      {% if media.status == Status.COMPLETED.value %}
+        已读 <b>{{ media.item.total_pages }}</b> / {{ media.item.total_pages }} 页
+      {% else %}
+        已读 <b>{{ media.formatted_progress }}</b> / {{ media.item.total_pages }} 页
+      {% endif %}
     {% else %}
-      <span class="font-medium">阅读进度</span>
-      <span class="text-indigo-400 font-medium">已读 {{ media.formatted_progress }}%</span>
+      {% if media.status == Status.COMPLETED.value %}
+        已读 <b>{% widthratio 1 1 100 %}%</b>
+      {% else %}
+        已读 <b>{{ media.formatted_progress }}%</b>
+      {% endif %}
     {% endif %}
-  </span>
+  </b>
 
-  <div class="flex items-center gap-2 ms-auto">
-    <button type="button"
-            class="inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-11 text-sm font-medium text-white bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#4a9eff]"
-            aria-label="{% if media.item.total_pages %}加 1 页{% else %}加 1%{% endif %}"
-            title="{% if media.item.total_pages %}加 1 页{% else %}加 1%{% endif %}"
-            hx-post="{% url 'progress_edit' media_type media.id %}"
-            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-            hx-vals='{"operation": "increase", "detail": "1"}'
-            hx-swap="innerHTML"
-            hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
-      {% include "app/icons/plus.svg" with classes="w-4 h-4" %}
-      <span>{% if media.item.total_pages %}+1 页{% else %}+1%{% endif %}</span>
-    </button>
-
-    <button type="button"
-            class="inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-11 text-sm font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-[#4a9eff] {% if media.status == Status.COMPLETED.value %}bg-gray-700/40 text-gray-500 cursor-not-allowed{% else %}text-white bg-emerald-700 hover:bg-emerald-800 cursor-pointer{% endif %}"
-            {% if media.status == Status.COMPLETED.value %}disabled{% endif %}
-            aria-label="标记为读完"
-            title="标记为读完"
-            hx-post="{% url 'progress_edit' media_type media.id %}"
-            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-            hx-vals='{"operation": "complete", "detail": "1"}'
-            hx-swap="innerHTML"
-            hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
-      {% include "app/icons/states/completed.svg" with classes="w-4 h-4" %}
-      <span>{% if media.status == Status.COMPLETED.value %}已读完{% else %}标记读完{% endif %}</span>
-    </button>
-  </div>
+  <button type="button"
+          class="lj-qa-act{% if media.status == Status.COMPLETED.value %} lj-qa-act--done{% endif %}"
+          {% if media.status == Status.COMPLETED.value %}disabled{% endif %}
+          aria-label="标记为读完"
+          title="标记为读完"
+          hx-post="{% url 'progress_edit' media_type media.id %}"
+          hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+          hx-vals='{"operation": "complete", "detail": "1"}'
+          hx-swap="innerHTML"
+          hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
+    {% include "app/icons/states/completed.svg" with classes="w-3.5 h-3.5" %}
+    <b>{% if media.status == Status.COMPLETED.value %}已读完{% else %}标记读完{% endif %}</b>
+  </button>
 
   {% elif media_type == "movie" %}
-  <span class="flex items-center gap-2 text-sm text-gray-200">
-    <span class="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-600/15 text-indigo-400 shrink-0">
-      {% include "app/icons/eye.svg" with classes="w-4 h-4" %}
-    </span>
-    <span class="font-medium">{% if media.status == Status.COMPLETED.value %}已看{% else %}未看{% endif %}</span>
-  </span>
+  <b class="lj-qa-tag">当前状态</b>
+  <b class="lj-qa-state{% if media.status == Status.COMPLETED.value %} lj-qa-state--done{% endif %}">
+    <b class="lj-qa-dot"></b>{% if media.status == Status.COMPLETED.value %}已观看{% else %}未看{% endif %}
+  </b>
 
-  <div class="flex items-center gap-2 ms-auto">
-    <button type="button"
-            class="inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-11 text-sm font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-[#4a9eff] {% if media.status == Status.COMPLETED.value %}bg-gray-700/40 text-gray-500 cursor-not-allowed{% else %}text-white bg-emerald-700 hover:bg-emerald-800 cursor-pointer{% endif %}"
-            {% if media.status == Status.COMPLETED.value %}disabled{% endif %}
-            aria-label="标记已看"
-            title="标记已看"
-            hx-post="{% url 'progress_edit' media_type media.id %}"
-            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-            hx-vals='{"operation": "complete", "detail": "1"}'
-            hx-swap="innerHTML"
-            hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
-      {% include "app/icons/states/completed.svg" with classes="w-4 h-4" %}
-      <span>标记已看</span>
-    </button>
-  </div>
+  <button type="button"
+          class="lj-qa-act{% if media.status == Status.COMPLETED.value %} lj-qa-act--done{% endif %}"
+          {% if media.status == Status.COMPLETED.value %}disabled{% endif %}
+          aria-label="标记已看"
+          title="标记已看"
+          hx-post="{% url 'progress_edit' media_type media.id %}"
+          hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+          hx-vals='{"operation": "complete", "detail": "1"}'
+          hx-swap="innerHTML"
+          hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
+    {% include "app/icons/states/completed.svg" with classes="w-3.5 h-3.5" %}
+    <b>标记已看</b>
+  </button>
 
   {% else %}
-  <span class="flex items-center gap-2 text-sm text-gray-200">
-    <span class="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-600/15 text-indigo-400 shrink-0">
-      {% include "app/icons/states/in-progress.svg" with classes="w-4 h-4" %}
-    </span>
-    <span class="font-medium">{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}已看集数{% else %}进度{% endif %}</span>
-    <span class="text-indigo-400 font-medium">{{ media.formatted_progress }}{% if media.max_progress %} / {{ media.max_progress }}{% endif %}</span>
-  </span>
+  {% comment %}
+    剧集 / 季 / 动画 / 漫画 / 桌游等兜底分支。
+    集数由豆瓣同步，所以「+1 集 / +1」按钮本轮已删除，只展示当前值。
 
-  <div class="flex items-center gap-2 ms-auto">
-    <button type="button"
-            class="inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-11 text-sm font-medium text-white bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#4a9eff]"
-            aria-label="{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}看下一集{% else %}加 1{% endif %}"
-            title="{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}看下一集{% else %}加 1{% endif %}"
-            hx-post="{% url 'progress_edit' media_type media.id %}"
-            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-            hx-vals='{"operation": "increase", "detail": "1"}'
-            hx-swap="innerHTML"
-            hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
-      {% include "app/icons/plus.svg" with classes="w-4 h-4" %}
-      <span>{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}+1 集{% else %}+1{% endif %}</span>
-    </button>
+    已完成时显示满值（12 / 12 集）：后端的 complete 只改 status，不动 progress，
+    所以看到第 5 集的剧点「标记看完」后 progress 仍是 5。按用户直觉
+    「标记已看完 = 12/12」，这里在显示层兜底。只改显示，不动数据库和 views.py。
+  {% endcomment %}
+  <b class="lj-qa-tag">当前状态</b>
+  <b class="lj-qa-state{% if media.status == Status.COMPLETED.value %} lj-qa-state--done{% endif %}">
+    <b class="lj-qa-dot"></b>{{ media|media_status_readable }}
+  </b>
+  <b class="lj-qa-metric">
+    {% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}
+      {% if media.status == Status.COMPLETED.value and media.max_progress %}
+        已看 <b>{{ media.max_progress }}</b> / {{ media.max_progress }} 集
+      {% else %}
+        已看 <b>{{ media.formatted_progress }}</b>{% if media.max_progress %} / {{ media.max_progress }}{% endif %} 集
+      {% endif %}
+    {% else %}
+      {% if media.status == Status.COMPLETED.value and media.max_progress %}
+        进度 <b>{{ media.max_progress }}</b> / {{ media.max_progress }}
+      {% else %}
+        进度 <b>{{ media.formatted_progress }}</b>{% if media.max_progress %} / {{ media.max_progress }}{% endif %}
+      {% endif %}
+    {% endif %}
+  </b>
 
-    <button type="button"
-            class="inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-11 text-sm font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-[#4a9eff] {% if media.status == Status.COMPLETED.value %}bg-gray-700/40 text-gray-500 cursor-not-allowed{% else %}text-white bg-emerald-700 hover:bg-emerald-800 cursor-pointer{% endif %}"
-            {% if media.status == Status.COMPLETED.value %}disabled{% endif %}
-            aria-label="{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}标记为看完{% else %}标记为完成{% endif %}"
-            title="{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}标记为看完{% else %}标记为完成{% endif %}"
-            hx-post="{% url 'progress_edit' media_type media.id %}"
-            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-            hx-vals='{"operation": "complete", "detail": "1"}'
-            hx-swap="innerHTML"
-            hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
-      {% include "app/icons/states/completed.svg" with classes="w-4 h-4" %}
-      <span>{% if media.status == Status.COMPLETED.value %}{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}已看完{% else %}已完成{% endif %}{% else %}{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}标记看完{% else %}标记完成{% endif %}{% endif %}</span>
-    </button>
-  </div>
+  <button type="button"
+          class="lj-qa-act{% if media.status == Status.COMPLETED.value %} lj-qa-act--done{% endif %}"
+          {% if media.status == Status.COMPLETED.value %}disabled{% endif %}
+          aria-label="{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}标记为看完{% else %}标记为完成{% endif %}"
+          title="{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}标记为看完{% else %}标记为完成{% endif %}"
+          hx-post="{% url 'progress_edit' media_type media.id %}"
+          hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+          hx-vals='{"operation": "complete", "detail": "1"}'
+          hx-swap="innerHTML"
+          hx-target="#detail-progress-{{ media_type }}-{{ media.id }}">
+    {% include "app/icons/states/completed.svg" with classes="w-3.5 h-3.5" %}
+    <b>{% if media.status == Status.COMPLETED.value %}{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}已看完{% else %}已完成{% endif %}{% else %}{% if media_type == "tv" or media_type == "season" or media_type == "episode" or media_type == "anime" %}标记看完{% else %}标记完成{% endif %}{% endif %}</b>
+  </button>
   {% endif %}
 </div>

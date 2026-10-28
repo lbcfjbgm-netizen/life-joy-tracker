@@ -1,0 +1,3 @@
+/*! Select2 4.0.13 | https://github.com/select2/select2/blob/master/LICENSE.md */
+
+!function(){if(jQuery&&jQuery.fn&&jQuery.fn.select2&&jQuery.fn.select2.amd)var e=jQuery.fn.select2.amd;e.define("select2/i18n/zh-hans",[],function(){return{errorLoading:function(){return"无法加载结果。"},inputTooLong:function(e){var n=e.input.length-e.maximum;return"请删除 "+n+" 个字符"},inputTooShort:function(e){return"请至少输入 "+(e.minimum-e.input.length)+" 个字符"},loadingMore:function(){return"正在加载更多结果…"},maximumSelected:function(e){return"最多只能选择 "+e.maximum+" 项"},noResults:function(){return"未找到结果"},searching:function(){return"搜索中…"},removeAllItems:function(){return"移除全部选项"}}}),e.define,e.require}();

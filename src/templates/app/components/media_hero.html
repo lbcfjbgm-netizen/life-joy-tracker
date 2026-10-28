@@ -203,7 +203,8 @@
 
           <div class="lj-hero-meta">
             {% if media.status %}
-              <span class="lj-hero-mi is-pill">{{ media.status|media_status_readable }}</span>
+              {% comment %}传对象才能看见 is_all_achievements，全成就的巨幕显示「全成就」。{% endcomment %}
+              <span class="lj-hero-mi is-pill">{{ media|media_status_readable }}</span>
             {% endif %}
             {% if media.progress %}
               <span class="lj-hero-mi"><b>{{ media.progress|hours_brief }}h</b>&nbsp;游玩</span>

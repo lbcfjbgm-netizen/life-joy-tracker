@@ -14,6 +14,15 @@
       .lj-gd .ambient {position: fixed; inset: 0 0 auto 0; height: 540px; z-index: 0; overflow: hidden; pointer-events: none;}
       .lj-gd .ambient-art {position: absolute; inset: 0; opacity: var(--hero-alpha); transition: opacity .6s var(--ease);}
       .lj-gd .ambient-art img {width: 100%; height: 100%; object-fit: cover; object-position: center 22%; filter: saturate(1.08) contrast(1.02) blur(2px); transform: scale(1.03); -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0,0,0,0.72) 48%, rgba(0,0,0,0.22) 78%, transparent 100%); mask-image: linear-gradient(to bottom, #000 0%, rgba(0,0,0,0.72) 48%, rgba(0,0,0,0.22) 78%, transparent 100%);}
+      /* 封面兜底层：库里只有竖版封面、或手工条目只有横图时，铺在 Steam 官方横屏层下面。
+         默认透明度 0 —— 有官方横屏图的游戏（Zombidle 这类）渲染结果跟改动前完全一致，
+         一层都不会多出来。只有"拼不出 appid"或"hero 图 404"时它才亮起来顶上。 */
+      .lj-gd .ambient-art-cover {opacity: 0;}
+      .lj-gd .ambient:not(.has-hero) .ambient-art-cover {opacity: var(--hero-alpha);}
+      .lj-gd .ambient-art-cover img {object-position: center 52%; filter: saturate(1.22) contrast(1.08) brightness(1.22); transform: scale(1.02);}
+      /* 完全没图（封面空、也没有 appid）：柔光收窄、渐层加深，落成干净的渐变底，不出现色块 */
+      .lj-gd .ambient.is-empty .ambient-glow {opacity: 0.55; inset: -12% -6% 0 -6%;}
+      .lj-gd .ambient.is-empty .ambient-fade {background: linear-gradient( to bottom, rgba(var(--scrim), 0.34) 0%, rgba(var(--scrim), 0.62) 45%, rgba(var(--scrim), 0.9) 78%, var(--bg) 100% );}
       .lj-gd .ambient-glow {position: absolute; inset: -20% -10% 0 -10%; background: radial-gradient(46% 52% at 24% 26%, rgba(232, 175, 92, 0.24) 0%, transparent 72%), radial-gradient(40% 48% at 76% 20%, rgba(147, 118, 242, 0.18) 0%, transparent 70%); filter: blur(48px);}
       html[data-theme="light"] .lj-gd .ambient-glow {background: radial-gradient(46% 52% at 24% 26%, rgba(214, 152, 62, 0.18) 0%, transparent 72%), radial-gradient(40% 48% at 76% 20%, rgba(132, 102, 220, 0.10) 0%, transparent 70%);}
       .lj-gd .ambient-fade {position: absolute; inset: 0; background: linear-gradient( to bottom, rgba(var(--scrim), 0.18) 0%, rgba(var(--scrim), 0.46) 45%, rgba(var(--scrim), 0.85) 78%, var(--bg) 100% );}
@@ -49,6 +58,11 @@
       .lj-gd .poster-frame {position: relative; width: 200px; aspect-ratio: 2 / 3 !important; border-radius: 12px; overflow: hidden; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--skylight), var(--shadow);}
       .lj-gd .poster-frame img {width: 100%; height: 100%; aspect-ratio: 2 / 3 !important; object-fit: cover !important; display: block; transition: transform .5s var(--ease);}
       .lj-gd .poster-frame:hover img {transform: scale(1.025);}
+      {% comment %}
+        没有封面时的占位块：与列表页无封面卡片同一底色 #3e454d，居中来一个图片图标，
+        不再往 img 里塞空 src（那样浏览器会画裂图图标 + alt 文字）。
+      {% endcomment %}
+      .lj-gd .poster-fallback {width: 100%; height: 100%; display: grid; place-items: center; background: #3e454d; color: #8b949f;}
       .lj-gd .status-split {position: relative; display: grid; grid-template-columns: 1fr 34px; height: 34px; border-radius: 9px; overflow: visible; background: var(--emerald-bg); color: #ffffff; box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 12px rgba(16, 185, 129, 0.24);}
       .lj-gd .status-main-btn {display: inline-flex; align-items: center; justify-content: center; gap: 7px; font-size: 12.5px; font-weight: 600; letter-spacing: .06em; color: #fff; border-radius: 9px 0 0 9px; transition: background .2s;}
       .lj-gd .status-main-btn:hover {background: rgba(0, 0, 0, 0.08);}
@@ -170,6 +184,31 @@
         .lj-gd .poster-col {margin: 0 auto;}
         .lj-gd .shot-grid {grid-template-columns: repeat(2, minmax(0, 1fr));}
         .lj-gd .side-col {grid-template-columns: 1fr;}
+
+        /* ===== 375px 指标卡：按钮/标签不许被压成一字一行 =====
+           原因：≤760px 时指标卡只有 ~130px 宽（内容区约 102px），而 .m-head 是
+           flex + space-between 且不换行，「成就进度」+ 百分比 + 「刷新成就」挤不下，
+           浏览器就把按钮文字按字断行（刷/新/成/就 竖成一列，高 72px）；
+           「改分」同样变成 2 行，「● 记录中」被拆成两段。
+           解法：允许换行 + 关键元素永不拆字，「10h 02min」这种长值才排得进一行。
+           作用域只有 ≤760px，1440px 桌面端那 4 列 219px 宽的卡片完全不受影响。 */
+        .lj-gd .m-head {flex-wrap: wrap; row-gap: 4px;}
+        .lj-gd .m-head-right {flex-wrap: wrap; justify-content: flex-end; row-gap: 4px;}
+        .lj-gd .m-label,
+        .lj-gd .m-unit,
+        .lj-gd .m-mini-btn {white-space: nowrap;}
+        .lj-gd .m-foot {flex-wrap: wrap; row-gap: 2px;}
+        /* 23px 时「10h 02min」会被撕成两行，降到 19px 刚好一行 */
+        .lj-gd .m-val {font-size: 19px;}
+        /* 「当前状态」卡（原「快捷打卡」）：+30 分钟已经搬去「游玩时长」卡右上角当小角标，
+           这张卡里只剩状态药丸 + 当前时长 + 「标记通关」，所以这里只让「标记通关」
+           自己占一整行做够大的点击区。
+           原来那条 `.gd-quick button {flex:1 1 100%}` 是给「两个大按钮」写的通配，
+           留着会把任何按钮都撑成一整行，故收敛成只点名字。
+           状态药丸/进度值的样式写在组件自己的 <style> 里（见 detail_progress_actions.html）。 */
+        .lj-gd .gd-quick .lj-qa-act {flex: 1 1 100%; white-space: nowrap;}
+        .lj-gd .gd-quick .lj-qa-state,
+        .lj-gd .gd-quick .lj-qa-metric {white-space: nowrap;}
       }
       /* ===== game-detail overrides (mobile shot grid + project icon sizing) ===== */
       .lj-gd.lj-gd { position: relative; }
@@ -196,4 +235,17 @@
       .lj-gd .gd-quick .ms-auto {margin-left: auto;}
       .lj-gd .lb-backdrop {position: absolute; inset: 0; background: transparent; z-index: 0;}
       .lj-gd .lb-top, .lj-gd .lb-stage, .lj-gd .lb-thumbs {position: relative; z-index: 1;}
+
+      /* ===== 成就卡的同步按钮（手写，非 Tailwind） ===== */
+      .lj-gd .m-head-right {display: inline-flex; align-items: center; gap: 6px;}
+      /* 同步中：htmx 发请求时自动给元素挂 .htmx-request，靠它切换文案，不用 JS */
+      .lj-gd .m-sync-busy {display: none; align-items: center; gap: 3px;}
+      .lj-gd .m-sync-btn.htmx-request .m-sync-idle {display: none;}
+      .lj-gd .m-sync-btn.htmx-request .m-sync-busy {display: inline-flex;}
+      .lj-gd .m-sync-btn.htmx-request,
+      .lj-gd .m-sync-btn:disabled {opacity: .5; cursor: progress; pointer-events: none;}
+      .lj-gd .m-sync-note {margin-top: 5px; font-size: 10.5px; line-height: 1.35;}
+      .lj-gd .m-sync-note.is-good {color: var(--emerald);}
+      .lj-gd .m-sync-note.is-warn {color: var(--gold);}
+      .lj-gd .m-sync-note.is-bad {color: var(--verm);}
     </style>

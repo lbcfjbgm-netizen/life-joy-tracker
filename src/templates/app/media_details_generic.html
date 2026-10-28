@@ -73,6 +73,7 @@
 
             {# Create Track Modal #}
             <div x-show="createOpen"
+                 @click.self.stop="createOpen = false"
                  role="dialog"
                  aria-modal="true"
                  class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -84,6 +85,7 @@
 
           {# Track Modal #}
           <div x-show="trackOpen"
+               @click.self.stop="trackOpen = false"
                role="dialog"
                aria-modal="true"
                class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -194,6 +196,16 @@
                       title="{% for genre in current_instance.item.genres %}{{ genre }}{% if not forloop.last %}、{% endif %}{% endfor %}">+{{ current_instance.item.genres|length|add:"-5" }}</span>
               {% endif %}
             {% endif %}
+          </div>
+        {% endif %}
+
+        {% comment %}
+          豆瓣这类数据源只给整部剧、不给分季数据，页面照常渲染但每集信息可能是空的。
+          只有 provider 真的没给这一季时才提示；能拿到分季数据的源一个字都不多。
+        {% endcomment %}
+        {% if season_data_missing %}
+          <div class="mb-4 rounded-lg bg-[#2a2f35] border border-white/10 px-4 py-3 text-sm text-gray-300">
+            豆瓣没有这部剧的分季数据，这一季的内容可能不完整。
           </div>
         {% endif %}
 
@@ -905,6 +917,7 @@
             </button>
 
             <div x-show="listsOpen"
+                 @click.self.stop="listsOpen = false"
                  @keydown.escape.window="listsOpen = false"
                  role="dialog"
                  aria-modal="true"
@@ -932,6 +945,7 @@
             </button>
 
             <div x-show="historyOpen"
+                 @click.self.stop="historyOpen = false"
                  @keydown.escape.window="historyOpen = false"
                  role="dialog"
                  aria-modal="true"
@@ -1153,6 +1167,7 @@
                       </button>
 
                       <div x-show="trackOpen"
+                           @click.self.stop="trackOpen = false"
                            @keydown.escape.window="trackOpen = false"
                            role="dialog"
                            aria-modal="true"
@@ -1278,6 +1293,7 @@
                               </button>
 
                               <div x-show="listsOpen"
+                                   @click.self.stop="listsOpen = false"
                                    @keydown.escape.window="listsOpen = false"
                                    role="dialog"
                                    aria-modal="true"
@@ -1300,6 +1316,7 @@
                                 {% include "app/icons/history.svg" with classes="w-4 h-4" %}
                               </button>
                               <div x-show="historyOpen"
+                                   @click.self.stop="historyOpen = false"
                                    @keydown.escape.window="historyOpen = false"
                                    role="dialog"
                                    aria-modal="true"

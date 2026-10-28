@@ -1,5 +1,10 @@
 import datetime
+import json
 import logging
+import os
+import re
+import shutil
+import subprocess
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -22,9 +27,11 @@ from django.http import (
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from app import (
+    achievements,
     config,
     duration_stats,
     helpers,
@@ -44,6 +51,7 @@ from app.models import (
     TV,
     BasicMedia,
     Episode,
+    Game,
     Highlight,
     Item,
     MediaTypes,
@@ -71,6 +79,11 @@ logger = logging.getLogger(__name__)
 # results arrive in a single batch and are sliced locally, so a huge page
 # number is only a very large offset; capping keeps that bounded.
 MAX_SEARCH_PAGE = 1000
+
+# How long one game's "refresh achievements" button stays closed after a sync.
+# Long enough that a double click never sends a second request to Steam, short
+# enough that a person retrying never has to wait on nothing.
+THROTTLE_SECONDS = 45
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +132,9 @@ def _get_list_pref_bucket(request, media_type):
 def _set_list_pref(request, media_type, name, value):
     """写一项偏好。只有值真的变了才改 session（避免每次请求都写库）。
 
+    传 value=None 表示「删掉这一项」，用于电影 / 剧集 / 季清掉历史遗留的
+    状态档位 —— 留着 None 也照样会被 _full_list_params 过滤掉，但删干净更省心。
+
     注意必须显式给 request.session[key] 赋值，session 才会被标记 modified；
     只改嵌套字典里的值 Django 察觉不到。
     """
@@ -126,9 +142,14 @@ def _set_list_pref(request, media_type, name, value):
         return
     prefs = dict(_get_list_prefs(request))
     bucket = dict(_get_list_pref_bucket(request, media_type))
-    if bucket.get(name) == value:
-        return
-    bucket[name] = value
+    if value is None:
+        if name not in bucket:
+            return
+        bucket.pop(name, None)
+    else:
+        if bucket.get(name) == value:
+            return
+        bucket[name] = value
     prefs[media_type] = bucket
     request.session[PREF_SESSION_KEY] = prefs
 
@@ -159,12 +180,17 @@ def _list_param_names():
     return (*PREF_NAMES, PREF_LEAD)
 
 
-def _full_list_params(saved):
+def _full_list_params(saved, media_type=None):
     """把某个库 session 里记的偏好拼成 URL 参数（顺序固定，便于肉眼比对）。
 
     只输出合法值；空桶返回空列表，调用方据此决定「不跳 / 不推 URL」。
+
+    电影 / 剧集 / 季（``status_filters.is_fixed_status_type``）**永远不输出
+    status**：这三个库的列表恒为全量，把 status 拼回地址栏只会让用户看到
+    「自动跳到已放弃」那种莫名其妙的参数，也是根因之一。
     """
     bucket = saved if isinstance(saved, dict) else {}
+    status_ok = not status_filters.is_fixed_status_type(media_type)
     params = []
     for name in PREF_NAMES:
         value = bucket.get(name)
@@ -172,7 +198,7 @@ def _full_list_params(saved):
             if value == DENSITY_HERO or value in VALID_DENSITIES:
                 params.append((name, value))
         elif name == "status":
-            if value in status_filters.FILTER_VALUES:
+            if status_ok and value in status_filters.FILTER_VALUES:
                 params.append((name, value))
         elif name == "sort":
             if value in _VALID_SORTS:
@@ -268,12 +294,44 @@ def home(request):
         for section_key in section_keys
     ]
 
+    # 新版首页（设计稿 home-A-shelf）：顶栏 5 组数字 + 「继续上次」一排卡片 +
+    # 「书架待启」货架。数据全部复用统计页那套函数，口径不会和 /statistics 打架。
+    in_progress_media = home_sections[0]["media_types"] if home_sections else {}
+    game_shelf = in_progress_media.get(MediaTypes.GAME.value) or {}
+    book_shelf = in_progress_media.get(MediaTypes.BOOK.value) or {}
+
+    # 第一张卡要的是「本周涨得最多的游戏」，它可能是 Completed / Paused，
+    # 物理上进不了「进行中」那个只有 10 条的货架。所以候选池单独查一次全库
+    # 头部（只取前 20 条），但**只用来挑第一张卡** —— 货架和补位卡还是那 10 条，
+    # 模板不会多渲染 1180 张。
+    weekly = stats_playtime.get_weekly_playtime(request.user)
+    if weekly:
+        # 有真增量时，候选就是上榜那几个（本来就只有 3 个）。
+        first_card_candidates = [row["game"] for row in weekly]
+    else:
+        first_card_candidates = list(
+            Game.objects.filter(user=request.user, progress__gt=0)
+            .select_related("item")
+            .order_by("-progress")[:20]
+        )
+
     context = {
         "home_sections": home_sections,
         "current_sort": sort_by,
         "sort_choices": i18n_zh.tr_choices(HomeSortChoices.choices),
         "hide_unreleased": hide_unreleased,
         "items_limit": items_limit,
+        "home_topline": home_helpers.build_home_topline(request.user),
+        # 本周增量（最多 3 条，不含模型集合外的任何东西）。模板目前不单独用，
+        # 留着是为了以后要展示「本周前三」时不必再查一次库。
+        "home_weekly": weekly,
+        "home_continue": home_helpers.build_continue_cards(
+            game_shelf.get("items") or [],
+            book_shelf.get("items") or [],
+            weekly=weekly,
+            candidates=first_card_candidates,
+        ),
+        "home_shelf": home_helpers.planning_book_shelf(request.user),
     }
     return render(request, "app/home.html", context)
 
@@ -454,12 +512,30 @@ def _genre_options(queryset, media_type):
 @require_GET
 def media_list(request, username, media_type):
     """Return the media list page."""
+    # 单集（episode）没有独立的列表页，这里显式拦成 404，别让它掉进下面的偏好逻辑：
+    # 1) 项目自己的 User.get_enabled_media_types() 就明确跳过了 episode，
+    #    侧栏/顶栏从来不会产出 /admin/episode 这种链接；
+    # 2) User 上也从来没有 episode_layout 这个布局偏好字段，
+    #    硬走下去会在 update_preference() 里 getattr 抛 AttributeError（500）。
+    # 返回 404 比 500 诚实：这个页面本来就不存在。
+    if media_type == MediaTypes.EPISODE.value:
+        msg = "Episodes do not have a standalone list page"
+        raise Http404(msg)
+
     target_user = get_object_or_404(User, username=username)
 
     # 这个库自己的 session 偏好（每个 media_type 一桶，互不污染）。
     # 只有「看自己的库」才有意义；看别人的库一律不读也不写 session。
     is_own_list = request.user == target_user
     saved = _get_list_pref_bucket(request, media_type) if is_own_list else {}
+
+    # 电影 / 剧集 / 季这三个库：状态永远是「全部」，既不吃 URL 里的 status，
+    # 也不把它写进用户偏好。豆瓣那边只有「已看过」一种标记，这几类库里压根
+    # 不存在在看 / 已搁置 / 已放弃的记录 —— 一旦有人（或老链接）把
+    # ?status=Dropped 打进来，update_preference 会把它永久写进 movie_status，
+    # 之后每回裸进 /admin/movie 都按「已放弃」筛，476 条电影全被筛掉 → 空白页。
+    # 这就是「电影总自己跳到已放弃页面」的根因，从源头掐掉。
+    status_locked = status_filters.is_fixed_status_type(media_type)
 
     # if user is looking at own page then update preferences
     if request.user == target_user:
@@ -471,10 +547,14 @@ def media_list(request, username, media_type):
             f"{media_type}_sort",
             request.GET.get("sort"),
         )
-        status_filter = target_user.update_preference(
-            f"{media_type}_status",
-            request.GET.get("status"),
-        )
+        if status_locked:
+            # 不写库、不返库里的陈旧值，直接锁死「全部」。
+            status_filter = MediaStatusChoices.ALL
+        else:
+            status_filter = target_user.update_preference(
+                f"{media_type}_status",
+                request.GET.get("status"),
+            )
     else:
         # privacy check then media type check
         if target_user.profile_private:
@@ -501,10 +581,13 @@ def media_list(request, username, media_type):
             f"{media_type}_sort",
             request.GET.get("sort"),
         )
-        status_filter = target_user.get_valid_preference(
-            f"{media_type}_status",
-            request.GET.get("status"),
-        )
+        if status_locked:
+            status_filter = MediaStatusChoices.ALL
+        else:
+            status_filter = target_user.get_valid_preference(
+                f"{media_type}_status",
+                request.GET.get("status"),
+            )
 
     search_query = request.GET.get("search", "")
     page = request.GET.get("page", 1)
@@ -542,10 +625,17 @@ def media_list(request, username, media_type):
     if hero_search_mode and not request.GET.get("status"):
         status_filter = MediaStatusChoices.ALL
 
-    # 下拉四档里「全成就」是界面造出来的伪状态，库里没有这个取值，
+    # 下拉五档里「全成就」「仅通关」是界面造出来的伪状态，库里没有这两个取值，
     # 存进 *_status 字段会违反 check constraint，所以只对本次请求生效。
     requested_status = request.GET.get("status")
-    if requested_status in status_filters.FILTER_VALUES:
+    if status_locked:
+        # 电影 / 剧集 / 季：URL 里的 status 一律无视（老书签、脏链接、
+        # 别人贴过来的 ?status=Dropped），列表永远全量，也不再往 session 里记。
+        # 顺带把 session 里可能残留的旧档位清掉，免得 302 补全又把它拼回地址栏。
+        status_filter = MediaStatusChoices.ALL
+        if is_own_list and (saved or {}).get("status") is not None:
+            _set_list_pref(request, media_type, "status", None)
+    elif requested_status in status_filters.FILTER_VALUES:
         status_filter = requested_status
         # 伪值 "All achievements" 照存进 session（那边不受 DB 约束），
         # 这样「上次选了全成就」下次裸进来还能回来。
@@ -731,10 +821,11 @@ def media_list(request, username, media_type):
         "page_number": media_page.number,
         "total_pages": paginator.num_pages,
         "sort_choices": i18n_zh.tr_choices(MediaSortChoices.choices),
-        # 下拉只给四档：全成就 / 已通关 / 进行中 / 已暂停。
+        # 下拉给五档：全成就 / 已通关 / 仅通关 / 进行中 / 已暂停。
+        # 「全成就」和「仅通关」是同一刀切出来的两半，「已通关」是它们的和。
         # 老值（All / Planning / Dropped）仍要能显示标签，所以另有 status_label_choices。
         # 书和影视没有成就系统，这两类按媒体类型换词（已读完 / 已观看 等），
-        # 取值和筛选逻辑完全不变，游戏仍是原来那四档。
+        # 并去掉两个成就档；取值和筛选逻辑完全不变，游戏仍是原来那五档。
         "status_choices": i18n_zh.tr_choices(status_filters.filter_choices_for(media_type)),
         "status_label_choices": i18n_zh.tr_choices(status_filters.label_choices_for(media_type)),
         "target_user": target_user,
@@ -797,7 +888,7 @@ def media_list(request, username, media_type):
         or not saved  # 进这个视图之前就没记过 → 不跳
     )
     if not skip_redirect:
-        full_params = _full_list_params(saved_now)
+        full_params = _full_list_params(saved_now, media_type)
         if full_params:
             url = reverse("medialist", args=[target_user.username, media_type])
             return redirect(f"{url}?{urlencode(full_params)}")
@@ -808,7 +899,7 @@ def media_list(request, username, media_type):
     # 分页 / 搜索 / 分类不属于「要记住的 5 项」，但它们在这次请求里生效了，
     # 所以原样带上，不能让推回地址栏的链接丢掉用户当前看的页。
     if soft_navigation and saved_now:
-        push_params = _full_list_params(saved_now)
+        push_params = _full_list_params(saved_now, media_type)
         if push_params:
             push_params += [
                 (name, request.GET[name])
@@ -1055,6 +1146,68 @@ def _tv_progress_context(current_instance):
     return season_rows, episode_rows
 
 
+_DETAIL_METADATA_DEFAULTS = {
+    # dict-shaped values the detail templates index into
+    "details": {},
+    "achievements": {},
+    "time_to_beat": {},
+    "external_links": {},
+    "related": {},
+    "providers": {},
+    # list-shaped values the detail templates slice / |length
+    "genres": [],
+    "cast": [],
+    "directors": [],
+    "episodes": [],
+    # numbers: None keeps "no value yet" distinct from a real 0 minute runtime
+    "score": None,
+    "score_count": None,
+    "total_cast_count": None,
+    "total_pages": None,
+    "season_number": None,
+    "episode_number": None,
+    "runtime_minutes": None,
+    "episode_runtime": None,
+    "max_progress": None,
+    # strings
+    "title": "",
+    "title_en": "",
+    "title_zh": "",
+    "season_title": "",
+    "synopsis": "",
+    "image": "",
+    "source": "",
+    "source_url": "",
+    "release_date": "",
+    "media_type": "",
+    "media_id": "",
+}
+
+
+def _missing_detail_value(key):
+    """Return the empty value a detail template expects for ``key``."""
+    default = _DETAIL_METADATA_DEFAULTS.get(key, "")
+    # Hand out a copy so one rendered page cannot mutate the shared default.
+    return default.copy() if isinstance(default, (dict, list)) else default
+
+
+class _DetailMetadata(dict):
+    """A metadata dict that answers every key a detail template can ask for.
+
+    A provider that is down, or answers for an id that does not exist, gives a
+    partial dict; a Django template raises ``VariableDoesNotExist`` on a plain
+    dict miss (unlike an attribute miss, which is silent), so a thin provider
+    answer used to become a 500. Missing keys are filled with the empty value of
+    the type the templates expect, which means a field added to a template later
+    can never take the page down again.
+    """
+
+    def __missing__(self, key):
+        value = _missing_detail_value(key)
+        self[key] = value
+        return value
+
+
 def _detail_extras(media_type, current_instance, media_metadata):
     """Return the per-type extras the redesigned detail pages read.
 
@@ -1106,12 +1259,18 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
             media_id,
             exc_info=True,
         )
-        media_metadata = {
-            "media_id": media_id,
-            "media_type": media_type,
-            "source": source,
-            "title": str(media_id),
-        }
+        media_metadata = _DetailMetadata(
+            {
+                "media_id": media_id,
+                "media_type": media_type,
+                "source": source,
+                "title": str(media_id),
+            },
+        )
+    else:
+        # Every provider dict goes through the same wrapper: a provider that
+        # answers with only some of the keys must not 500 the page either.
+        media_metadata = _DetailMetadata(media_metadata)
     user_medias = BasicMedia.objects.filter_media_prefetch(
         request.user,
         media_id,
@@ -1122,12 +1281,14 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
 
     # Steam achievements are stored per user on the game itself, the metadata
     # of the item can only guess which tracked game to read them from
-    total_achievements = getattr(current_instance, "achievements_total", 0)
+    total_achievements = getattr(current_instance, "achievements_total", 0) or 0
     if total_achievements:
+        # getattr 兜底：只有 Game 有这几个字段，非游戏媒体不该因为读属性
+        # 把整页打成 500（外层 if 只是第一道闸，将来字段改名也不至于炸）。
         media_metadata["achievements"] = {
             "total": total_achievements,
-            "unlocked": current_instance.achievements_unlocked,
-            "percent": current_instance.achievement_percent,
+            "unlocked": getattr(current_instance, "achievements_unlocked", 0) or 0,
+            "percent": getattr(current_instance, "achievement_percent", None),
         }
 
     if current_instance is not None:
@@ -1152,18 +1313,41 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
     else:
         watch_providers = None
 
-    # Steam captures live only in the client cache, so they are read per
-    # request instead of being imported. Anything but a Steam game gets an
-    # empty list, which the template treats as "no screenshot section".
+    # Screenshots are read per request instead of being imported: a Steam game
+    # is served straight from the client's cache folder, and any other game
+    # (hand entered, imported from a notebook) from the local drop-in gallery.
+    # Anything that is not a game gets an empty list, which the template treats
+    # as "no screenshot section".
     screenshots = []
     if current_instance is not None:
-        appid = steam_screenshots.appid_for_item(current_instance.item)
-        if appid:
-            screenshots = steam_screenshots.list_screenshots(appid)
+        gallery_key = steam_screenshots.appid_for_item(current_instance.item)
+        if gallery_key:
+            screenshots = steam_screenshots.list_screenshots(gallery_key)
 
     # Extras the redesigned detail pages read: reading lists for a book, season
     # and episode progress for a show, runtime in minutes for both.
     extras = _detail_extras(media_type, current_instance, media_metadata)
+
+    # The achievement card is its own partial (the refresh button swaps the
+    # whole card in), so it takes its numbers from here and the sync view feeds
+    # it the very same shape. One appid helper decides whether the button shows.
+    achievement_game = current_instance if current_instance is not None else None
+    achievement_appid = (
+        achievements.steam_appid_of(current_instance.item)
+        if achievement_game is not None
+        else None
+    )
+
+    achievement_sync_url = ""
+    if achievement_appid is not None:
+        achievement_sync_url = reverse(
+            "sync_game_achievements",
+            kwargs={
+                "source": current_instance.item.source,
+                "media_type": current_instance.item.media_type,
+                "media_id": current_instance.item.media_id,
+            },
+        )
 
     context = {
         "media": media_metadata,
@@ -1174,6 +1358,9 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
         "watch_provider_region": request.user.watch_provider_region,
         "screenshots": screenshots,
         "screenshot_count": len(screenshots),
+        "achievements": achievements.achievement_summary(achievement_game),
+        "achievement_appid": achievement_appid,
+        "achievement_sync_url": achievement_sync_url,
         **extras,
     }
     return render(request, "app/media_details.html", context)
@@ -1188,7 +1375,6 @@ def season_details(request, source, media_id, title, season_number):  # noqa: AR
         source,
         [season_number],
     )
-    season_metadata = tv_with_seasons_metadata[f"season/{season_number}"]
 
     user_medias = BasicMedia.objects.filter_media_prefetch(
         request.user,
@@ -1200,6 +1386,15 @@ def season_details(request, source, media_id, title, season_number):  # noqa: AR
 
     current_instance = user_medias[0] if user_medias else None
     episodes_in_db = current_instance.episodes.all() if current_instance else []
+
+    season_metadata = helpers.season_metadata_from(
+        tv_with_seasons_metadata,
+        season_number,
+        episodes_in_db,
+    )
+    # Douban describes a show, not its seasons, so the season page for it is
+    # served from what the library holds and says so instead of failing.
+    season_data_missing = f"season/{season_number}" not in tv_with_seasons_metadata
 
     if current_instance is not None:
         helpers.refresh_item_image_if_missing(
@@ -1239,6 +1434,7 @@ def season_details(request, source, media_id, title, season_number):  # noqa: AR
             season_metadata.get("providers"), request.user.watch_provider_region
         ),
         "watch_provider_region": request.user.watch_provider_region,
+        "season_data_missing": season_data_missing,
     }
     return render(request, "app/media_details.html", context)
 
@@ -1385,6 +1581,145 @@ def sync_metadata(request, source, media_type, media_id, season_number=None):
     return helpers.redirect_back(request)
 
 
+@require_POST
+def sync_game_achievements(request, source, media_type, media_id):
+    """Refresh the Steam achievements of one tracked game and return its card.
+
+    The response is always the same partial template the detail page includes,
+    so htmx can swap the card in place and the numbers, the progress bar and
+    the empty state stay in one place.
+
+    Every failure still answers with the card (status 200) plus a short Chinese
+    note inside it: htmx 2 does not swap 4xx/5xx responses by default, so a
+    plain error status would leave the old card on screen with nothing to
+    explain what happened.
+    """
+    game = (
+        Game.objects.filter(
+            user=request.user,
+            item__source=source,
+            item__media_type=media_type,
+            item__media_id=media_id,
+        )
+        .select_related("item")
+        .first()
+    )
+
+    if game is None:
+        raise Http404
+
+    appid = achievements.steam_appid_of(game.item)
+
+    def render_card(notice=None, status=200):
+        """Render the achievement card for the game, with an optional notice."""
+        return render(
+            request,
+            "app/components/achievement_card.html",
+            {
+                "achievements": achievements.achievement_summary(game),
+                "achievement_appid": appid,
+                "achievement_sync_url": reverse(
+                    "sync_game_achievements",
+                    kwargs={
+                        "source": game.item.source,
+                        "media_type": game.item.media_type,
+                        "media_id": game.item.media_id,
+                    },
+                ),
+                "achievement_notice": notice,
+            },
+            status=status,
+        )
+
+    if appid is None:
+        # No button is shown for these entries, so this is a hand typed URL:
+        # answer with a plain 400 rather than pretending a sync happened.
+        return render_card(
+            {"tone": "bad", "text": "这个条目没有 Steam 编号，同步不了"},
+            status=400,
+        )
+
+    # Thirty seconds is long enough to stop a double click from firing a second
+    # request at Steam, short enough that a real retry is never far away.
+    cache_key = f"achievements_sync_{request.user.id}_{appid}"
+    ttl = cache.ttl(cache_key)
+    if ttl is not None and ttl > 0:
+        return render_card(
+            {"tone": "warn", "text": f"刚同步过，{int(ttl) + 1} 秒后再试"},
+        )
+
+    cache.set(cache_key, 1, THROTTLE_SECONDS)
+
+    # Imported here so a plain page view never pulls the whole integrations
+    # package (and its Steam client cache reader) into memory.
+    from integrations.imports import steam_achievements
+
+    try:
+        ok, from_local = steam_achievements.refresh_game_achievements(
+            game,
+            settings.STEAM_ID,
+            delay=0,
+        )
+    except Exception:
+        logger.warning(
+            "achievement refresh failed for appid %s",
+            appid,
+            exc_info=True,
+        )
+        # Let the user retry right away: nothing reached Steam, so the throttle
+        # would only be a "wait" with no sync behind it.
+        cache.delete(cache_key)
+        game.refresh_from_db(
+            fields=[
+                "achievements_total",
+                "achievements_unlocked",
+                "achievements_synced_at",
+                "status",
+            ],
+        )
+        return render_card(
+            {"tone": "bad", "text": "Steam 暂时没给数据，稍后再试"},
+        )
+
+    game.refresh_from_db(
+        fields=[
+            "achievements_total",
+            "achievements_unlocked",
+            "achievements_synced_at",
+            "status",
+        ],
+    )
+
+    if not ok:
+        # Steam answered nothing, so a retry is allowed immediately.
+        cache.delete(cache_key)
+        return render_card(
+            {"tone": "bad", "text": "Steam 暂时没给数据，稍后再试"},
+        )
+
+    if from_local:
+        return render_card(
+            {"tone": "warn", "text": "官网没回应，用本机 Steam 缓存顶上了"},
+        )
+
+    return render_card({"tone": "good", "text": "已刷新"})
+
+
+def _modal_return_url(request):
+    """Return the address a modal's save / delete / cancel action goes back to.
+
+    The modals are normally opened by htmx from a detail page, which passes
+    ``return_url`` explicitly in ``hx-vals``. A bare link, a bookmark or a page
+    reload carries no such parameter, and the old ``request.GET["return_url"]``
+    subscript turned that into a ``KeyError`` and a 500.
+
+    The fallback is the home page: it is what ``helpers.redirect_back`` already
+    uses when a request has no ``next`` at all, so an explicit ``return_url``
+    keeps working exactly as before and only the missing case changes.
+    """
+    return request.GET.get("return_url") or reverse("home")
+
+
 @require_GET
 def track_modal(
     request,
@@ -1440,6 +1775,8 @@ def track_modal(
 
     form = i18n_zh.tr_form_labels(
         get_form_class(media_type)(instance=media, initial=initial_data),
+        # 电影 / 剧集 / 季的状态只留「已观看」一档，其余类型照旧。
+        media_type,
     )
 
     return render(
@@ -1449,7 +1786,7 @@ def track_modal(
             "title": title,
             "form": form,
             "media": media,
-            "return_url": request.GET["return_url"],
+            "return_url": _modal_return_url(request),
         },
     )
 
@@ -1562,7 +1899,10 @@ def episode_save(request):
             source,
             [season_number],
         )
-        season_metadata = tv_with_seasons_metadata[f"season/{season_number}"]
+        season_metadata = helpers.season_metadata_from(
+            tv_with_seasons_metadata,
+            season_number,
+        )
 
         item, _ = Item.objects.get_or_create(
             media_id=media_id,
@@ -1570,7 +1910,7 @@ def episode_save(request):
             media_type=MediaTypes.SEASON.value,
             season_number=season_number,
             defaults={
-                "title": tv_with_seasons_metadata["title"],
+                "title": tv_with_seasons_metadata.get("title", ""),
                 "image": season_metadata["image"],
             },
         )
@@ -1606,7 +1946,31 @@ def create_entry(request):
             if media_type in enabled_types
             or media_type == MediaTypes.EPISODE.value
         ]
-        return render(request, "app/create_entry.html", {"media_types": media_types})
+        # 状态下拉按媒体类型分开给：电影 / 剧集 / 季只有「已观看」一档
+        # （数据全部来自豆瓣，那边只有「已看过」），游戏五档、书籍照旧。
+        # 模板里一个 <select> 服务所有类型，靠 Alpine 在切换类型时替换 option。
+        status_choices_by_type = {
+            media_type: i18n_zh.tr_status_choices(
+                status_filters.form_status_choices(media_type=media_type),
+                media_type,
+            )
+            for media_type in media_types
+        }
+        # 首屏默认选中剧集（见 create_entry.html 里的 mediaType: 'tv'），
+        # 首屏 option 就跟剧集走；切类型时 Alpine 用上面那坨 JSON 重建。
+        default_status_choices = status_choices_by_type.get(
+            MediaTypes.TV.value,
+            i18n_zh.tr_choices(status_filters.form_status_choices()),
+        )
+        return render(
+            request,
+            "app/create_entry.html",
+            {
+                "media_types": media_types,
+                "status_choices": default_status_choices,
+                "status_choices_json": status_choices_by_type,
+            },
+        )
 
     # Process the form submission
     form = ManualItemForm(request.POST, user=request.user)
@@ -1761,7 +2125,7 @@ def history_modal(
             "media_type": media_type,
             "timeline": timeline_entries,
             "total_medias": total_medias,
-            "return_url": request.GET["return_url"],
+            "return_url": _modal_return_url(request),
         },
     )
 
@@ -2045,7 +2409,7 @@ def journal(request):
 
 
 @require_GET
-def service_worker():
+def service_worker(request):
     """Serve the service worker file."""
     sw_path = Path(settings.STATICFILES_DIRS[0]) / "js" / "serviceworker.js"
     with sw_path.open() as f:
@@ -2064,7 +2428,13 @@ def relay_external_image(request):
 @require_GET
 @login_not_required
 def steam_screenshot(request, appid, kind, filename):
-    """Serve one Steam screenshot straight from the local client cache.
+    """Serve one screenshot straight from a local folder.
+
+    ``appid`` is either a Steam appid or the local gallery key of a non-Steam
+    game (its ``media_id``); the module decides which by the shape of the
+    string, so the URL keeps its single ``steam-shot`` route. Nothing about
+    either gallery is imported into the database, so the URL names a directory
+    layout rather than a row id.
 
     Same access rule as :func:`relay_external_image`: no ``@login_required``.
     The page that embeds these images is already behind the login, and a
@@ -2073,9 +2443,9 @@ def steam_screenshot(request, appid, kind, filename):
     endpoints consistent also means a cached image URL never turns into a
     redirect to the login page, which would render as a broken image.
 
-    Every failure is a plain 404: a bad appid, a bad filename, a path that
-    escapes the screenshot root, or a file that has since been deleted. The
-    body is never generated, so an unknown URL costs one directory lookup.
+    Every failure is a plain 404: a bad key, a bad filename, a path that
+    escapes a screenshot root, or a file that has since been deleted. The body
+    is never generated, so an unknown URL costs one directory lookup.
     """
     try:
         path = steam_screenshots.resolve_screenshot_path(appid, kind, filename)
@@ -2130,6 +2500,172 @@ def year_in_review(request):
             "year": year,
             "year_options": payload["years"],
         },
+    )
+
+
+def _share_shot_name(title: str, fallback: str = "详情页") -> str:
+    """把条目名变成能在 Windows 上直接用、还能一眼看出是谁的文件名。
+
+    去非法字符（``\\ / : * ? " < > |``）、压掉多余空格、掐掉过长的尾巴。
+    中文原样保留：这是给人看的文件，不是 URL。
+    """
+    name = re.sub(r'[\\/:*?"<>|\r\n\t]+', " ", title or "")
+    name = re.sub(r"\s+", " ", name).strip()
+    if len(name) > 60:
+        name = name[:60].rstrip()
+    return name or fallback
+
+
+def _share_shot_paths() -> tuple[Path, Path]:
+    """返回（桌面目录, 截图脚本）两个绝对路径。
+
+    桌面取 Windows 的 ``USERPROFILE/Desktop``；OneDrive 把桌面重定向过去时
+    真实位置在 ``OneDrive/Desktop``，两个都探一下，谁在就用谁。探不到就退回
+    用户主目录下的 Desktop（不存在会被截图脚本自己建出来）。
+    """
+    home = Path.home()
+    candidates = []
+    for env_name in ("OneDrive", "OneDriveConsumer"):
+        drive = os.environ.get(env_name)
+        if drive:
+            candidates.append(Path(drive) / "Desktop")
+    candidates.append(home / "Desktop")
+    desktop = next((path for path in candidates if path.is_dir()), home / "Desktop")
+    script = Path(settings.BASE_DIR).parent / ".tools" / "shot_detail.py"
+    return desktop, script
+
+
+@require_POST
+def share_page_shot(request, source, media_type, media_id):
+    """把当前详情页整页拍成长图存到桌面，回一段 JSON 给前端弹提示。
+
+    本站是本地部署，把链接发给别人没有意义（对面打不开 localhost），所以
+    「分享」改成「拍成图」。为什么放在服务端拍：页面颜色是 Tailwind v4 的
+    ``oklch()``，前端 html2canvas 那类库不认这种颜色函数，会渲成错色甚至直接
+    抛异常；而且本地没有这些库，走 CDN 还得联网。服务端让 Chromium 自己去
+    渲染，所见即所得。
+
+    整个过程不碰数据库：建个 item 只为过路由校验、拼出详情页地址。任何失败
+    都回 ``ok: false`` 加一句人话，绝不 500，也不让按钮一直转圈。
+    """
+    title = (request.POST.get("title") or "").strip()
+    detail_path = reverse(
+        "media_details",
+        kwargs={
+            "source": source,
+            "media_type": media_type,
+            "media_id": media_id,
+            "title": slugify(title) or "item",
+        },
+    )
+
+    # 同一用户、同一页 30 秒内只拍一次：连点不该在桌面堆出一串一模一样的文件。
+    last = request.session.get("share_shot_last") or {}
+    now = int(timezone.now().timestamp())
+    if last.get("path") == detail_path and now - int(last.get("at") or 0) < 30:
+        return JsonResponse(
+            {
+                "ok": True,
+                "throttled": True,
+                "name": last.get("name") or "",
+                "message": "刚拍过一张，稍等半分钟再拍。",
+            }
+        )
+
+    desktop, script = _share_shot_paths()
+    # 找装了 Playwright 的解释器：优先环境变量，其次项目自带 .venv，
+    # 最后退回 PATH 里的 python。不写死任何本机路径，别人 clone 下来也能跑。
+    interpreter = next(
+        (
+            path
+            for path in (
+                os.environ.get("YAMTRACK_SHOT_PYTHON"),
+                str(Path(settings.BASE_DIR).parent / ".venv" / "Scripts" / "python.exe"),
+                str(Path(settings.BASE_DIR).parent / ".venv" / "bin" / "python"),
+                shutil.which("python") or "",
+            )
+            if path and Path(path).exists()
+        ),
+        "",
+    )
+    if not interpreter or not script.exists():
+        # 环境里没有那个装了 playwright 的解释器时，给的是不 500 的软失败。
+        return JsonResponse(
+            {
+                "ok": False,
+                "message": "这台机器没装截图工具（Playwright），暂时拍不了。",
+            }
+        )
+
+    stamp = timezone.localtime().strftime("%Y%m%d-%H%M%S")
+    base_name = _share_shot_name(title, fallback=str(media_id))
+    out_path = desktop / f"{base_name} {stamp}.png"
+
+    payload = {
+        "url": request.build_absolute_uri(detail_path),
+        "out": str(out_path),
+        "title": base_name,
+        "cookie": request.COOKIES.get(settings.SESSION_COOKIE_NAME, ""),
+        "width": 1440,
+    }
+
+    try:
+        completed = subprocess.run(
+            [interpreter, str(script), "--json", json.dumps(payload, ensure_ascii=False)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=180,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning("share screenshot timed out for %s", detail_path)
+        return JsonResponse(
+            {"ok": False, "message": "页面太长，这次没拍完，稍后再点一次。"}
+        )
+    except OSError:
+        logger.warning("share screenshot could not start", exc_info=True)
+        return JsonResponse({"ok": False, "message": "截图程序没起来，稍后再试。"})
+
+    result: dict = {}
+    for line in reversed((completed.stdout or "").splitlines()):
+        if line.startswith("_RESULT_JSON_"):
+            try:
+                result = json.loads(line[len("_RESULT_JSON_") :])
+            except ValueError:
+                result = {}
+            break
+
+    if not result.get("ok"):
+        logger.warning(
+            "share screenshot failed for %s: %s",
+            detail_path,
+            (result.get("error") or (completed.stderr or ""))[-400:],
+        )
+        return JsonResponse(
+            {
+                "ok": False,
+                "message": "截图没成功（页面可能还没加载完），再点一次试试。",
+            }
+        )
+
+    request.session["share_shot_last"] = {
+        "path": detail_path,
+        "at": now,
+        "name": result.get("name") or out_path.name,
+    }
+    size_mb = round((result.get("bytes") or 0) / 1024 / 1024, 1)
+    return JsonResponse(
+        {
+            "ok": True,
+            "name": result.get("name") or out_path.name,
+            "dir": str(desktop),
+            "width": result.get("width"),
+            "height": result.get("height"),
+            "bytes": result.get("bytes"),
+            "message": f"已存到桌面：{result.get('name') or out_path.name}（{size_mb} MB）",
+        }
     )
 
 

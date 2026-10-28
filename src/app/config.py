@@ -268,13 +268,15 @@ STATUS_CONFIG = {
         "button_color": COLORS["orange"]["button"],
         "icon": "app/icons/states/paused.svg",
     },
+    # Planning 在界面上并进「已暂停」这一档（i18n_zh 里两者同名），
+    # 所以配色和图标都必须跟 Paused 一致，否则同一个「已暂停」会一蓝一橙。
     Status.PLANNING.value: {
-        "text_color": COLORS["sky"]["text"],
-        "stats_color": COLORS["sky"]["hex"],
-        "background_color": COLORS["sky"]["background"],
-        "background_color_strong": COLORS["sky"]["background_strong"],
-        "button_color": COLORS["sky"]["button"],
-        "icon": "app/icons/states/planning.svg",
+        "text_color": COLORS["orange"]["text"],
+        "stats_color": COLORS["orange"]["hex"],
+        "background_color": COLORS["orange"]["background"],
+        "background_color_strong": COLORS["orange"]["background_strong"],
+        "button_color": COLORS["orange"]["button"],
+        "icon": "app/icons/states/paused.svg",
     },
     Status.DROPPED.value: {
         "text_color": COLORS["red"]["text"],

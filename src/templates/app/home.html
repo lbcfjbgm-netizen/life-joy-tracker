@@ -6,65 +6,795 @@
   {% trans "Home - Yamtrack" %}
 {% endblock title %}
 
+{% block extra_head %}
+  {% if request.resolver_match.url_name == 'home' %}
+    {% comment %}
+      首页新版视觉层（设计稿 ui-redesign/home-A-shelf.html）。
+
+      四条必须守住的规矩，和 statistics.html 同源：
+      1) 所有选择器都挂在 .lj-hm 作用域下，样式只作用于首页，不碰 static/css。
+      2) 元素级重置必须包进 @layer base。main.css 是 Tailwind 4 产物，
+         不在任何 layer 里的普通声明优先级高于所有 layer，裸写 .lj-hm button{}
+         会把卡片里的 bg-indigo-600 / p-2.5 全部压死（详情页踩过）。包进 base 后
+         utilities 那一层仍然赢。
+      3) 颜色/字体变量定义在 .lj-hm 自己身上，亮色主题走
+         html[data-theme="light"] .lj-hm 覆盖，不动 :root。
+      4) 整个 style 包在 url_name == 'home' 判断里，别的页面一个字节都不带。
+      Django 的 {# #} 不能跨行，多行注释必须用 comment 标签。
+    {% endcomment %}
+    <style>
+      /* ---------- 元素级重置：必须留在 base 层 ---------- */
+      @layer base {
+        .lj-hm button {
+          background: none;
+          border: 0;
+          margin: 0;
+          padding: 0;
+          font: inherit;
+          color: inherit;
+          cursor: pointer;
+        }
+        .lj-hm a {
+          color: inherit;
+          text-decoration: none;
+        }
+        .lj-hm h1,
+        .lj-hm h2,
+        .lj-hm h3,
+        .lj-hm p {
+          margin: 0;
+          font-weight: inherit;
+          font-size: inherit;
+        }
+        .lj-hm i {
+          font-style: normal;
+        }
+      }
+
+      /* ---------- 设计稿配色，收敛到 .lj-hm 局部作用域 ---------- */
+      .lj-hm {
+        --font-serif: "Noto Serif SC", "Source Han Serif SC", "Source Han Serif CN", "Songti SC", "STSong", serif;
+        --font-mono: "JetBrains Mono", "Cascadia Mono", "Consolas", ui-monospace, monospace;
+        --bg: #14171b;
+        --ink: #f4f1ea;
+        --ink2: rgba(244, 241, 234, .76);
+        --ink3: rgba(244, 241, 234, .48);
+        --line: rgba(255, 255, 255, .09);
+        --line2: rgba(255, 255, 255, .055);
+        --warm-line: rgba(232, 201, 130, .38);
+        --gold: #e8c982;
+        --gold-soft: rgba(232, 201, 130, .14);
+        --gold-line: rgba(232, 201, 130, .30);
+        --card: rgba(29, 34, 41, .86);
+        --card-hover: rgba(38, 45, 54, .95);
+        --track: rgba(255, 255, 255, .07);
+        --ph: #252b33;
+        --emerald: #34d399;
+        --tag-bg: rgba(255, 255, 255, .055);
+        --ease: cubic-bezier(.22, .8, .24, 1);
+        --shadow-s: 0 8px 24px -6px rgba(0, 0, 0, .42);
+        --skylight: inset 0 1px 0 rgba(255, 255, 255, .07);
+      }
+      html[data-theme="light"] .lj-hm {
+        --bg: #f4efe5;
+        --ink: #221d17;
+        --ink2: rgba(34, 29, 23, .78);
+        --ink3: rgba(34, 29, 23, .52);
+        --line: rgba(48, 34, 18, .12);
+        --line2: rgba(48, 34, 18, .07);
+        --warm-line: rgba(154, 107, 31, .36);
+        --gold: #9a6b1f;
+        --gold-soft: rgba(154, 107, 31, .11);
+        --gold-line: rgba(154, 107, 31, .26);
+        --card: rgba(255, 252, 246, .88);
+        --card-hover: #ffffff;
+        --track: rgba(48, 34, 18, .08);
+        --ph: #e8e0d0;
+        --emerald: #0d9468;
+        --tag-bg: rgba(48, 34, 18, .05);
+        --shadow-s: 0 6px 18px -8px rgba(60, 40, 10, .16);
+        --skylight: inset 0 1px 0 #fff;
+      }
+
+      /* ---------- 页面底盘 ---------- */
+      .lj-hm {
+        max-width: 1520px;
+        margin: 0 auto;
+        padding: clamp(14px, 1.4vw, 24px) clamp(14px, 1.6vw, 26px) 34px;
+        border-radius: 20px;
+        background: var(--bg);
+        color: var(--ink);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ---------- 页头 ---------- */
+      .lj-hm .hd {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 24px;
+        padding-bottom: 15px;
+        margin-bottom: 18px;
+        border-bottom: 1px solid var(--line);
+        flex-wrap: wrap;
+      }
+      .lj-hm .hd-l {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        min-width: 0;
+      }
+      .lj-hm .eyebrow {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: .20em;
+        color: var(--gold);
+        text-transform: uppercase;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .lj-hm .eyebrow::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--gold);
+        box-shadow: 0 0 8px var(--gold);
+      }
+      .lj-hm .h1 {
+        font-family: var(--font-serif);
+        font-size: 27px;
+        font-weight: 700;
+        letter-spacing: .02em;
+        line-height: 1.25;
+        color: var(--ink);
+      }
+      .lj-hm .h1 em {
+        font-style: normal;
+        color: var(--gold);
+      }
+      .lj-hm .hd-sub {
+        font-size: 12px;
+        color: var(--ink3);
+        font-family: var(--font-mono);
+      }
+
+      /* 顶栏右侧：5 组统计词条。设计稿只有 3 组，这里按用户要求扩到 5 组；
+         窄屏靠 flex-wrap 折行，绝不允许把页面撑出横向滚动。 */
+      .lj-hm .hd-r {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        flex-wrap: wrap;
+        row-gap: 10px;
+      }
+      .lj-hm .hd-stat {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        text-align: right;
+        position: relative;
+        padding-left: 18px;
+      }
+      .lj-hm .hd-stat + .hd-stat::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 4px;
+        bottom: 4px;
+        width: 1px;
+        background: var(--line2);
+      }
+      .lj-hm .hd-stat b {
+        font-family: var(--font-mono);
+        font-size: 20px;
+        font-weight: 700;
+        line-height: 1.1;
+        color: var(--ink);
+        white-space: nowrap;
+      }
+      .lj-hm .hd-stat b u {
+        text-decoration: none;
+        font-size: 12px;
+        font-weight: 600;
+        opacity: .55;
+        margin-left: 1px;
+      }
+      .lj-hm .hd-stat b s {
+        text-decoration: none;
+        font-size: 12px;
+        font-weight: 600;
+        opacity: .5;
+      }
+      .lj-hm .hd-stat span {
+        font-size: 10.5px;
+        color: var(--ink3);
+        letter-spacing: .06em;
+        white-space: nowrap;
+      }
+      .lj-hm .num {
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ---------- 继续上次 ---------- */
+      .lj-hm .now {
+        display: grid;
+        grid-template-columns: 1.35fr 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 28px;
+      }
+      @media (max-width: 900px) {
+        .lj-hm .now { grid-template-columns: 1fr; }
+      }
+      .lj-hm .now-card {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 13px 15px;
+        border-radius: 14px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        box-shadow: var(--skylight), var(--shadow-s);
+        overflow: hidden;
+        transition: transform .2s var(--ease), border-color .2s var(--ease);
+      }
+      .lj-hm .now-card:hover {
+        transform: translateY(-2px);
+        border-color: var(--warm-line);
+      }
+      .lj-hm .now-cover {
+        width: 58px;
+        height: 82px;
+        border-radius: 7px;
+        object-fit: cover;
+        flex: 0 0 auto;
+        background: var(--ph);
+      }
+      .lj-hm .now-body {
+        min-width: 0;
+        flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .lj-hm .now-kicker {
+        font-size: 10px;
+        letter-spacing: .14em;
+        color: var(--gold);
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+      .lj-hm .now-title {
+        font-family: var(--font-serif);
+        font-size: 14.5px;
+        font-weight: 700;
+        line-height: 1.3;
+        color: var(--ink);
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .lj-hm .now-meta {
+        font-size: 11px;
+        color: var(--ink3);
+        font-family: var(--font-mono);
+      }
+      .lj-hm .now-big .now-cover {
+        width: 70px;
+        height: 99px;
+      }
+      .lj-hm .now-big .now-title {
+        font-size: 16px;
+      }
+
+      /* ---------- 分区 ---------- */
+      .lj-hm .sec {
+        margin-bottom: 30px;
+      }
+      .lj-hm .sec-hd {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin-bottom: 11px;
+      }
+      .lj-hm .sec-t {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-width: 0;
+      }
+      .lj-hm .sec-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-family: var(--font-serif);
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--ink);
+        letter-spacing: .04em;
+        white-space: nowrap;
+      }
+      .lj-hm .sec-label-bar {
+        width: 3px;
+        height: 14px;
+        border-radius: 2px;
+        background: var(--gold);
+        flex: 0 0 auto;
+      }
+      .lj-hm .sec-en {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: .16em;
+        color: var(--ink3);
+        font-weight: 500;
+        white-space: nowrap;
+      }
+      .lj-hm .sec-n {
+        font-size: 10.5px;
+        color: var(--ink3);
+        font-family: var(--font-mono);
+        padding: 1px 7px;
+        border-radius: 999px;
+        background: var(--tag-bg);
+        border: 1px solid var(--line2);
+      }
+      .lj-hm .link-more {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11.5px;
+        color: var(--ink3);
+        transition: color .2s;
+        white-space: nowrap;
+      }
+      .lj-hm .link-more:hover {
+        color: var(--gold);
+      }
+
+      /* ---------- 正在玩：4 列横向卡 ---------- */
+      .lj-hm .game-row {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+      @media (max-width: 1180px) {
+        .lj-hm .game-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+      @media (max-width: 640px) {
+        .lj-hm .game-row { grid-template-columns: 1fr; }
+      }
+      .lj-hm .g-card {
+        display: flex;
+        gap: 12px;
+        padding: 10px;
+        border-radius: 14px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        box-shadow: var(--skylight), var(--shadow-s);
+        position: relative;
+        overflow: hidden;
+        transition: transform .2s var(--ease), border-color .2s var(--ease), background .2s;
+      }
+      .lj-hm .g-card:hover {
+        transform: translateY(-2px);
+        border-color: var(--warm-line);
+        background: var(--card-hover);
+      }
+      .lj-hm .g-cover {
+        width: 86px;
+        height: 129px;
+        border-radius: 8px;
+        object-fit: cover;
+        flex: 0 0 auto;
+        background: var(--ph);
+        box-shadow: 0 8px 22px -8px rgba(0, 0, 0, .6);
+      }
+      .lj-hm .g-body {
+        min-width: 0;
+        flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding-top: 2px;
+      }
+      .lj-hm .g-title {
+        font-family: var(--font-serif);
+        font-size: 13.5px;
+        font-weight: 700;
+        line-height: 1.32;
+        color: var(--ink);
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .lj-hm .g-nums {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 10px;
+        font-size: 10.5px;
+        color: var(--ink3);
+        font-family: var(--font-mono);
+      }
+      .lj-hm .g-nums b {
+        color: var(--ink2);
+        font-weight: 600;
+      }
+      .lj-hm .g-foot {
+        margin-top: auto;
+        min-width: 0;
+      }
+      /* 卡片内的编辑条（progress_changer）原本是深色 Tailwind 配色，
+         这里只把它压紧一点，颜色交给组件自己，避免把它改花。 */
+      .lj-hm .g-foot > div {
+        padding-left: 0;
+        padding-right: 0;
+        padding-bottom: 0;
+      }
+
+      /* ---------- 在读：横向书轨 ---------- */
+      .lj-hm .rail {
+        display: flex;
+        gap: 14px;
+        overflow-x: auto;
+        padding: 2px 2px 10px;
+        scroll-snap-type: x proximity;
+        scrollbar-width: thin;
+      }
+      .lj-hm .bk {
+        flex: 0 0 132px;
+        width: 132px;
+        min-width: 0;
+        scroll-snap-align: start;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+      }
+      .lj-hm .bk-cov {
+        position: relative;
+        width: 132px;
+        height: 198px;
+        border-radius: 9px;
+        overflow: hidden;
+        background: var(--ph);
+        box-shadow: 0 10px 26px -10px rgba(0, 0, 0, .62), 0 0 0 1px var(--line2);
+        transition: transform .24s var(--ease), box-shadow .24s var(--ease);
+      }
+      .lj-hm .bk-cov img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+      .lj-hm .bk-t {
+        margin-top: 8px;
+        font-size: 12px;
+        line-height: 1.4;
+        /* 固定两行高度：书名字数差很多，不锁死这一排的编辑条就会高低不齐 */
+        height: 2.8em;
+        color: var(--ink);
+        font-family: var(--font-serif);
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .lj-hm .bk-m {
+        margin-top: 3px;
+        font-size: 10.5px;
+        color: var(--ink3);
+        font-family: var(--font-mono);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .lj-hm .bk-pct {
+        position: absolute;
+        left: 8px;
+        bottom: 9px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--gold);
+        text-shadow: 0 1px 4px rgba(0, 0, 0, .6);
+      }
+      .lj-hm .bk-bar {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 3px;
+        background: rgba(255, 255, 255, .16);
+      }
+      .lj-hm .bk-bar > i {
+        display: block;
+        height: 100%;
+        background: var(--gold);
+        border-radius: 0 2px 2px 0;
+      }
+      .lj-hm .bk .bk-edit {
+        margin-top: auto;
+        padding-top: 2px;
+      }
+
+      /* ---------- 卡片上的悬停操作（加入追踪 / 列表 / 历史） ---------- */
+      /* 设计稿没这块，但它替掉了旧版的深色遮罩层，必须自带定位和配色。
+         用 pointer-events 控制可点，不用 opacity，避免"看不见但能点"。 */
+      .lj-hm .hc-acts {
+        position: absolute;
+        left: 5px;
+        right: 5px;
+        bottom: 5px;
+        display: flex;
+        gap: 3px;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity .2s var(--ease);
+        z-index: 3;
+      }
+      .lj-hm .g-card:hover .hc-acts,
+      .lj-hm .g-card:focus-within .hc-acts,
+      .lj-hm .bk:hover .hc-acts,
+      .lj-hm .bk:focus-within .hc-acts {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .lj-hm .hc-cover {
+        position: relative;
+        flex: 0 0 auto;
+      }
+      /* 操作钮里塞的是 svg，给个固定尺寸免得撑变形 */
+      .lj-hm .hc-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        color: #fff;
+        background: rgba(20, 23, 27, .82);
+        border: 1px solid rgba(255, 255, 255, .14);
+        cursor: pointer;
+        transition: transform .16s var(--ease), background .16s;
+      }
+      .lj-hm .hc-btn svg {
+        display: block;
+        width: 13px;
+        height: 13px;
+      }
+      .lj-hm .hc-btn:hover {
+        transform: translateY(-1px);
+      }
+      .lj-hm .hc-track:hover {
+        background: #6366f1;
+      }
+      .lj-hm .hc-lists:hover {
+        background: #059669;
+      }
+      .lj-hm .hc-hist:hover {
+        background: #d97706;
+      }
+      /* 更新日角标：书卡没有这块地方，只有游戏卡用 */
+      .lj-hm .g-next {
+        position: absolute;
+        top: 4px;
+        left: 4px;
+        max-width: calc(100% - 8px);
+        font-size: 9px;
+        font-family: var(--font-mono);
+        color: #fff;
+        background: rgba(20, 23, 27, .82);
+        border-radius: 4px;
+        padding: 1px 4px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        z-index: 2;
+      }
+      /* progress_changer 自带 Tailwind 内边距，嵌进窄书卡时收一收 */
+      .lj-hm .bk-edit > div {
+        padding-left: 0;
+        padding-right: 0;
+        padding-bottom: 0;
+      }
+
+      /* ---------- 书架待启：小格 ---------- */
+      .lj-hm .mini-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+        gap: 11px;
+      }
+      .lj-hm .mn {
+        display: block;
+        min-width: 0;
+      }
+      .lj-hm .mn img {
+        width: 100%;
+        aspect-ratio: 2 / 3;
+        object-fit: cover;
+        border-radius: 7px;
+        background: var(--ph);
+        box-shadow: 0 0 0 1px var(--line2);
+        transition: transform .22s var(--ease);
+      }
+      .lj-hm .mn:hover img {
+        transform: translateY(-2px);
+      }
+      .lj-hm .mn span {
+        display: block;
+        margin-top: 6px;
+        font-size: 11px;
+        color: var(--ink3);
+        line-height: 1.35;
+        display: -webkit-box;
+        -webkit-line-clamp: 1;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      /* ---------- 空态 / 加载更多 / 脚注 ---------- */
+      .lj-hm .hm-empty {
+        border: 1px dashed var(--line);
+        border-radius: 14px;
+        padding: 40px 20px;
+        text-align: center;
+        color: var(--ink3);
+        font-size: 12.5px;
+      }
+      .lj-hm .hm-empty b {
+        display: block;
+        font-family: var(--font-serif);
+        font-size: 15px;
+        color: var(--ink);
+        margin-bottom: 6px;
+      }
+      .lj-hm .lj-more {
+        margin-top: 14px;
+        display: flex;
+        justify-content: center;
+      }
+      .lj-hm .lj-more button {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 6px 14px;
+        font-size: 11.5px;
+        font-family: var(--font-mono);
+        color: var(--ink2);
+        background: var(--tag-bg);
+      }
+      .lj-hm .lj-more button:hover {
+        border-color: var(--warm-line);
+        color: var(--gold);
+      }
+      .lj-hm .foot {
+        margin-top: 30px;
+        padding-top: 16px;
+        border-top: 1px solid var(--line2);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        flex-wrap: wrap;
+        font-size: 11px;
+        color: var(--ink3);
+        font-family: var(--font-mono);
+      }
+      .lj-hm .foot-links {
+        display: flex;
+        gap: 16px;
+      }
+      .lj-hm .foot-links a:hover {
+        color: var(--gold);
+      }
+    </style>
+  {% endif %}
+{% endblock extra_head %}
+
 {% block content %}
-  <div class="space-y-8">
-    <div class="flex flex-col gap-4 sm:grid sm:grid-cols-[1fr_auto_1fr] sm:items-center">
-      <h1 class="text-3xl font-bold sm:col-start-1 sm:justify-self-start">{% trans "Home" %}</h1>
-      <div class="flex flex-wrap items-center justify-center gap-3 sm:col-start-3 sm:justify-self-end">
-        {% comment %}
-        「隐藏未上映」按钮已移除：本库进行中的游戏/书都没有未来事件，
-        这个过滤没有任何作用对象，点了也看不到变化。
-        视图层的 hide_unreleased 参数逻辑保留不动（URL 里带
-        ?hide_unreleased=true 时仍然生效，排序链接也会带上）。
-        {% endcomment %}
-        <div class="relative" x-data="{ open: false }">
-          <button @click="open = !open"
-                  @click.outside="open = false"
-                  class="flex items-center gap-2 rounded-lg border border-gray-700 bg-[#39404b] px-4 py-2 min-h-11 text-sm font-medium text-white transition-colors hover:bg-[#454d5a] cursor-pointer">
-            {% include "app/icons/arrows-up-down.svg" with classes="w-4 h-4" %}
-            <span>{% if current_sort == "upcoming" %}即将上映{% elif current_sort == "recent" %}最近{% elif current_sort == "completion" %}完成度{% elif current_sort == "episodes_left" %}剩余集数{% elif current_sort == "title" %}标题{% else %}{{ current_sort }}{% endif %}</span>
-            {% include "app/icons/chevron-down.svg" with classes="w-4 h-4 text-gray-400" %}
-          </button>
-          <div x-show="open"
-               x-transition:enter="transition ease-out duration-100"
-               x-transition:enter-start="transform opacity-0 scale-95"
-               x-transition:enter-end="transform opacity-100 scale-100"
-               x-transition:leave="transition ease-in duration-75"
-               x-transition:leave-start="transform opacity-100 scale-100"
-               x-transition:leave-end="transform opacity-0 scale-95"
-               class="absolute right-0 z-10 mt-2 w-52 overflow-hidden rounded-lg border border-gray-700 bg-[#39404b] py-1 shadow-lg">
-            {% for value, label in sort_choices %}
-              <a href="{% url 'home' %}?sort={{ value }}{% if hide_unreleased %}&hide_unreleased=true{% endif %}"
-                 class="block w-full px-4 py-2 min-h-11 text-left text-sm transition-colors {% if current_sort == value %}bg-indigo-600 text-white font-medium{% else %}text-gray-300 hover:bg-[#454d5a] hover:text-white{% endif %}">
-                {{ label }}
-              </a>
-            {% endfor %}
-          </div>
+  <div class="lj-hm">
+    {% comment %}
+      顶栏：左边标题，右边 5 组统计词条。
+      数字全部来自视图里的 home_topline（口径 = 统计页同一套函数 + 同一段时间范围），
+      不在这里写死任何数值。
+    {% endcomment %}
+    <header class="hd">
+      <div class="hd-l">
+        <span class="eyebrow">LIFE JOY · HOME</span>
+        <h1 class="h1">继续上次的<em>地方</em></h1>
+        <span class="hd-sub">{{ home_topline.range_text }} · {{ home_topline.year }} 年</span>
+      </div>
+      <div class="hd-r">
+        <div class="hd-stat">
+          <b class="num">{{ home_topline.completed_text }}<s>/</s>{{ home_topline.total_text }}</b>
+          <span>已完成 / 全部词条</span>
+        </div>
+        <div class="hd-stat">
+          <b class="num">{{ home_topline.movie_hours_text }}<u>h</u></b>
+          <span>电影 · {{ home_topline.movie_count }} 部</span>
+        </div>
+        <div class="hd-stat">
+          <b class="num">{{ home_topline.game_hours_text }}</b>
+          <span>游戏 · {{ home_topline.game_count }} 款</span>
+        </div>
+        <div class="hd-stat">
+          <b class="num">{{ home_topline.tv_hours_text }}<u>h</u></b>
+          <span>剧集 · {{ home_topline.tv_count }} 部</span>
+        </div>
+        <div class="hd-stat">
+          <b class="num">{{ home_topline.reading_hours_text }}<u>h</u></b>
+          <span>今年读书 · {{ home_topline.reading_books }} 本</span>
         </div>
       </div>
-    </div>
+    </header>
 
-    <div class="space-y-16">
-      {% for section in home_sections %}
-        {% include "app/components/home_section.html" with section=section %}
-      {% empty %}
-        <div class="flex flex-col items-center justify-center rounded-lg border border-dashed border-gray-700 bg-[#2a2f35] px-6 py-16 text-center">
-          <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#39404b]">
-            {% include "app/icons/eye-closed.svg" with classes="h-8 w-8 text-gray-300" %}
+    {% if home_continue %}
+      <section class="now">
+        {% for card in home_continue %}
+          <a class="now-card {% if forloop.first %}now-big{% endif %}"
+             href="{{ card.media.item|media_url }}">
+            <img class="now-cover"
+                 src="{{ card.media.item.image|relay_image }}"
+                 alt="{{ card.media }}"
+                 loading="lazy">
+            <div class="now-body">
+              <span class="now-kicker">{{ card.kicker }}</span>
+              <span class="now-title">{{ card.media }}</span>
+              <span class="now-meta">{{ card.meta }}</span>
+            </div>
+          </a>
+        {% endfor %}
+      </section>
+    {% endif %}
+
+    {% for section in home_sections %}
+      {% include "app/components/home_section.html" with section=section %}
+    {% endfor %}
+
+    {% comment %}
+      书架待启：库里 Planning 的书。这一块不走统计页的日期范围
+      （Planning 的书起止日期都是空的，按区间筛会一本不剩），直接按状态取。
+    {% endcomment %}
+    {% if home_shelf %}
+      <section class="sec">
+        <div class="sec-hd">
+          <div class="sec-t">
+            <span class="sec-label"><i class="sec-label-bar"></i>书架待启</span>
+            <span class="sec-en">SHELF · NOT STARTED</span>
+            <span class="sec-n">{{ home_shelf|length }}</span>
           </div>
-          <h3 class="text-xl font-semibold text-white">{% trans "All sections are hidden" %}</h3>
-          <p class="mt-2 max-w-md text-sm text-gray-400">
-            {% trans "Every home section is turned off. Open the preferences page and enable In Progress or Planning to see them again." %}
-          </p>
-          <div class="mt-6">
-            <a href="{% url 'preferences' %}"
-               class="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 min-h-11 text-sm font-medium text-white transition-colors hover:bg-indigo-700">
-              {% include "app/icons/settings.svg" with classes="h-4 w-4" %}
-              {% trans "Open preferences" %}
-            </a>
-          </div>
+          <a class="link-more"
+             href="{% url 'medialist' username=user.username media_type='book' %}">全部书籍 →</a>
         </div>
-      {% endfor %}
-    </div>
+        <div class="mini-grid">
+          {% for book in home_shelf %}
+            <a class="mn" href="{{ book.item|media_url }}" title="{{ book }}">
+              <img src="{{ book.item.image|relay_image }}" alt="{{ book }}" loading="lazy">
+              <span>{{ book }}</span>
+            </a>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% if not home_sections and not home_shelf %}
+      <div class="hm-empty">
+        <b>这里还什么都没有</b>
+        去「偏好设置」打开想看的货架，或者先在搜索里加几条进来的。
+      </div>
+    {% endif %}
+
+    <footer class="foot">
+      <span>{{ home_topline.range_text }} · 共 {{ home_topline.total_text }} 条词条 · 已完成 {{ home_topline.completed_text }}</span>
+      <div class="foot-links">
+        <a href="{% url 'statistics' %}">统计总览</a>
+        <a href="{% url 'journal' %}">日志</a>
+        <a href="{% url 'preferences' %}">设置</a>
+      </div>
+    </footer>
   </div>
 {% endblock content %}

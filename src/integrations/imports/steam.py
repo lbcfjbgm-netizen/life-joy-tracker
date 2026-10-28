@@ -15,7 +15,7 @@ import app
 from app.models import MediaTypes, Sources, Status
 from app.providers import services
 from app.providers import steam as steam_provider
-from integrations.imports import helpers
+from integrations.imports import cn_names, helpers, steam_local
 from integrations.imports.helpers import MediaImportError, MediaImportUnexpectedError
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,16 @@ COVER_CHECK_TIMEOUT = 3
 # exactly.
 FAMILY_IMPORT_PLAYED_ONLY = True
 
+# A third set of games exists that neither Steam web endpoint reports: titles
+# launched on this machine that belong to the account's own library nor to a
+# relative's. The client keeps their playtime on disk anyway (see
+# ``steam_local``), which is the only trace they leave. They are merged into
+# the import on top of the two API sources, and flagged in the notes like the
+# family ones so the origin of every card stays readable. Reading the files is
+# local and free, so this is on by default; turning it off only costs those
+# games.
+IMPORT_LOCAL_ONLY = True
+
 # Games the operator decided to keep out of the library live in this file. It is
 # rebuilt by ``.tools/rebuild_blocklist.py`` from the review score, the playtime
 # and the two week play log, and read on every import so a rebuilt list needs no
@@ -72,9 +82,25 @@ BLOCKLIST_PATH = (
     Path(settings.BASE_DIR).parent / ".tools" / "raw" / "steam_blocklist.json"
 )
 
+# Games the operator took out of the library by hand, one row per game marked
+# as dropped for good. Unlike the blocklist they are never given a second
+# chance: an exemption would put back exactly the games that were removed on
+# purpose. Deleting an appid from the JSON file is what brings a game back, so
+# the list is re-read on every import and needs no restart.
+EXCLUDED_PATH = (
+    Path(settings.BASE_DIR).parent / ".tools" / "raw" / "steam_excluded.json"
+)
+
 # Ten hours of total playtime buys a game back even when its review score is
 # poor: something played that long was clearly worth it.
 BLOCKED_MIN_PLAY_MINUTES = 600
+
+# A game played during the last two weeks is in progress, but not every source
+# reports the two week counter: the Steam client file only keeps the time of the
+# last session, and the endpoints leave the counter out for games played on
+# another machine. The timestamp of that session is compared against this window
+# instead, in seconds, so both signals share the same two weeks.
+RECENT_PLAY_WINDOW = 14 * 24 * 60 * 60
 
 # The Steam endpoints are reachable directly from this machine, but the
 # operator's proxy also answers and is tried first when it is listening, as it
@@ -111,6 +137,26 @@ def read_blocklist():
             data = json.load(fh)
         return {int(entry["appid"]) for entry in data.get("appids", [])}
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return set()
+
+
+def read_excluded():
+    """Return the appids the operator took out of the library on purpose.
+
+    这张表是用户手动放弃 (Dropped) 的游戏, 和黑名单分开: 黑名单里的游戏
+    玩够 10 小时还能被自动「复活」, 这张表里的不会 -- 用户是主动不要它们的.
+    想让某个游戏回来, 就把它从 ``.tools/raw/steam_excluded.json`` 的
+    ``appids`` 里删掉 (删掉 ``detail`` 里那行没用), 下次同步它就会重新出现.
+
+    The file is written by hand and by tooling, so a broken one only costs the
+    filter, never the import.
+    """
+    try:
+        with EXCLUDED_PATH.open(encoding="utf-8") as fh:
+            data = json.load(fh)
+        # Unlike the blocklist, the entries here are plain integers
+        return {int(appid) for appid in data.get("appids", [])}
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return set()
 
 
@@ -400,6 +446,11 @@ class SteamImporter:
         self.recently_played = set()
         self.revived = set()
         self.skipped_blocked = 0
+        self.skipped_excluded = 0
+
+        # Read once here: the games removed by hand are never given a second
+        # chance, so the list only has to be read once per run
+        self.excluded = read_excluded()
 
         logger.info(
             "Initialized Steam importer for Steam ID %s with mode %s",
@@ -415,19 +466,55 @@ class SteamImporter:
         # ones, flagged in the notes so both origins stay readable
         games = owned_games + self._get_family_shared_games()
 
+        # Games the client played on this machine but neither endpoint lists
+        games = games + self._get_local_only_games(games)
+
         if not games:
             logger.info("No games found for Steam user %s", self.steam_id)
             return {}, ""
+
+        # 兜底: 用户要求私密/隐藏的游戏一个都不能再出现, 而它们可能从任何
+        # 一个来源混进来 -- 自己买的, 家庭共享的, 本机记录的 -- 所以在入库前
+        # 再按私密清单整体筛一遍, 别的地方漏了也不至于把垃圾游戏加回来.
+        private = {str(appid) for appid in steam_local.read_private_appids()}
+        if private:
+            before = len(games)
+            games = [game for game in games if str(game.get("appid")) not in private]
+            logger.info(
+                "Skipped %d private or hidden Steam games (%d left of %d)",
+                before - len(games),
+                len(games),
+                before,
+            )
 
         # Read once per import: a rebuilt list is picked up by the next run
         self.blocklist = read_blocklist()
         self.recently_played = fetch_recently_played(self.api_key, self.steam_id)
         self.revived = set()
         self.skipped_blocked = 0
+        self.skipped_excluded = 0
         games = [game for game in games if not self._is_blocked(game)]
 
         for game_data in games:
             self._process_game(game_data)
+
+        # The client file knows the playtime of every game it ever ran, while
+        # the two endpoints only cover the games they list. A title already in
+        # the library therefore keeps whatever the API reported when it was
+        # first imported, even when the client kept counting. Only the games
+        # that are still behind are raised here, through the same one way
+        # updater so the playtime is never lowered.
+        self._backfill_local_playtime()
+
+        # The backfill only raises the playtime; a game the user paused and
+        # played again since gets its status back on the pass below
+        self._promote_recently_played()
+
+        # Names the operator wrote down by hand land in title_zh, so the search
+        # box finds a game by its Chinese name even before the store answered
+        # for it. Only the manual table is applied here: asking the store costs
+        # one request per game and would stall every daily import.
+        self._apply_cn_names()
 
         helpers.cleanup_existing_media(self.to_delete, self.user)
         helpers.bulk_create_media(self.bulk_media, self.user)
@@ -454,16 +541,197 @@ class SteamImporter:
 
         logger.info(
             "Steam import completed for user %s: %s "
-            "(skipped_blocked=%d, revived=%d, blocklist=%d, recently_played=%d)",
+            "(skipped_blocked=%d, skipped_excluded=%d, revived=%d, "
+            "blocklist=%d, excluded=%d, recently_played=%d)",
             self.user.username,
             imported_counts,
             self.skipped_blocked,
+            self.skipped_excluded,
             len(self.revived),
             len(self.blocklist),
+            len(self.excluded),
             len(self.recently_played),
         )
 
         return imported_counts, "\n".join(self.warnings) if self.warnings else ""
+
+    def _local_playtime(self):
+        """Return the playtime the client file records, minus the excluded games.
+
+        The three exclusion lists outrank every playtime and every status: a
+        game that is private, removed on purpose or blocked must not be written
+        by an import even when the library still holds it. Reading them in one
+        place keeps the two local passes of the import in agreement.
+
+        Returns:
+            dict: ``{appid: {"playtime_minutes": int, "last_played": int}}``,
+            empty when the client file can't be read
+        """
+        # The blocklist is only read in ``import_data``; a caller that skipped
+        # it would filter against an empty set, so it is read here if missing
+        private = steam_local.read_private_appids()
+        excluded = self.excluded or read_excluded()
+        blocked = self.blocklist or read_blocklist()
+
+        try:
+            local = steam_local.local_playtime_map(
+                exclude_appids=private | excluded | blocked,
+            )
+        except Exception:
+            logger.warning(
+                "Could not read the local playtime of the Steam games",
+                exc_info=True,
+            )
+            return {}
+
+        logger.debug(
+            "Local playtime read for %d games (%d private, %d excluded, "
+            "%d blocked left out)",
+            len(local),
+            len(private),
+            len(excluded),
+            len(blocked),
+        )
+        return local
+
+    def _backfill_local_playtime(self):
+        """Raise the playtime of tracked games the client file knows better.
+
+        The games of this source are the ones the two endpoints never reported,
+        so the import loops right over the ones that are only known to the
+        client file and were imported once, from a run that had the playtime it
+        has today. Any time played since then is lost, because no later API
+        answer carries the game at all.
+
+        The playtime is the only field written: the score, notes, dates and
+        status of the entry stay exactly as they are.
+
+        Returns:
+            int: number of games whose playtime was raised
+        """
+        # In overwrite mode every tracked game is deleted and rebuilt from the
+        # sources, so the rows read here belong to records that are about to
+        # disappear; the rebuilt ones already carry the playtime of this run
+        if not IMPORT_LOCAL_ONLY or self.mode == "overwrite":
+            return 0
+
+        local = self._local_playtime()
+        if not local:
+            return 0
+
+        tracked = self.existing_media[MediaTypes.GAME.value][Sources.STEAM.value]
+        raised = 0
+
+        for appid, entry in local.items():
+            game = tracked.get(appid)
+            if game is None:
+                continue
+
+            minutes = int(entry.get("playtime_minutes") or 0)
+            if minutes <= game.progress:
+                continue
+
+            if helpers.sync_existing_media(game, {"progress": minutes}):
+                raised += 1
+                queued = self.bulk_media_updates[MediaTypes.GAME.value]
+                if game not in queued:
+                    queued.append(game)
+                logger.debug(
+                    "Raised the playtime of Steam game %s to %d minutes",
+                    appid,
+                    minutes,
+                )
+
+        logger.info(
+            "Raised the playtime of %d Steam games from the local client file",
+            raised,
+        )
+        return raised
+
+    def _promote_recently_played(self):
+        """Move paused Steam games played within the window back to in progress.
+
+        A game played again is in progress, but the status of a paused game
+        belongs to the user and the one way updater of the imports leaves it
+        alone, so ``advance_status`` refuses to move it. The paused games that
+        the client file places inside the same window are moved here instead,
+        on a path of their own, so no other media type follows.
+
+        Only the status is written: the score, notes, dates and progress of the
+        entry stay exactly as they are, and a finished game is never pulled
+        back to in progress.
+
+        Returns:
+            int: number of games moved back to in progress
+        """
+        # Same gate as the playtime backfill: overwrite mode rebuilds every row
+        # from the sources, and a run that skips the local file has no timestamp
+        if not IMPORT_LOCAL_ONLY or self.mode == "overwrite":
+            return 0
+
+        local = self._local_playtime()
+        if not local:
+            return 0
+
+        tracked = self.existing_media[MediaTypes.GAME.value][Sources.STEAM.value]
+        now = time.time()
+        promoted = 0
+
+        for appid, entry in local.items():
+            game = tracked.get(appid)
+            if game is None or game.status != Status.PAUSED.value:
+                continue
+
+            last_played = int(entry.get("last_played") or 0)
+            if not last_played or now - last_played > RECENT_PLAY_WINDOW:
+                continue
+
+            game.status = Status.IN_PROGRESS.value
+            promoted += 1
+            queued = self.bulk_media_updates[MediaTypes.GAME.value]
+            if game not in queued:
+                queued.append(game)
+            logger.debug(
+                "Moved paused Steam game %s back to in progress, played %d "
+                "seconds ago",
+                appid,
+                int(now - last_played),
+            )
+
+        logger.info(
+            "Moved %d paused Steam games played recently back to in progress",
+            promoted,
+        )
+        return promoted
+
+    def _apply_cn_names(self):
+        """Store the hand written Chinese names of the Steam games.
+
+        The search box matches ``title``, ``title_zh`` and ``title_en``, so a
+        game is findable by its Chinese name only once that name is in
+        ``title_zh``. The store carries a localized name for a handful of the
+        games only, which is why the names the operator wrote down by hand are
+        the ones applied here.
+
+        Only the manual table is read: the store costs one request per game and
+        would stall every daily import. Only ``title_zh`` is written, and a row
+        that already holds a different name keeps it.
+
+        Returns:
+            int: number of games whose ``title_zh`` was written
+        """
+        try:
+            applied = cn_names.apply_manual_names()
+        except Exception:
+            # A broken table or a locked database must never fail the import
+            logger.warning(
+                "Could not apply the hand written Chinese names",
+                exc_info=True,
+            )
+            return 0
+
+        logger.info("Applied %d Chinese names from the manual table", applied)
+        return applied
 
     def _is_blocked(self, game_data):
         """Return whether a game must stay out of the library.
@@ -472,11 +740,20 @@ class SteamImporter:
         played during the last two weeks, or played for ten hours in total.
         Such a game is imported normally and its status is restored by
         ``_revive_blocked``, which lifts the block on its own.
+
+        A game on the excluded list is skipped before any of that: it is one
+        the operator removed on purpose, so no playtime buys it back.
         """
         try:
             appid = int(game_data.get("appid"))
         except (TypeError, ValueError):
             return False
+
+        if appid in self.excluded:
+            # 这张表是用户主动放弃的, 不走「玩够 10 小时就复活」那套逻辑
+            self.skipped_excluded += 1
+            logger.info("Skipping %s: removed from the library on purpose", appid)
+            return True
 
         if appid not in self.blocklist:
             return False
@@ -498,7 +775,13 @@ class SteamImporter:
         self.skipped_blocked += 1
         return True
 
-    def _revive_blocked(self, game, playtime_forever, playtime_2weeks):
+    def _revive_blocked(
+        self,
+        game,
+        playtime_forever,
+        playtime_2weeks,
+        last_played=None,
+    ):
         """Give a game its status back when it earned an exemption."""
         if game.status != Status.DROPPED.value:
             return
@@ -507,6 +790,7 @@ class SteamImporter:
             playtime_2weeks,
             achievements_unlocked=game.achievements_unlocked,
             achievements_total=game.achievements_total,
+            last_played=last_played,
         )
         if status == Status.DROPPED.value:
             return
@@ -688,6 +972,75 @@ class SteamImporter:
         )
         return shared
 
+    def _get_local_only_games(self, known_games):
+        """Return the games played here that neither Steam endpoint reports.
+
+        ``GetOwnedGames`` only covers the games bought with the account and
+        ``GetSharedLibraryApps`` only the ones lent by a relative, so a title
+        that belongs to neither is invisible to both. The Steam client still
+        records its playtime on disk, and that file is the only trace left.
+
+        The playtime is stored in minutes, the same unit as ``playtime_2weeks``
+        of the API and as the progress of a game, so it needs no conversion.
+
+        Args:
+            known_games (list): the games already read from the API, whose App
+                IDs are left out to avoid importing a game twice
+
+        Returns:
+            list: game dictionaries shaped like the ones of the API, plus
+            ``local_only: True`` so the notes can show where they came from
+        """
+        if not IMPORT_LOCAL_ONLY:
+            return []
+
+        known_appids = {
+            str(game.get("appid")) for game in known_games if game.get("appid")
+        }
+
+        # The private and hidden games of the account are read here and left
+        # out, so the local file can't put back what was just deleted
+        private = steam_local.read_private_appids()
+
+        try:
+            games = steam_local.local_only_games(
+                known_appids,
+                exclude_appids=private,
+            )
+        except Exception:
+            # Whatever breaks while reading the client's files must not cost
+            # the games the two APIs already returned
+            logger.warning(
+                "Could not read the games played locally by Steam user %s",
+                self.steam_id,
+                exc_info=True,
+            )
+            return []
+
+        local = [
+            {
+                "appid": game["appid"],
+                "name": game["name"],
+                "playtime_forever": game["playtime_minutes"],
+                # The client records no counter for the last two weeks, so the
+                # status comes from the timestamp of the last session instead,
+                # which is read by ``_determine_game_status``
+                "playtime_2weeks": 0,
+                "rtime_last_played": game["last_played"],
+                "local_only": True,
+            }
+            for game in games
+        ]
+
+        logger.info(
+            "Found %d games played locally that Steam does not report "
+            "(%d already known, %d private or hidden left out)",
+            len(local),
+            len(known_appids),
+            len(private),
+        )
+        return local
+
     def _process_game(self, game_data):
         """Process a single game from Steam API response."""
         appid = str(game_data["appid"])
@@ -695,9 +1048,14 @@ class SteamImporter:
         # Playtime is in minutes, the same unit as the progress of a game
         playtime_forever = int(game_data.get("playtime_forever") or 0)
         playtime_2weeks = int(game_data.get("playtime_2weeks") or 0)
+        # Unix time of the last session, in seconds; only the local file and
+        # the recently played endpoint carry it, the owned one does not
+        last_played = int(game_data.get("rtime_last_played") or 0) or None
         notes = "Imported from Steam"
         if game_data.get("family_shared"):
             notes += "（家庭共享）"  # noqa: RUF001
+        if game_data.get("local_only"):
+            notes += "（本地记录）"  # noqa: RUF001
 
         try:
             existing_game = self.existing_media[MediaTypes.GAME.value][
@@ -707,13 +1065,19 @@ class SteamImporter:
             # A game that was blocked before and earned an exemption since
             # gets its status back, whatever the import mode is
             if existing_game and appid in self.revived:
-                self._revive_blocked(existing_game, playtime_forever, playtime_2weeks)
+                self._revive_blocked(
+                    existing_game,
+                    playtime_forever,
+                    playtime_2weeks,
+                    last_played=last_played,
+                )
 
             if existing_game and self.mode == "overwrite":
                 self._queue_existing_game_update(
                     existing_game,
                     playtime_forever,
                     playtime_2weeks,
+                    last_played=last_played,
                 )
                 return
 
@@ -723,6 +1087,7 @@ class SteamImporter:
                     existing_game,
                     playtime_forever,
                     playtime_2weeks,
+                    last_played=last_played,
                 )
                 return
 
@@ -740,7 +1105,11 @@ class SteamImporter:
 
             # Determine status from playtime here; the achievement sync will
             # upgrade it to "completed" once every achievement is unlocked.
-            status = self._determine_game_status(playtime_forever, playtime_2weeks)
+            status = self._determine_game_status(
+                playtime_forever,
+                playtime_2weeks,
+                last_played=last_played,
+            )
 
             # Create game object
             game = app.models.Game(
@@ -777,7 +1146,13 @@ class SteamImporter:
 
         return item
 
-    def _queue_existing_game_update(self, game, playtime_forever, playtime_2weeks):
+    def _queue_existing_game_update(
+        self,
+        game,
+        playtime_forever,
+        playtime_2weeks,
+        last_played=None,
+    ):
         """Queue updates for an existing game when Steam overwrite is used."""
         changed = False
 
@@ -790,6 +1165,7 @@ class SteamImporter:
             playtime_2weeks,
             achievements_unlocked=game.achievements_unlocked,
             achievements_total=game.achievements_total,
+            last_played=last_played,
         )
         if (
             game.status
@@ -807,7 +1183,13 @@ class SteamImporter:
             self.bulk_media_updates[MediaTypes.GAME.value].append(game)
             logger.debug("Queued Steam update for existing game %s", game)
 
-    def _sync_existing_game(self, game, playtime_forever, playtime_2weeks):
+    def _sync_existing_game(
+        self,
+        game,
+        playtime_forever,
+        playtime_2weeks,
+        last_played=None,
+    ):
         """Raise the playtime of an existing game and move its status forward.
 
         The playtime tracked in Yamtrack can include time played outside Steam,
@@ -818,6 +1200,7 @@ class SteamImporter:
             playtime_2weeks,
             achievements_unlocked=game.achievements_unlocked,
             achievements_total=game.achievements_total,
+            last_played=last_played,
         )
         changed = helpers.sync_existing_media(
             game,
@@ -840,6 +1223,7 @@ class SteamImporter:
         playtime_2weeks,
         achievements_unlocked=0,
         achievements_total=0,
+        last_played=None,
     ):
         """Determine game status based on achievements and Steam playtime.
 
@@ -848,13 +1232,18 @@ class SteamImporter:
             playtime_2weeks (int): Playtime in last 2 weeks in minutes
             achievements_unlocked (int): Number of unlocked achievements
             achievements_total (int): Number of achievements the game has
+            last_played (int, optional): Unix time of the last session, in
+                seconds; read from the Steam client file, which keeps no
+                two week counter
 
         Returns:
             str: Status value from Status choices
 
         A fully completed achievement list wins over everything else: the game
         is finished even if it is still being launched. Otherwise the playtime
-        decides, from most recent to oldest activity.
+        decides, from most recent to oldest activity. The two week counter is
+        used first, and the timestamp of the last session covers the sources
+        that have no counter at all.
         """
         # Every achievement unlocked means the game is finished.
         if achievements_total > 0 and achievements_unlocked >= achievements_total:
@@ -866,6 +1255,12 @@ class SteamImporter:
 
         # Games played in the last 2 weeks are "In Progress"
         if playtime_2weeks > 0:
+            return Status.IN_PROGRESS.value
+
+        # The local file records no two week counter, so the last session is
+        # used instead: anything inside the same window counts as recent. A
+        # missing or unreadable timestamp changes nothing.
+        if last_played and time.time() - last_played <= RECENT_PLAY_WINDOW:
             return Status.IN_PROGRESS.value
 
         # Games with total playtime but no recent activity are "On Hold"

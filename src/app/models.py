@@ -979,10 +979,17 @@ class MediaManager(models.Manager):
         item_ids = [media.item.id for media in media_list]
 
         # Fetch all relevant events in a single query
-        events_data = events.models.Event.objects.filter(
-            item_id__in=item_ids,
-            datetime__lte=current_datetime,
-        ).values("item_id", "content_number")
+        # .order_by() 清掉 Event.Meta.ordering 带来的默认排序：这里只逐个条目取
+        # 最大进度，遍历顺序无意义；保留排序会逼 SQLite 建临时文件，本机系统临时
+        # 目录对 Python 不可写，会报 unable to open database file 导致整页 500。
+        events_data = (
+            events.models.Event.objects.filter(
+                item_id__in=item_ids,
+                datetime__lte=current_datetime,
+            )
+            .values("item_id", "content_number")
+            .order_by()
+        )
 
         # Process events to find max content number per item
         for event in events_data:
@@ -1005,7 +1012,11 @@ class MediaManager(models.Manager):
             item__season_number__gt=0,
             datetime__lte=current_datetime,
             content_number__isnull=False,
-        ).select_related("item")
+            # 显式清掉 Event.Meta.ordering 带来的 ORDER BY：下面只按字典逐条取
+            # 每个季度的最大集数，遍历顺序完全不影响结果；而带上排序时 SQLite
+            # 要对几千行宽行（JOIN item 全列）建临时文件，本机系统临时目录不可写，
+            # 会直接报 unable to open database file，导致 /admin/tv 500。
+        ).select_related("item").order_by()
 
         # Create a dictionary to store max episode numbers per season per show
         released_episodes = {}
@@ -1419,7 +1430,7 @@ class Media(models.Model):
         """Increase the progress of the media by one."""
         self.progress += 1
         self.save()
-        logger.info("Incresed progress of %s to %s", self, self.progress)
+        logger.info("Increased progress of %s to %s", self, self.progress)
 
     def decrease_progress(self):
         """Decrease the progress of the media by one."""
@@ -1478,6 +1489,47 @@ class TV(Media):
             for season in self.seasons.all()
             if season.item.season_number != 0
         )
+
+    def increase_progress(self):
+        """Watch the next episode in the first season that is not finished.
+
+        ``progress`` on a TV show is derived from its seasons and therefore
+        read-only, so the increment is handed to the season. Specials (season
+        zero) are skipped, the same way ``progress`` skips them.
+        """
+        seasons = sorted(
+            (
+                season
+                for season in self.seasons.all()
+                if season.item.season_number != 0
+                and season.status != Status.COMPLETED.value
+            ),
+            key=lambda season: season.item.season_number,
+        )
+
+        if not seasons:
+            logger.info("No more episodes to watch.")
+            return
+
+        seasons[0].increase_progress()
+
+    def decrease_progress(self):
+        """Unwatch the last episode of the season that has progress."""
+        seasons = sorted(
+            (
+                season
+                for season in self.seasons.all()
+                if season.item.season_number != 0 and season.progress > 0
+            ),
+            key=lambda season: season.item.season_number,
+            reverse=True,
+        )
+
+        if not seasons:
+            logger.info("No episodes to unwatch.")
+            return
+
+        seasons[0].decrease_progress()
 
     @property
     def last_watched(self):
@@ -1564,7 +1616,16 @@ class TV(Media):
             season_numbers,
         )
         for season_number in season_numbers:
-            season_metadata = tv_with_seasons_metadata[f"season/{season_number}"]
+            season_metadata = tv_with_seasons_metadata.get(f"season/{season_number}")
+            if season_metadata is None:
+                # The source describes the show but not its seasons; leaving
+                # this season out is better than failing the whole save.
+                logger.info(
+                    "No season %s metadata for %s, skipped",
+                    season_number,
+                    self.item.media_id,
+                )
+                continue
 
             item, _ = Item.objects.get_or_create(
                 media_id=self.item.media_id,
@@ -1616,9 +1677,13 @@ class TV(Media):
         bulk_update_with_history(seasons_to_update, Season, ["status"])
 
         for season_instance in seasons_to_create + seasons_to_update:
-            season_metadata = tv_with_seasons_metadata[
+            season_metadata = tv_with_seasons_metadata.get(
                 f"season/{season_instance.item.season_number}"
-            ]
+            )
+            if season_metadata is None:
+                # No per-season data from this source: nothing can be filled in
+                # for the season, so it is left exactly as it is.
+                continue
             episodes_to_create.extend(
                 season_instance.get_remaining_eps(
                     season_metadata,
@@ -2264,7 +2329,17 @@ class Episode(models.Model):
             self.item.source,
             [season_number],
         )
-        season_metadata = tv_with_seasons_metadata[f"season/{season_number}"]
+        # A source without per-season data (Douban) returns the show alone, so
+        # the episode count falls back to what the season already holds. Without
+        # this every episode save raised a KeyError and the whole request 500ed.
+        season_metadata = tv_with_seasons_metadata.get(f"season/{season_number}")
+        if season_metadata is None:
+            season_metadata = {
+                "episodes": [
+                    {"episode_number": episode.item.episode_number}
+                    for episode in self.related_season.episodes.all()
+                ],
+            }
         max_progress = len(season_metadata["episodes"])
 
         # clear prefetch cache to get the updated episodes
@@ -2378,6 +2453,11 @@ class Game(Media):
     achievements_total = models.PositiveIntegerField(default=0)
     achievements_unlocked = models.PositiveIntegerField(default=0)
     achievements_synced_at = models.DateTimeField(null=True, blank=True)
+
+    # 连续失败次数：每同步一次拿不到成就就 +1，拿到就归零。
+    # 用途是给补漏任务一个止损线 —— 同一个 appid 连试 10 次都空手而归，
+    # 说明 Steam 那边确实没数据（403 私有 / 没有成就系统），再试也是白跑。
+    achievement_sync_failures = models.PositiveSmallIntegerField(default=0)
 
     # Per-aspect ratings imported from Notion: each is -10..10, except visual
     # which cannot go below 0. They are separate from the overall score.
@@ -2788,3 +2868,63 @@ class PlaytimeSnapshot(models.Model):
     def __str__(self):
         """Return the game and month this snapshot belongs to."""
         return f"{self.game.item.title} @ {self.captured_on:%Y-%m} = {self.playtime_minutes}min"
+
+
+class PlaytimeDaily(models.Model):
+    """每个游戏每天一条累计时长快照，用来算「本周玩了多久」这类短期增量。
+
+    为什么要单独一张日表：Steam 只给「累计时长」这一个数字，本站从来没存过
+    逐日的游玩记录（导入进来的 historical 记录是同一时刻的批量快照，时间戳
+    不可信，用它会算出大量假增量）。月度表 PlaytimeSnapshot 粒度太粗，
+    要算「最近 7 天」就必须有逐日的累计值。
+
+    口径：某天的增量 = 当天这条的累计分钟数 - 「7 天前或更早的最近一条」的累计
+    分钟数。两个数字来自同一张表、同一套采集逻辑，所以相减是自洽的。
+    副作用是站点上线后要攒够 7 天，才有第一条合法基线 —— 在那之前任何
+    「本周增长」都是编的，调用方必须降级显示，不能用累计值冒充。
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="playtime_daily",
+    )
+    game = models.ForeignKey(
+        Game,
+        on_delete=models.CASCADE,
+        related_name="playtime_daily",
+    )
+    captured_on = models.DateField(
+        "快照日期",
+        help_text="自然日，一天一条，靠唯一约束保证重跑不重复。",
+    )
+    playtime_minutes = models.IntegerField(
+        "累计游玩分钟数",
+        default=0,
+        help_text="这一天的累计值（不是当天增量）。",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        """Meta options for the model."""
+
+        verbose_name = "playtime daily snapshot"
+        verbose_name_plural = "playtime daily snapshots"
+        ordering = ["-captured_on", "game_id"]
+        constraints = [
+            UniqueConstraint(
+                fields=["user", "game", "captured_on"],
+                name="unique_playtime_daily_per_user_game_day",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["user", "captured_on"],
+                name="playtime_daily_user_day_idx",
+            ),
+        ]
+
+    def __str__(self):
+        """Return the game and day this snapshot belongs to."""
+        return f"{self.game.item.title} @ {self.captured_on:%Y-%m-%d} = {self.playtime_minutes}min"

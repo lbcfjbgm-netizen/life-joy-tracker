@@ -81,6 +81,7 @@
   {% else %}
     {# Track Modal #}
     <div x-show="trackOpen"
+         @click.self.stop="trackOpen = false"
          @keydown.escape.window="trackOpen = false"
          role="dialog"
          aria-modal="true"
@@ -93,6 +94,7 @@
 
   {# Lists Modal #}
   <div x-show="listsOpen"
+       @click.self.stop="listsOpen = false"
        @keydown.escape.window="listsOpen = false"
        role="dialog"
        aria-modal="true"
@@ -104,6 +106,7 @@
 
   {# History Modal #}
   <div x-show="historyOpen"
+       @click.self.stop="historyOpen = false"
        @keydown.escape.window="historyOpen = false"
        role="dialog"
        aria-modal="true"

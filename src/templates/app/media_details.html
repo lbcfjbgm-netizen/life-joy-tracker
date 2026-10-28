@@ -17,7 +17,7 @@
 {% endblock extra_head %}
 
 {% block title %}
-  {{ media.title }}
+  {{ media.title|friendly_title:media.media_id }}
   {% if media.media_type == MediaTypes.SEASON.value %}S{{ media.season_number }}{% endif %}
   {% trans "- Yamtrack" %}
 {% endblock title %}

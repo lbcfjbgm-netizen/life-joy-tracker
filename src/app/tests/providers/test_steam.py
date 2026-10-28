@@ -470,8 +470,10 @@ class SteamSearchRoutingTest(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "12/30")
-        self.assertContains(response, "(40%)")
+        # 游戏详情页换成设计稿卡片后，格式是「12」+「/ 30 已解锁」+「已解锁 40%」，
+        # 不再是老的「12/30」「(40%)」那种写法（那两个字符串现在只在 generic 兜底页里）。
+        self.assertContains(response, "/ 30 已解锁")
+        self.assertContains(response, "已解锁 40%")
         self.assertEqual(game.achievement_percent, 40)
 
     def test_default_game_source_is_steam(self):

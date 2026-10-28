@@ -1,20 +1,27 @@
-"""按月给每个游戏存一条「累计游玩时长」快照。
+"""按月（或按天）给每个游戏存一条「累计游玩时长」快照。
 
 背景：本站的 historical 记录是导入时的一次性批量快照，时间戳都是假的，
 所以「过去每天玩了多久」数据库里根本没有，事后也补不出来。唯一的办法
-是从现在开始，每月把每个游戏的累计时长存一份，下个月减这个月就是当月时长。
+是从现在开始，每月（每月版）或每天（--daily 版）把每个游戏的累计时长存一份，
+下个月/过几天减掉上一次，就是这段时间玩了多久。
 
 用法：
-    python .tools/snapshot_playtime.py             # 预演，不写库（默认）
-    python .tools/snapshot_playtime.py --apply     # 真正写入
+    python .tools/snapshot_playtime.py                    # 月度，预演（默认）
+    python .tools/snapshot_playtime.py --apply            # 月度，真写
     python .tools/snapshot_playtime.py --apply --user admin
     python .tools/snapshot_playtime.py --apply --month 2026-10
 
+    python .tools/snapshot_playtime.py --daily            # 日度，预演
+    python .tools/snapshot_playtime.py --daily --apply    # 日度，真写
+
 规则：
     1. 只统计 progress > 0 或 achievements_total > 0 的游戏（玩过的）。
-    2. 每个游戏每月只留一条，captured_on 固定当月 1 号，靠唯一约束 + 先查后写
-       保证同一个月跑多少次都不会重复。
-    3. 时长和上一条快照相同就不写（省行数）；第一次跑时全部写，留基线。
+    2. 月度：每个游戏每月只留一条，captured_on 固定当月 1 号。
+       日度：每个游戏每天只留一条，captured_on 就是当天（timezone.localdate()）。
+       两种都靠唯一约束 + update_or_create 保证重跑不重复（幂等）。
+    3. 月度：时长和上一条快照相同就不写（省行数）；第一次跑时全部写，留基线。
+       日度：**每天每个玩过的游戏都写一条**，哪怕时长没变 —— 首页要算
+       「最近 7 天增量」，缺任何一天都会让那天的差值算不出来。
 """
 
 from __future__ import annotations
@@ -43,7 +50,7 @@ from django.db import transaction  # noqa: E402
 from django.db.models import OuterRef, Q, Subquery  # noqa: E402
 from django.utils import timezone  # noqa: E402
 
-from app.models import Game, PlaytimeSnapshot  # noqa: E402
+from app.models import Game, PlaytimeDaily, PlaytimeSnapshot  # noqa: E402
 
 logger = logging.getLogger("snapshot_playtime")
 
@@ -192,9 +199,67 @@ def run(user, captured_on: datetime.date, *, apply: bool) -> dict:
     }
 
 
+def collect_daily_rows(user) -> list[dict]:
+    """算出今天该写哪些日快照，返回待写列表。
+
+    和月度版的差别：日度**不过滤「和上次一样」**。首页算的是「今天 - 7 天前」
+    这条长跨度的差，中间任何一天缺一行都不影响差值本身，但缺数据会让
+    「哪天有基线」变得不确定，所以每天每个玩过的游戏都写一条，最省心。
+    """
+    games = (
+        Game.objects.filter(user=user, progress__gt=0)
+        .values("id", "item__title", "progress")
+        .order_by("id")
+    )
+    return [
+        {
+            "game_id": row["id"],
+            "title": row["item__title"],
+            "minutes": int(row["progress"] or 0),
+        }
+        for row in games
+    ]
+
+
+def run_daily(user, captured_on: datetime.date, *, apply: bool) -> dict:
+    """执行日度采集（幂等：同一天跑多少次都只有一条）。"""
+    plan = collect_daily_rows(user)
+
+    written = 0
+    if apply and plan:
+        with transaction.atomic():
+            for row in plan:
+                PlaytimeDaily.objects.update_or_create(
+                    user=user,
+                    game_id=row["game_id"],
+                    captured_on=captured_on,
+                    defaults={"playtime_minutes": row["minutes"]},
+                )
+                written += 1
+
+    mode = "APPLY" if apply else "DRY-RUN"
+    logger.info(
+        "[%s] user=%s day=%s 有待写游戏=%d 实写=%d",
+        mode,
+        user.username,
+        captured_on.isoformat(),
+        len(plan),
+        written,
+    )
+
+    return {
+        "mode": mode,
+        "day": captured_on.isoformat(),
+        "total_games": len(plan),
+        "written": written,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     """命令行入口。"""
-    parser = argparse.ArgumentParser(description="按月存游戏累计游玩时长快照")
+    parser = argparse.ArgumentParser(
+        description="存游戏累计游玩时长快照（默认按月，加 --daily 按天）",
+    )
     parser.add_argument(
         "--apply",
         action="store_true",
@@ -205,17 +270,21 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="预演，不写库（默认行为，显式写出来更清楚）",
     )
+    parser.add_argument(
+        "--daily",
+        action="store_true",
+        help="写日快照 PlaytimeDaily（默认写月度 PlaytimeSnapshot）",
+    )
     parser.add_argument("--user", default=None, help="只处理这个用户名，默认全部用户")
     parser.add_argument(
         "--month",
         default=None,
-        help="快照月份 YYYY-MM，默认当前月",
+        help="月度快照的月份 YYYY-MM，默认当前月（--daily 时忽略）",
     )
     args = parser.parse_args(argv)
 
     setup_logging()
     setup_console()
-    captured_on = parse_month(args.month)
 
     user_model = get_user_model()
     if args.user:
@@ -229,6 +298,11 @@ def main(argv: list[str] | None = None) -> int:
     apply = args.apply and not args.dry_run
     if args.apply and args.dry_run:
         logger.warning("--apply 和 --dry-run 同时给了，按 dry-run 处理")
+
+    if args.daily:
+        return _main_daily(users, apply=apply)
+
+    captured_on = parse_month(args.month)
 
     total_written = 0
     for user in users:
@@ -244,6 +318,25 @@ def main(argv: list[str] | None = None) -> int:
         print("（预演模式，没有写库。要真写请加 --apply）")
     else:
         print(f"本次共写入 {total_written} 条快照。")
+    return 0
+
+
+def _main_daily(users, *, apply: bool) -> int:
+    """--daily 分支：写今天的日快照。"""
+    captured_on = timezone.localdate()
+    total_written = 0
+    for user in users:
+        result = run_daily(user, captured_on, apply=apply)
+        total_written += result["written"]
+        print(
+            f"日期 {result['day']} / 有时长的游戏 {result['total_games']} 个 / "
+            f"实写 {result['written']} 条",
+        )
+
+    if not apply:
+        print("（预演模式，没有写库。要真写请加 --apply）")
+    else:
+        print(f"本次共写入 {total_written} 条日快照。")
     return 0
 
 

@@ -951,6 +951,31 @@
       .yir-genre-layout { grid-template-columns: 1fr; }
       .yir-kpi-grid { grid-template-columns: 1fr; }
     }
+
+    /* ==================================================================
+       10. 窄屏（≤640px）：区块头角标必须能折行
+       ------------------------------------------------------------------
+       320px 实测事故：.yir-sec-head 是 display:flex 但没开 flex-wrap，
+       而 .yir-sec-badge 是 flex:0 0 auto + white-space:nowrap，
+       「展示最近通关的 6 款 · 其余 12 款在游戏库」这种长文案 intrinsic
+       宽度到 229px，撑得卡片外框 256 → 360，把 <html> 的 initial
+       containing block 一起顶到 360。于是所有 position:fixed 的层
+       （本站的 .yir-toast、base.html 那个 div.fixed.top-24 消息层）
+       跟着按 360 铺开，documentElement.scrollWidth 就比 clientWidth
+       多出 40px。
+       注意：改 toast / 给 html 加 overflow-x:hidden 都无效（实测过），
+       因为它们是「被传染的受害者」，不是原因。只能从这条链的根部断：
+       让 .yir-sec-head 能折行、让 badge 允许收缩并换行。
+       ================================================================== */
+    @media (max-width: 640px) {
+      .yir-sec-head { flex-wrap: wrap; }
+      .yir-sec-badge {
+        flex: 0 1 auto;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        max-width: 100%;
+      }
+    }
   </style>
 {% endblock extra_head %}
 

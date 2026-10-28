@@ -21,6 +21,65 @@ from users.models import WeekStartDayChoices
 
 logger = logging.getLogger(__name__)
 
+# 统计页日期参数的安全边界。库里最早的数据也就在近几十年，1900 之前没有任何业务
+# 意义，却足够把 timezone.make_aware 搞炸：settings.TIME_ZONE 是 Asia/Shanghai，
+# 公元 1 年它用的是 LMT +08:05:43，于是 date(1, 1, 1) 变成
+# ``0001-01-01 00:00:00+08:05:43``，再转 UTC 就下溢抛
+# ``OverflowError: date value out of range``（整页 500）。上界取 2999 是跟
+# ``get_user_media`` 里「只开一边」时用的哨兵保持一致。
+MIN_DATE = datetime.date(1900, 1, 1)
+MAX_DATE = datetime.date(2999, 12, 31)
+
+
+def _safe_parse_date(value):
+    """把 ``YYYY-MM-DD`` 解析成 ``date``；任何不合法值都返回 None（=「无限制」）。
+
+    两个坑都在这里兜住：
+
+    1. ``django.utils.dateparse.parse_date`` 对 ``2026-13-45`` / ``2026-02-30``
+       这类**语法合法但日期不存在**的字符串是抛 ``ValueError``，不是返回 None
+       （只有 ``abc`` 这种才返回 None），所以必须 try/except。
+    2. 比 ``MIN_DATE`` 早或比 ``MAX_DATE`` 晚的值直接不要，免得下游
+       ``timezone.make_aware`` 再去算史前时区。
+    """
+    if not value or value == "all":
+        return None
+    try:
+        parsed = parse_date(value)
+    except ValueError:  # 2026-13-45 / 2026-02-30 / 2026-00-00
+        logger.warning("统计时间范围里的日期不合法，当作无限制：%s", value)
+        return None
+    if parsed is None:
+        return None
+    if parsed < MIN_DATE or parsed > MAX_DATE:
+        logger.warning("统计时间范围里的日期越界，当作无限制：%s", value)
+        return None
+    return parsed
+
+
+def _to_aware_bound(day, at):
+    """``date`` + 时刻 → aware datetime；万一仍溢出就退回 None（而不是 500）。"""
+    if day is None:
+        return None
+    try:
+        return timezone.make_aware(datetime.datetime.combine(day, at))
+    except (OverflowError, ValueError):
+        logger.warning("统计时间范围时区换算溢出，当作无限制：%s", day)
+        return None
+
+
+def _bound_to_field(value):
+    """把边界值写成入库字符串：None / 越界一律 ``"all"``，其余 ``YYYY-MM-DD``。"""
+    if value is None:
+        return "all"
+    day = value.date() if isinstance(value, datetime.datetime) else value
+    if not isinstance(day, datetime.date):
+        return "all"
+    if day < MIN_DATE or day > MAX_DATE:
+        logger.warning("统计时间范围越界，不写库：%s", day)
+        return "all"
+    return day.strftime("%Y-%m-%d")
+
 
 def save_date_range(user, start_date, end_date):
     """把本次选择的时间范围写回用户（"all" 表示不限，空串表示没选过）。
@@ -32,9 +91,9 @@ def save_date_range(user, start_date, end_date):
     if user is None or not getattr(user, "pk", None):
         return
 
-    timeformat = "%Y-%m-%d"
-    start_str = start_date.strftime(timeformat) if start_date is not None else "all"
-    end_str = end_date.strftime(timeformat) if end_date is not None else "all"
+    # 存之前过同一道边界校验：越界的日期不落库，免得下次裸开 /statistics 被毒化值带崩。
+    start_str = _bound_to_field(start_date)
+    end_str = _bound_to_field(end_date)
     value = f"{start_str}|{end_str}"
     # 字段上限 32 字符；两个 10 位日期 + 分隔符最多 21，超了直接不存，
     # 免得触发数据库校验把整个统计页带崩。
@@ -66,18 +125,14 @@ def load_date_range(user):
 
     start_date = None
     end_date = None
-    if start_str and start_str != "all":
-        parsed = parse_date(start_str)
-        if parsed is not None:
-            start_date = timezone.make_aware(
-                datetime.datetime.combine(parsed, datetime.time.min),
-            )
-    if end_str and end_str != "all":
-        parsed = parse_date(end_str)
-        if parsed is not None:
-            end_date = timezone.make_aware(
-                datetime.datetime.combine(parsed, datetime.time.max),
-            )
+    # 读旧值也要过同一道校验：库里可能已经存了毒化值（比如 0001-01-01），
+    # 读出来必须当「无限制」，否则裸开 /statistics 会永久 500。
+    start_day = _safe_parse_date(start_str) if start_str else None
+    end_day = _safe_parse_date(end_str) if end_str else None
+    if start_day is not None:
+        start_date = _to_aware_bound(start_day, datetime.time.min)
+    if end_day is not None:
+        end_date = _to_aware_bound(end_day, datetime.time.max)
 
     return start_date, end_date
 
@@ -98,21 +153,16 @@ def parse_activity_date_range(request):
     if start_date_str == "all" and end_date_str == "all":
         return None, None
 
-    start_date = parse_date(start_date_str)
-    end_date = parse_date(end_date_str)
+    start_date = _safe_parse_date(start_date_str)
+    end_date = _safe_parse_date(end_date_str)
 
-    # Normalise each side on its own: a side that is "all" (or unparsable)
-    # stays open (None), while a real value becomes an aware datetime. The two
-    # sides are independent, so a half-open range must not hand callers a bare
-    # ``date`` — they rely on the datetime API (``.date()``, filtering).
-    if start_date is not None:
-        start_date = timezone.make_aware(
-            datetime.datetime.combine(start_date, datetime.time.min),
-        )
-    if end_date is not None:
-        end_date = timezone.make_aware(
-            datetime.datetime.combine(end_date, datetime.time.max),
-        )
+    # Normalise each side on its own: a side that is "all" (or unparsable,
+    # or out of bounds like 0001-01-01) stays open (None), while a real value
+    # becomes an aware datetime. The two sides are independent, so a half-open
+    # range must not hand callers a bare ``date`` — they rely on the datetime
+    # API (``.date()``, filtering).
+    start_date = _to_aware_bound(start_date, datetime.time.min)
+    end_date = _to_aware_bound(end_date, datetime.time.max)
 
     return start_date, end_date
 
@@ -192,6 +242,16 @@ def get_user_media(user, start_date, end_date):
             # No date filtering for "All Time"
             queryset = model.objects.filter(user=user)
         else:
+            # Case 4 只对「游戏」放开，别的一律走原来的 Case 1-3（下面有注释说明原因）。
+            case4_q = (
+                (
+                    Q(start_date__isnull=True)
+                    & Q(end_date__isnull=True)
+                    & Q(status=Status.IN_PROGRESS.value)
+                )
+                if media_type == MediaTypes.GAME.value
+                else Q(pk__in=[])
+            )
             queryset = model.objects.filter(user=user).filter(
                 # Case 1: Media has both start_date and end_date
                 # Include if ranges overlap
@@ -218,7 +278,16 @@ def get_user_media(user, start_date, end_date):
                     & Q(end_date__isnull=False)
                     & Q(end_date__gte=start_date)
                     & Q(end_date__lte=end_date)
-                ),
+                )
+                |
+                # Case 4: 两边都没有日期的条目，原样保留。
+                # 只对「进行中」生效：一个正在玩的游戏本来就没有结束日期，Steam 导入
+                # 也从来不填开始日期，把它按区间筛掉等于让它从统计里凭空消失 —— 用户
+                # 库里 10 个进行中的游戏有 9 个是这种。其他状态（已通关/已暂停/计划中）
+                # 没有日期是数据缺失，仍按原来那样不进区间统计。
+                # 也只对「游戏」生效：书籍那 115 本进行中同样没有日期，放开会把它们
+                # 一起灌进卡片，数字从 10 变 125 —— 而这条修的是游戏被筛没的问题。
+                case4_q,
             )
 
         queryset = queryset.select_related("item")
@@ -1362,10 +1431,29 @@ def _get_overview_summary(user_media, achievement_buckets):
         row["percent_text"] = f"{row['percent']:.1f}%"
         row["count_text"] = _format_int(row["count"])
 
-    # 「季」和「剧集」在库里是两张表，但读起来是一回事：KPI 的总条目要算上它
-    # （4429 里含 170 季），比例条和「几类媒体」却只数四大类，否则会出现
-    # 「剧集 170 · 季 170」两条一模一样的 3.8%。
-    media_split = [row for row in rows if row["count"] > 0 and row["key"] != MediaTypes.SEASON.value]
+    # 「季」和「剧集」在库里是两张表，但比例条和小灰字只有四格。
+    # KPI 大数字（media_count["total"]）是「条目数」口径：一季也算一条，所以总数里
+    # 含季。四格必须跟大数字用同一个分母，否则页面会自相矛盾 —— 大数字 4,365、
+    # 四格之和小 180、剧集那格宽度却按 4,185 算（2026-10-27 实测：180/4,185 = 4.3%，
+    # 正是页面上显示的值；按 4,365 算应该是 4.1%）。
+    # 所以把季并进「剧集」一格：四个数字之和 = 四条宽度之和 = 大数字。
+    # 这和「已通关」卡里「剧集/季 1,264」是同一个口径，也不用再出现
+    # 「剧集 180 · 季 180」两条一模一样的条。
+    # 用 dict(row, ...) 复制：直接改 rows 里的 label 会连带改坏下面
+    # completed_split / in_progress_split 的图例。
+    tv_row = next((row for row in rows if row["key"] == MediaTypes.TV.value), None)
+    season_row = next((row for row in rows if row["key"] == MediaTypes.SEASON.value), None)
+    season_count = (season_row["count"] or 0) if tv_row is not None and season_row else 0
+    media_split = []
+    for row in rows:
+        if row["key"] == MediaTypes.SEASON.value and season_count:
+            continue  # 已并进下面「剧集」那一格
+        if row is tv_row and season_count:
+            row = dict(row, count=row["count"] + season_count, label=f"{row['label']}/季")
+        if row["count"] <= 0:
+            continue
+        row["count_text"] = _format_int(row["count"])
+        media_split.append(row)
     split_total = sum(row["count"] for row in media_split)
     for row in media_split:
         row["split_percent"] = _percent(row["count"], split_total)
@@ -1440,10 +1528,9 @@ def _get_overview_summary(user_media, achievement_buckets):
         "media_total_text": _format_int(media_total),
         "media_kinds": len(media_split),
         "media_split": media_split,
+        # 小灰字和上面四个数字、四条宽度是同一份数据，保证三者之和都等于大数字。
         "media_subtext": " · ".join(
-            f"{row['label']} {row['count_text']}"
-            for row in media_split
-            if row["key"] != MediaTypes.SEASON.value
+            f"{row['label']} {row['count_text']}" for row in media_split
         ),
         "completed_total": sum(row["completed"] for row in rows),
         "completed_text": _format_int(sum(row["completed"] for row in rows)),

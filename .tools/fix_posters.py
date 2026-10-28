@@ -280,27 +280,21 @@ def do_write():
         print("没有可更新的记录，退出")
         return 1
 
-    # ---- 备份（父代理指定路径，不另存）----
+    # ---- 备份：SQLite 在线热备（绝不能用 shutil.copy2 裸拷活库）----
+    # 裸拷贝会和正在写库的 Django / Celery 连接抢文件，
+    # 历史上一连串 "unable to open database file" 的 worker 崩溃就是它引起的。
     os.makedirs(BACKUP_DIR, exist_ok=True)
-    wal = DB + "-wal"
-    wal_size = os.path.getsize(wal) if os.path.exists(wal) else 0
-    print("WAL 文件大小: %d bytes（0 表示内容已全部落盘，直接复制文件是安全的）" % wal_size)
-    if wal_size > 0:
-        print("WAL 非空，先做 checkpoint 再备份")
-        ck = sqlite3.connect(DB)
-        ck.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        ck.commit()
-        ck.close()
-        wal_size = os.path.getsize(wal) if os.path.exists(wal) else 0
-        print("checkpoint 后 WAL: %d bytes" % wal_size)
-
-    shutil.copy2(DB, BACKUP_PATH)
-    src_size = os.path.getsize(DB)
+    src_con = sqlite3.connect(DB, timeout=30)
+    dst_con = sqlite3.connect(BACKUP_PATH, timeout=30)
+    try:
+        src_con.backup(dst_con)
+    finally:
+        dst_con.close()
+        src_con.close()
     bk_size = os.path.getsize(BACKUP_PATH)
-    print("备份: %s (%d bytes)  源库: %d bytes  一致=%s" % (
-        BACKUP_PATH, bk_size, src_size, src_size == bk_size))
-    if src_size != bk_size:
-        print("备份大小不一致，中止")
+    print("备份: %s (%d bytes, sqlite3 在线热备)" % (BACKUP_PATH, bk_size))
+    if bk_size == 0:
+        print("备份文件为空，中止")
         return 1
     bcon = sqlite3.connect("file:" + BACKUP_PATH + "?mode=ro", uri=True)
     try:

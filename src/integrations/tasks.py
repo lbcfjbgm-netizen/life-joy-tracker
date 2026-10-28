@@ -216,6 +216,17 @@ def backfill_steam_achievements(user_id, steam_id, batch_size=None):
     return steam_recent.backfill_achievements(user, steam_id)
 
 
+@shared_task(name="Refresh played Steam achievements")
+def refresh_played_steam_achievements(user_id, steam_id):
+    """Celery task for the weekly rescan of the played games' achievements.
+
+    Different from the backfill: this one does not care whether a game was ever
+    synced, it walks every game with a playtime above zero.
+    """
+    user = get_user_model().objects.get(pk=user_id)
+    return steam_recent.refresh_played_achievements(user, steam_id)
+
+
 @shared_task(name="Import from IMDB")
 def import_imdb(file, user_id, mode):
     """Celery task for importing media data from IMDB."""

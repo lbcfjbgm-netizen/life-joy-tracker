@@ -43,6 +43,18 @@ urlpatterns = [
         views.sync_metadata,
         name="sync_metadata",
     ),
+    # 单个游戏的「刷新成就」：只同步这一个 appid，返回详情页那张卡片的片段
+    path(
+        "details/sync-achievements/<source:source>/<media_type:media_type>/<str:media_id>",
+        views.sync_game_achievements,
+        name="sync_game_achievements",
+    ),
+    # 本地部署下「分享链接」没意义（对面打不开 localhost），改成把整页拍成长图存桌面
+    path(
+        "details/share-shot/<source:source>/<media_type:media_type>/<str:media_id>",
+        views.share_page_shot,
+        name="share_page_shot",
+    ),
     path(
         "track_modal/<source:source>/<media_type:media_type>/<str:media_id>",
         views.track_modal,

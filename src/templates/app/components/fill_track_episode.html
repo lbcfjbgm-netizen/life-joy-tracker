@@ -3,6 +3,7 @@
 
 {# Track Episode Modal #}
 <div x-show="trackOpen"
+     @click.self.stop="trackOpen = false"
      @keydown.escape.window="trackOpen = false"
      role="dialog"
      aria-modal="true"

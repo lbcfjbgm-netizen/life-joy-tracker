@@ -17,6 +17,51 @@
   <link rel="stylesheet"
         type="text/css"
         href="{% static 'css/hero.css' %}{% get_static_file_mtime 'css/hero.css' %}">
+
+  {# 表格布局（layout=table）的窄屏适配。只在本页、只作用于 .lj-tbl，别的页面零影响。 #}
+  <style>
+    /* ===== 表格布局：375px 不再被挤出视口 / 不把词裁成断字 =====
+       改前实测（375px）：容器 max-w 311px，但 table 实际 339px（剧集库 7 列），
+       右边被 overflow 裁掉；「已暂停」所在的状态列只有 64px 宽，中文按字断行
+       变成「已暂」，剧集名一列一列地竖排，时长「502h 46min」折成两行。
+       修法：给表格一个最小宽度 + 容器允许横向滚动（滚动而不是裁切，信息不丢），
+       再让短字段永不拆字。1440px 下表格宽 1184px 远小于视口，这些规则全部不生效。 */
+    /* 注意：本 style 块在 base.html 里排 main.css 之前，所以选择器必须带一个
+       标签名（div.lj-tbl-scroll = 0,1,1）才能压过 Tailwind 的 .overflow-hidden /
+       .w-full（都是 0,1,0）。不要为了省事改成 !important。 */
+    div.lj-tbl-scroll {
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+      /* 和筛选排、卡片统一到 8px（原来是 rounded-lg 的 8px，保持一致不动） */
+      border-radius: 8px;
+    }
+    div.lj-tbl-scroll table { min-width: 540px; }
+    /* 短字段（状态 / 时长 / 集数 / 评分）一律不许拆字 */
+    div.lj-tbl-scroll td,
+    div.lj-tbl-scroll th { white-space: nowrap; }
+    /* 只有标题列允许折行，并给它一个合理下限，避免被挤成一字一列 */
+    div.lj-tbl-scroll td.lj-tbl-title,
+    div.lj-tbl-scroll th.lj-tbl-title {
+      white-space: normal;
+      min-width: 108px;
+      overflow-wrap: anywhere;
+    }
+    /* 标题里的链接本身挂了 line-clamp-1；窄屏取消它，让长剧集名能占两行而不是被截断 */
+    div.lj-tbl-scroll td.lj-tbl-title a {
+      display: block;
+      white-space: normal;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+    }
+    /* 窄屏把行内边距收紧，留出更多字宽 */
+    @media (max-width: 760px) {
+      div.lj-tbl-scroll table { font-size: 12.5px; }
+      div.lj-tbl-scroll th,
+      div.lj-tbl-scroll td { padding-left: 6px; padding-right: 6px; }
+    }
+  </style>
 {% endblock extra_head %}
 
 {% block content %}
@@ -339,7 +384,7 @@
     <!-- Form to manage state -->
     <form id="filter-form" class="hidden">
       <input type="hidden" name="sort" x-model="sort">
-      <input type="hidden" name="status" x-model="status">
+      {% if status_choices %}<input type="hidden" name="status" x-model="status">{% endif %}
       <input type="hidden" name="search" x-model="search">
       <input type="hidden" name="layout" x-model="layout">
       {# 分类筛选：搜索框用 hx-include="#filter-form" 带参，缺了这条搜索一敲分类就丢 #}
@@ -366,6 +411,13 @@
       </div>
 
       <div class="flex gap-2 flex-wrap">
+        {% comment %}
+          电影 / 剧集 / 季这三类库不带状态筛选：数据全部从豆瓣导入，那边只有
+          「已看过」一种标记，库里一条在看 / 已搁置 / 已放弃都没有，多给档位
+          只会把人筛进空白页。后端 status_choices 为空即整块不渲染，
+          对应的兜底在 views.media_list（这三类库强制全量）。
+        {% endcomment %}
+        {% if status_choices %}
         <!-- Filter by Status -->
         <div class="relative" x-data="{ open: false }">
           <button class="flex items-center px-4 py-2 min-h-11 bg-[#39404b] rounded-lg hover:bg-[#454d5a] transition-colors cursor-pointer"
@@ -409,6 +461,7 @@
             {% endfor %}
           </div>
         </div>
+        {% endif %}
 
         <!-- Sort by -->
         <div class="relative" x-data="{ open: false }">
@@ -696,12 +749,12 @@
         {% endif %}
       </div>
     {% else %}
-      <div class="bg-[#2a2f35] p-1 sm:p-4 rounded-lg overflow-hidden overflow-x-auto max-w-[calc(100svw-2rem)] sm:max-w-[calc(100svw-4rem)]">
+      <div class="lj-tbl-scroll bg-[#2a2f35] p-1 sm:p-4 rounded-lg overflow-hidden overflow-x-auto max-w-[calc(100svw-2rem)] sm:max-w-[calc(100svw-4rem)]">
         <table class="w-full bg-[#2a2f35]">
           <thead class="text-left text-gray-400 text-sm">
             <tr>
               <th class="p-2 w-15"></th>
-              <th class="p-2 pe-2 sm:pe-8 w-2/5">{% trans "Title" %}</th>
+              <th class="p-2 pe-2 sm:pe-8 w-2/5 lj-tbl-title">{% trans "Title" %}</th>
               {% if show_score_column %}<th class="p-2 text-center">{% trans "Score" %}</th>{% endif %}
               {% if media_type != MediaTypes.MOVIE.value %}<th class="p-2 text-center whitespace-nowrap">{% trans "Progress" %}</th>{% endif %}
               {% if media_type == MediaTypes.TV.value %}<th class="p-2 text-center">{% trans "Last Watched" %}</th>{% endif %}
